@@ -8,6 +8,7 @@ import re
 import json
 import urllib.parse
 from io import BytesIO
+from sqlalchemy import text
 from supabase import create_client
 
 # Google GenAI SDK (Requires package 'google-genai')
@@ -272,9 +273,11 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
 
     with c_col2:
         st.markdown("##### 💬 WhatsApp & Calling Generators (Indian Context)")
+        
         custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}")
         
         with st.expander("✨ AI-Driven Calling Script & Smart Message Generator (Voice & Text)"):
+            
             manager_voice_audio = st.audio_input(
                 "🎙️ Record Voice Instructions (Speak your custom prompt):",
                 key=f"voice_input_{tab_name}_{target_crm_school}"
@@ -324,6 +327,7 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
             encoded_final_text = urllib.parse.quote(editable_wa_area)
             st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
 
+    # --- CALL DISCUSSION NOTES & FOLLOW-UP SYNC TO SUPABASE ---
     st.markdown("---")
     st.markdown(f"##### 📝 Post-Call Discussion Notes & Follow-up Scheduler ({target_crm_school} - {selected_entity_type})")
     
@@ -949,7 +953,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             "Teacher": target_teacher,
             "Lesson Prep": f"{t_day_ld:.1f}m",
             "Library Usage": f"{t_day_lib:.1f}m",
-            "Phonics/Portfolio": f"{len(v_phonics)} / {len(v_portfolio)}",
+            "Phonics / Portfolio": f"{len(v_phonics)} / {len(v_portfolio)}",
             "Activity Submissions": f"{total_artifacts}"
         }
         headers_row = [Paragraph(k, card_header) for k in summary_metrics.keys()]
@@ -1010,7 +1014,27 @@ def ingest_excel_to_postgresql(processed_dfs):
     combined_df = pd.concat(processed_dfs, ignore_index=True)
     combined_df = normalize_identity_columns(combined_df)
     
-    insert_sql = """
+    # Required database columns
+    db_cols = [
+        "State_Zone", "Uploaded_By", "Institution", "Center",
+        "FirstName", "LastName", "FullName", "Role", "Type",
+        "Grade", "Subject", "Book", "StartTime", "EndTime",
+        "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
+        "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
+        "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+        "Assessment_Score_Pct"
+    ]
+    
+    # Ensure all required columns exist in the DataFrame
+    for col in db_cols:
+        if col not in combined_df.columns:
+            combined_df[col] = None
+
+    # Replace all np.nan with None so SQL parameters map correctly
+    cleaned_df = combined_df[db_cols].copy()
+    cleaned_df = cleaned_df.replace({np.nan: None})
+
+    insert_sql = text("""
         INSERT INTO teacher_records (
             "State_Zone", "Uploaded_By", "Institution", "Center",
             "FirstName", "LastName", "FullName", "Role", "Type",
@@ -1028,12 +1052,13 @@ def ingest_excel_to_postgresql(processed_dfs):
             :Writing_Sample_Link, :Phonics_Evidence_Link, :Portfolio_Evidence_Link,
             :Assessment_Score_Pct
         );
-    """
-    records = combined_df.to_dict(orient="records")
+    """)
+
+    records = cleaned_df.to_dict(orient="records")
     with conn.session as s:
-        for r in records:
-            s.execute(insert_sql, r)
+        s.execute(insert_sql, records)
         s.commit()
+        
     fetch_master_db_from_supabase.clear()
 
 
@@ -1060,7 +1085,15 @@ new_processed_dfs = []
 if uploaded_files:
     for file in uploaded_files:
         try:
-            temp_df = pd.read_excel(file, sheet_name="UserMetrics")
+            temp_dict = pd.read_excel(file, sheet_name=None)
+            # Find UserMetrics sheet case-insensitively or default to the first sheet
+            target_sheet = next((s for s in temp_dict.keys() if "usermetric" in s.lower()), list(temp_dict.keys())[0])
+            temp_df = temp_dict[target_sheet]
+            
+            # Ensure Institution exists before referencing
+            if 'Institution' not in temp_df.columns:
+                temp_df['Institution'] = "Default School"
+
             temp_df = normalize_identity_columns(temp_df)
             
             temp_df['Uploaded_By'] = employee_name
@@ -1143,7 +1176,7 @@ if not df.empty:
                     else:
                         with conn.session as s:
                             s.execute(
-                                'DELETE FROM teacher_records WHERE LOWER("Uploaded_By") = LOWER(:name) AND "State_Zone" = :state',
+                                text('DELETE FROM teacher_records WHERE LOWER("Uploaded_By") = LOWER(:name) AND "State_Zone" = :state'),
                                 {"name": del_emp_name.strip(), "state": del_state_zone}
                             )
                             s.commit()
@@ -1159,7 +1192,7 @@ if not df.empty:
             if st.button("🗑️ Delete School Data from SQL DB"):
                 try:
                     with conn.session as s:
-                        s.execute('DELETE FROM teacher_records WHERE "Institution" = :school', {"school": target_del_school})
+                        s.execute(text('DELETE FROM teacher_records WHERE "Institution" = :school'), {"school": target_del_school})
                         s.commit()
                     fetch_master_db_from_supabase.clear()
                     st.success(f"Successfully removed data for {target_del_school} from database!")
@@ -1171,7 +1204,7 @@ if not df.empty:
             if st.button("🚨 Clear Entire Database Table"):
                 try:
                     with conn.session as s:
-                        s.execute("TRUNCATE TABLE teacher_records;")
+                        s.execute(text("TRUNCATE TABLE teacher_records;"))
                         s.commit()
                     fetch_master_db_from_supabase.clear()
                     st.sidebar.error("Database table cleared!")
