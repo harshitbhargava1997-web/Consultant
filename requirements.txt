@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+plotly
+openpyxl
+sqlalchemy
+psycopg2-binary
+supabase
+google-genai
+reportlab
