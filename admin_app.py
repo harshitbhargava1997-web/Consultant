@@ -20,7 +20,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-# Page layout configuration (Must be the first Streamlit command)
+# Page layout configuration
 st.set_page_config(page_title="Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard", layout="wide")
 
 # --- NATIVE POSTGRESQL & SUPABASE CLOUD SETUP ---
@@ -36,7 +36,6 @@ try:
 except Exception as e:
     st.error(f"Supabase credentials missing or misconfigured in Streamlit Secrets: {e}")
 
-# Initialize Gemini Client using google-genai SDK (Using Gemini 2.5 Flash)
 try:
     GEMINI_API_KEY = st.secrets["gemini"]["api_key"]
     ai_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -64,7 +63,6 @@ def normalize_identity_columns(df):
             out[col] = ""
         out[col] = out[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
 
-    # Fallback to prevent records from being dropped by global sidebar filters
     out.loc[out["State_Zone"].eq(""), "State_Zone"] = "Madhya Pradesh (MP)"
     out.loc[out["Uploaded_By"].eq(""), "Uploaded_By"] = "Harshit Bhargava"
 
@@ -78,9 +76,9 @@ def normalize_identity_columns(df):
     return out
 
 
-@st.cache_data(ttl=120, show_spinner="Querying PostgreSQL directly...")
+@st.cache_data(ttl=60, show_spinner="Querying PostgreSQL directly...")
 def fetch_master_db_from_supabase():
-    """Fetches all teacher records directly using native PostgreSQL execution in a single fast query."""
+    """Fetches all teacher records directly using native PostgreSQL execution."""
     query = """
         SELECT 
             "State_Zone", "Uploaded_By", "Institution", "Center",
@@ -277,7 +275,6 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
         custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}")
         
         with st.expander("✨ AI-Driven Calling Script & Smart Message Generator (Voice & Text)"):
-            
             manager_voice_audio = st.audio_input(
                 "🎙️ Record Voice Instructions (Speak your custom prompt):",
                 key=f"voice_input_{tab_name}_{target_crm_school}"
@@ -1014,7 +1011,6 @@ def ingest_excel_to_postgresql(processed_dfs):
     combined_df = pd.concat(processed_dfs, ignore_index=True)
     combined_df = normalize_identity_columns(combined_df)
     
-    # Required database columns
     db_cols = [
         "State_Zone", "Uploaded_By", "Institution", "Center",
         "FirstName", "LastName", "FullName", "Role", "Type",
@@ -1025,14 +1021,19 @@ def ingest_excel_to_postgresql(processed_dfs):
         "Assessment_Score_Pct"
     ]
     
-    # Ensure all required columns exist in the DataFrame
     for col in db_cols:
         if col not in combined_df.columns:
             combined_df[col] = None
 
-    # Replace all np.nan with None so SQL parameters map correctly
     cleaned_df = combined_df[db_cols].copy()
+    
+    # Ensure datetimes are serialized cleanly for Postgres
+    for dt_col in ['StartTime', 'EndTime']:
+        cleaned_df[dt_col] = pd.to_datetime(cleaned_df[dt_col], errors='coerce')
+
+    # Replace all np.nan and pd.NaT with None so SQL parameters map accurately
     cleaned_df = cleaned_df.replace({np.nan: None})
+    records = cleaned_df.to_dict(orient="records")
 
     insert_sql = text("""
         INSERT INTO teacher_records (
@@ -1054,7 +1055,6 @@ def ingest_excel_to_postgresql(processed_dfs):
         );
     """)
 
-    records = cleaned_df.to_dict(orient="records")
     with conn.session as s:
         s.execute(insert_sql, records)
         s.commit()
@@ -1081,67 +1081,76 @@ employee_state = st.sidebar.selectbox("Select State / Zone (India Region):", [
 
 uploaded_files = st.sidebar.file_uploader("Upload UserMetrics Excel (.xlsx)", type=["xlsx"], accept_multiple_files=True)
 
-new_processed_dfs = []
 if uploaded_files:
-    for file in uploaded_files:
-        try:
-            temp_dict = pd.read_excel(file, sheet_name=None)
-            # Find UserMetrics sheet case-insensitively or default to the first sheet
-            target_sheet = next((s for s in temp_dict.keys() if "usermetric" in s.lower()), list(temp_dict.keys())[0])
-            temp_df = temp_dict[target_sheet]
-            
-            # Ensure Institution exists before referencing
-            if 'Institution' not in temp_df.columns:
-                temp_df['Institution'] = "Default School"
+    # Use session_state to prevent re-inserting the same files on every user interaction
+    uploaded_file_keys = [f"{f.name}_{f.size}" for f in uploaded_files]
+    if "last_ingested_files" not in st.session_state:
+        st.session_state["last_ingested_files"] = []
 
-            temp_df = normalize_identity_columns(temp_df)
-            
-            temp_df['Uploaded_By'] = employee_name
-            temp_df['State_Zone'] = employee_state
+    files_to_process = [f for f in uploaded_files if f"{f.name}_{f.size}" not in st.session_state["last_ingested_files"]]
 
-            if temp_df['Institution'].eq('').all():
-                temp_df['Institution'] = "Default School"
-            else:
-                temp_df['Institution'] = temp_df['Institution'].replace('', 'Unknown School')
+    if files_to_process:
+        new_processed_dfs = []
+        for file in files_to_process:
+            try:
+                temp_dict = pd.read_excel(file, sheet_name=None)
+                target_sheet = next((s for s in temp_dict.keys() if "usermetric" in s.lower()), list(temp_dict.keys())[0])
+                temp_df = temp_dict[target_sheet]
+                
+                if 'Institution' not in temp_df.columns:
+                    temp_df['Institution'] = "Default School"
 
-            for col in ['Grade', 'Subject', 'Book']:
-                if col not in temp_df.columns:
-                    temp_df[col] = ''
+                temp_df = normalize_identity_columns(temp_df)
+                
+                temp_df['Uploaded_By'] = employee_name
+                temp_df['State_Zone'] = employee_state
+
+                if temp_df['Institution'].eq('').all():
+                    temp_df['Institution'] = "Default School"
                 else:
-                    temp_df[col] = temp_df[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
+                    temp_df['Institution'] = temp_df['Institution'].replace('', 'Unknown School')
 
-            def parse_time_mins(t_str):
-                try:
-                    parts = str(t_str).split(':')
-                    return int(parts[0])*60 + int(parts[1]) + float(parts[2])/60.0
-                except:
-                    return 0.0
+                for col in ['Grade', 'Subject', 'Book']:
+                    if col not in temp_df.columns:
+                        temp_df[col] = ''
+                    else:
+                        temp_df[col] = temp_df[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
 
-            if 'Duration (HH:MM:SS)' in temp_df.columns:
-                temp_df['Duration_Min'] = temp_df['Duration (HH:MM:SS)'].apply(parse_time_mins)
-            elif 'Duration (Minutes)' in temp_df.columns:
-                temp_df['Duration_Min'] = pd.to_numeric(temp_df['Duration (Minutes)'], errors='coerce').fillna(0.0)
-            else:
-                temp_df['Duration_Min'] = 0.0
+                def parse_time_mins(t_str):
+                    try:
+                        parts = str(t_str).split(':')
+                        return int(parts[0])*60 + int(parts[1]) + float(parts[2])/60.0
+                    except:
+                        return 0.0
 
-            if 'Type' in temp_df.columns:
-                temp_df['Type'] = temp_df['Type'].fillna('Other').astype(str)
+                if 'Duration (HH:MM:SS)' in temp_df.columns:
+                    temp_df['Duration_Min'] = temp_df['Duration (HH:MM:SS)'].apply(parse_time_mins)
+                elif 'Duration (Minutes)' in temp_df.columns:
+                    temp_df['Duration_Min'] = pd.to_numeric(temp_df['Duration (Minutes)'], errors='coerce').fillna(0.0)
+                else:
+                    temp_df['Duration_Min'] = 0.0
 
-            for dt_col in ['StartTime', 'EndTime']:
-                if dt_col in temp_df.columns:
-                    temp_df[dt_col] = pd.to_datetime(temp_df[dt_col], errors='coerce')
+                if 'Type' in temp_df.columns:
+                    temp_df['Type'] = temp_df['Type'].fillna('Other').astype(str)
 
-            for qual_col in ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Assessment_Score_Pct']:
-                if qual_col not in temp_df.columns:
-                    temp_df[qual_col] = None
+                for dt_col in ['StartTime', 'EndTime']:
+                    if dt_col in temp_df.columns:
+                        temp_df[dt_col] = pd.to_datetime(temp_df[dt_col], errors='coerce')
 
-            new_processed_dfs.append(temp_df)
-        except Exception as e:
-            st.sidebar.error(f"Error reading {file.name}: {e}")
+                for qual_col in ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Assessment_Score_Pct']:
+                    if qual_col not in temp_df.columns:
+                        temp_df[qual_col] = None
 
-if new_processed_dfs:
-    ingest_excel_to_postgresql(new_processed_dfs)
-    st.sidebar.success(f"Synced {len(uploaded_files)} file(s) directly into PostgreSQL Database!")
+                new_processed_dfs.append(temp_df)
+            except Exception as e:
+                st.sidebar.error(f"Error reading {file.name}: {e}")
+
+        if new_processed_dfs:
+            ingest_excel_to_postgresql(new_processed_dfs)
+            for f in files_to_process:
+                st.session_state["last_ingested_files"].append(f"{f.name}_{f.size}")
+            st.sidebar.success(f"Synced {len(files_to_process)} file(s) directly into PostgreSQL Database!")
+            st.rerun()
 
 df = fetch_master_db_from_supabase()
 
