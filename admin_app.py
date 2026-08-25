@@ -43,7 +43,7 @@ except Exception:
     ai_client = None
 
 
-# --- 1. ROBUST DATA NORMALIZATION & MATHEMATICAL HELPER FUNCTIONS ---
+# --- 1. CORE DATA NORMALIZATION & MATHEMATICAL HELPER FUNCTIONS ---
 def _norm_text(value):
     if pd.isna(value):
         return ""
@@ -55,17 +55,15 @@ def _norm_key(value):
 
 
 def _parse_time_mins(t_val):
-    """Accurately parses numerical minutes, float minutes, and HH:MM:SS or MM:SS time formats."""
+    """Accurately parses numerical minutes, float minutes, and HH:MM:SS / MM:SS formats."""
     if pd.isna(t_val) or str(t_val).strip() == "" or str(t_val).strip().lower() in ['none', 'nan', 'nat']:
         return 0.0
     val_str = str(t_val).strip()
     try:
-        # Check if it's already a standard numerical float/int
         return float(val_str)
     except ValueError:
         pass
     
-    # Try parsing string HH:MM:SS or MM:SS
     parts = val_str.split(':')
     try:
         if len(parts) == 3:
@@ -113,7 +111,7 @@ def normalize_identity_columns(df):
 
     out["Standard_Type"] = out.apply(lambda r: _categorize_record_type(r.get("Type", ""), r.get("Book", "")), axis=1)
 
-    # Accurate duration extraction without arbitrary session span inflation
+    # Accurate duration extraction preserving original Excel values
     if "Duration_Min" in out.columns:
         out["Duration_Min"] = out["Duration_Min"].apply(_parse_time_mins)
     elif "Duration (HH:MM:SS)" in out.columns:
@@ -420,7 +418,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     card_header = ParagraphStyle('CardHead', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748B'), fontName='Helvetica-Bold', alignment=1)
     card_value = ParagraphStyle('CardVal', parent=styles['Normal'], fontSize=11, leading=14, textColor=primary_color, fontName='Helvetica-Bold', alignment=1)
 
-    # Respect full date-filtered data for this school
+    # Clean date-scoped slice for this school
     school_curr_df = filtered_df[filtered_df['Institution'] == school_name]
     if school_curr_df.empty and not school_filtered_df.empty:
         school_curr_df = school_filtered_df[school_filtered_df['Institution'] == school_name]
@@ -757,12 +755,9 @@ def ingest_excel_to_postgresql(processed_dfs):
 
 
 # --- 2. MULTI-EMPLOYEE INGESTION SIDEBAR ---
-st.title("🏫 Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard")
-st.markdown("Track **School Portfolio Management**, **School WoW Velocity**, **Teacher Execution Tiers**, **Quantitative Performance Indicators (Lesson Prep / Library)**, and **360° Qualitative Evidences & Artifact Compliance**.")
-
 st.sidebar.header("📁 Multi-Employee Data Ingestion Portal")
 
-employee_name = st.sidebar.text_input("Enter Consultant Name:", value="Harshit Bhargava")[cite: 1]
+employee_name = st.sidebar.text_input("Enter Consultant Name:", value="Harshit Bhargava")
 employee_state = st.sidebar.selectbox("Select State / Zone (India Region):", [
     "Madhya Pradesh (MP)", "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", 
     "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", 
@@ -1845,7 +1840,7 @@ else:
             else:
                 filtered_audit_log = teacher_all_data[teacher_all_data['Type'] == selected_type_filter]
 
-            t_log_cols = ['Date', 'Type', 'Grade', 'Subject', 'Book', 'StartTime', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Voice_Note_Link', 'Video_Evidence_1', 'Writing_Sample_Link', 'Duration_Min']
+            t_log_cols = ['Date', 'Type', 'Grade', 'Subject', 'Book', 'StartTime', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Voice_Note_Link', 'Video_Evidence_1', 'Writing_Sample_Link', 'Duration (HH:MM:SS)', 'Duration_Min']
             t_avail_cols = [c for c in t_log_cols if c in filtered_audit_log.columns]
             
             if filtered_audit_log.empty:
@@ -1857,45 +1852,38 @@ else:
 
                 col_p1, col_p2 = st.columns(2)
                 with col_p1:
-                    if st.button("⚙️ Prepare Teacher Audit Excel", key=f"prep_audit_xlsx_{target_teacher}"):
-                        buf_p1_xlsx = BytesIO()
-                        with pd.ExcelWriter(buf_p1_xlsx, engine='openpyxl') as writer:
-                            t_display_log.to_excel(writer, index=False, sheet_name='Teacher_Audit')
-                        st.session_state[f"audit_xlsx_{target_teacher}"] = buf_p1_xlsx.getvalue()
+                    buf_p1_xlsx = BytesIO()
+                    with pd.ExcelWriter(buf_p1_xlsx, engine='openpyxl') as writer:
+                        t_display_log.to_excel(writer, index=False, sheet_name='Teacher_Audit')
+                    buf_p1_xlsx.seek(0)
+                    st.download_button(
+                        label=f"📥 Download Full Excel Audit for {target_teacher}",
+                        data=buf_p1_xlsx,
+                        file_name=f"{target_teacher.replace(' ', '_')}_{selected_type_filter}_Audit.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 
-                    if f"audit_xlsx_{target_teacher}" in st.session_state:
-                        st.download_button(
-                            label=f"📥 Download Full Excel Audit for {target_teacher}",
-                            data=st.session_state[f"audit_xlsx_{target_teacher}"],
-                            file_name=f"{target_teacher.replace(' ', '_')}_{selected_type_filter}_Audit.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key="btn_xlsx_tab4"
-                        )
-
-            # --- EMBEDDED SCHOOL AUDIT & WHATSAPP DISPATCH HUB ---
+            # --- EMBEDDED SCHOOL AUDIT & WHATSAPP DISPATCH HUB (SCHOOL BY SCHOOL) ---
             st.markdown("---")
             st.markdown(f"### 📱 School Audit WhatsApp & PDF Dispatch Hub for: **{teacher_school}**")
             st.caption("Generates a school-wide performance summary with an embedded live Supabase download link for the Full School Audit Report.")
 
             sch_roster = school_master_roster[school_master_roster['Institution'] == teacher_school]
             sch_data = filtered_df[filtered_df['Institution'] == teacher_school]
-            if sch_data.empty and not school_filtered_df.empty:
-                sch_data = school_filtered_df[school_filtered_df['Institution'] == teacher_school]
-
             sch_teachers_list = sorted(sch_roster['FullName'].unique().tolist())
             tot_teachers = len(sch_teachers_list)
 
-            ld_m = sch_data[sch_data['Standard_Type'] == 'lessonDelivery'].groupby('FullName')['Duration_Min'].sum().to_dict()
-            lib_m = sch_data[sch_data['Standard_Type'] == 'library'].groupby('FullName')['Duration_Min'].sum().to_dict()
+            ld_m = sch_data[sch_data['Type'] == 'lessonDelivery'].groupby('FullName')['Duration_Min'].sum()
+            lib_m = sch_data[sch_data['Type'] == 'library'].groupby('FullName')['Duration_Min'].sum()
 
             met_ld = 0
             met_lib = 0
             for t in sch_teachers_list:
                 t_ld_mins = ld_m.get(t, 0.0)
                 t_lib_mins = lib_m.get(t, 0.0)
-                if (calc_ld_kpi_t4 > 0 and t_ld_mins >= calc_ld_kpi_t4) or (calc_ld_kpi_t4 == 0 and t_ld_mins > 0):
+                if (calc_ld_kpi > 0 and t_ld_mins >= calc_ld_kpi) or (calc_ld_kpi == 0 and t_ld_mins > 0):
                     met_ld += 1
-                if (calc_lib_kpi_t4 > 0 and t_lib_mins >= calc_lib_kpi_t4) or (calc_lib_kpi_t4 == 0 and t_lib_mins > 0):
+                if (calc_lib_kpi > 0 and t_lib_mins >= calc_lib_kpi) or (calc_lib_kpi == 0 and t_lib_mins > 0):
                     met_lib += 1
 
             ld_comp_pct = (met_ld / tot_teachers * 100) if tot_teachers > 0 else 0
@@ -1904,58 +1892,51 @@ else:
             inactive_teachers = [t for t in sch_teachers_list if (ld_m.get(t, 0.0) == 0.0 and lib_m.get(t, 0.0) == 0.0)]
             inactive_str = ", ".join(inactive_teachers[:3]) + (f" (+{len(inactive_teachers)-3} more)" if len(inactive_teachers) > 3 else "") if inactive_teachers else "None (All Active)"
 
-            vids_cnt = sum([len(extract_evidence_items_vectorized(sch_data, col)) for col in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']])
-            phonics_cnt = len(extract_evidence_items_vectorized(sch_data, 'Phonics_Evidence_Link'))
-            writing_cnt = len(extract_evidence_items_vectorized(sch_data, 'Writing_Sample_Link'))
-            lp_pic_cnt = len(extract_evidence_items_vectorized(sch_data, 'Lesson_Plan_Picture'))
-            voice_cnt = len(extract_evidence_items_vectorized(sch_data, 'Voice_Note_Link'))
-            portfolio_cnt = len(extract_evidence_items_vectorized(sch_data, 'Portfolio_Evidence_Link'))
+            vids_cnt = len([l for col in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3'] if col in sch_data.columns for l in sch_data[col].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)])
+            phonics_cnt = len([l for l in sch_data['Phonics_Evidence_Link'].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Phonics_Evidence_Link' in sch_data.columns else 0
+            writing_cnt = len([l for l in sch_data['Writing_Sample_Link'].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Writing_Sample_Link' in sch_data.columns else 0
+            lp_pic_cnt = len([l for l in sch_data['Lesson_Plan_Picture'].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Lesson_Plan_Picture' in sch_data.columns else 0
+            voice_cnt = len([l for l in sch_data['Voice_Note_Link'].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Voice_Note_Link' in sch_data.columns else 0
+            portfolio_cnt = len([l for l in sch_data['Portfolio_Evidence_Link'].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Portfolio_Evidence_Link' in sch_data.columns else 0
 
-            hosted_school_pdf_url = st.session_state.get(f"hosted_pdf_url_{teacher_school}")
-
-            if st.button(f"☁️ Compile & Upload PDF Report to Supabase Cloud for {teacher_school}", key=f"upload_cloud_pdf_{teacher_school}"):
-                with st.spinner("Generating and uploading PDF report to Supabase..."):
-                    school_pdf_buf = generate_comprehensive_school_pdf_report(
-                        school_name=teacher_school,
-                        teachers_list=sch_teachers_list,
-                        school_filtered_df=school_filtered_df,
-                        filtered_df=filtered_df,
-                        filter_desc=filter_description_text,
-                        calc_ld_kpi=calc_ld_kpi_t4,
-                        calc_lib_kpi=calc_lib_kpi_t4,
-                        daily_ld_target=daily_ld_target_t4,
-                        daily_lib_target=daily_lib_target_t4,
-                        selected_num_days=selected_num_days,
-                        target_vid_count=target_vid_count_t4,
-                        target_writing_count=target_writing_count_t4,
-                        target_lp_combo_count=target_lp_combo_count_t4,
-                        target_phonics_count=target_phonics_count_t4,
-                        target_portfolio_count=target_portfolio_count_t4,
-                        enable_quant_kpi=enable_quant_kpi_t4,
-                        enable_qual_kpi=enable_qual_kpi_t4
-                    )
-                    hosted_school_pdf_url = upload_pdf_to_supabase(school_pdf_buf, teacher_school)
-                    st.session_state[f"hosted_pdf_url_{teacher_school}"] = hosted_school_pdf_url
-                    st.success("Uploaded successfully to Supabase!")
-
+            school_pdf_buf = generate_comprehensive_school_pdf_report(
+                school_name=teacher_school,
+                teachers_list=sch_teachers_list,
+                school_filtered_df=school_filtered_df,
+                filtered_df=filtered_df,
+                filter_desc=filter_description_text,
+                calc_ld_kpi=calc_ld_kpi,
+                calc_lib_kpi=calc_lib_kpi,
+                daily_ld_target=daily_ld_target,
+                daily_lib_target=daily_lib_target,
+                selected_num_days=selected_num_days,
+                target_vid_count=target_vid_count,
+                target_writing_count=target_writing_count,
+                target_lp_combo_count=target_lp_combo_count,
+                target_phonics_count=target_phonics_count,
+                target_portfolio_count=target_portfolio_count,
+                enable_quant_kpi=enable_quant_kpi,
+                enable_qual_kpi=enable_qual_kpi
+            )
+            hosted_school_pdf_url = upload_pdf_to_supabase(school_pdf_buf, teacher_school)
             pdf_link_markdown = f"\n\n📄 *Download Full School Audit Report (PDF):*\n{hosted_school_pdf_url}" if hosted_school_pdf_url else ""
 
-            ld_bench_str = f" [Benchmark: {daily_ld_target_t4:.0f}m/day × {selected_num_days}d = {calc_ld_kpi_t4:.0f} mins total]" if (enable_quant_kpi_t4 and calc_ld_kpi_t4 > 0) else ""
-            lib_bench_str = f" [Benchmark: {daily_lib_target_t4:.0f}m/day × {selected_num_days}d = {calc_lib_kpi_t4:.0f} mins total]" if (enable_quant_kpi_t4 and calc_lib_kpi_t4 > 0) else ""
+            ld_bench_str = f" [Benchmark: {daily_ld_target:.0f}m/day × {selected_num_days}d = {calc_ld_kpi:.0f} mins total]" if (enable_quant_kpi and calc_ld_kpi > 0) else ""
+            lib_bench_str = f" [Benchmark: {daily_lib_target:.0f}m/day × {selected_num_days}d = {calc_lib_kpi:.0f} mins total]" if (enable_quant_kpi and calc_lib_kpi > 0) else ""
 
             school_msg_parts = [
-                f"Respected Sir/Madam,\n\n",
+                f"Respected Sir/Madam,\n\n"
                 f"Greetings from OneLearn Academic Team! Here is the latest performance & classroom implementation summary for *{teacher_school}* ({filter_description_text}):\n"
             ]
 
-            if enable_quant_kpi_t4:
+            if enable_quant_kpi:
                 school_msg_parts.append(
                     f"📊 *Quantitative Benchmarks:*\n"
                     f"• Lesson Plan Prep Compliance: {ld_comp_pct:.0f}% ({met_ld}/{tot_teachers} Teachers){ld_bench_str}\n"
                     f"• Library Digital Usage Compliance: {lib_comp_pct:.0f}% ({met_lib}/{tot_teachers} Teachers){lib_bench_str}"
                 )
 
-            if enable_qual_kpi_t4:
+            if enable_qual_kpi:
                 school_msg_parts.append(
                     f"\n📬 *Classroom Evidence Submissions:*\n"
                     f"• Activity Videos: {vids_cnt} Uploaded\n"
@@ -1991,19 +1972,6 @@ else:
         if school_filtered_df.empty:
             st.warning("No data available for the selected school filter.")
         else:
-            with st.expander("🎯 Portfolio Quadrant Benchmark Settings", expanded=False):
-                t5_kcol1, t5_kcol2 = st.columns(2)
-                with t5_kcol1:
-                    enable_quant_kpi_t5 = st.checkbox("Enable Quantitative Benchmark", value=True, key="t5_enable_quant_kpi")
-                    daily_ld_target_t5 = st.number_input("Lesson Prep Target (Mins/Day)", min_value=0.0, max_value=60.0, value=10.0, step=5.0, key="t5_ld_target", disabled=not enable_quant_kpi_t5) if enable_quant_kpi_t5 else 0.0
-                    daily_lib_target_t5 = st.number_input("Library Usage Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t5_lib_target", disabled=not enable_quant_kpi_t5) if enable_quant_kpi_t5 else 0.0
-                with t5_kcol2:
-                    enable_qual_kpi_t5 = st.checkbox("Enable Qualitative Artifact Benchmark", value=True, key="t5_enable_qual_kpi")
-                    target_vid_count_t5 = st.number_input("Min. Activity Videos Required", min_value=1, max_value=20, value=3, step=1, key="t5_vid_cnt", disabled=not enable_qual_kpi_t5) if enable_qual_kpi_t5 else 0
-                    target_writing_count_t5 = st.number_input("Min. Writing Practice Required", min_value=1, max_value=20, value=3, step=1, key="t5_writing_cnt", disabled=not enable_qual_kpi_t5) if enable_qual_kpi_t5 else 0
-
-            t5_class_filter = st.selectbox("Filter Portfolio by Classification:", ["All Classifications", "🌟 Pace Setters", "📘 Lesson Focused", "📚 Library Focused", "🚨 Priority Focus"], key="t5_class_filter")
-
             school_stats = filtered_df.groupby(['Institution', 'Type'])['Duration_Min'].sum().unstack(fill_value=0.0).reset_index()
             
             if 'lessonDelivery' not in school_stats.columns: school_stats['lessonDelivery'] = 0.0
@@ -2024,12 +1992,15 @@ else:
             qual_agg = []
             for s_name in school_stats['Institution'].unique():
                 s_data = filtered_df[filtered_df['Institution'] == s_name]
-                s_vids = sum([len(extract_evidence_items_vectorized(s_data, vc)) for vc in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']])
-                s_w = len(extract_evidence_items_vectorized(s_data, 'Writing_Sample_Link'))
-                s_lp = len(extract_evidence_items_vectorized(s_data, 'Lesson_Plan_Picture'))
-                s_vn = len(extract_evidence_items_vectorized(s_data, 'Voice_Note_Link'))
-                s_ph = len(extract_evidence_items_vectorized(s_data, 'Phonics_Evidence_Link'))
-                s_pf = len(extract_evidence_items_vectorized(s_data, 'Portfolio_Evidence_Link'))
+                s_vids = 0
+                for vc in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']:
+                    if vc in s_data.columns:
+                        s_vids += len([l for l in s_data[vc].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)])
+                s_w = len([l for l in s_data['Writing_Sample_Link'].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Writing_Sample_Link' in s_data.columns else 0
+                s_lp = len([l for l in s_data['Lesson_Plan_Picture'].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Lesson_Plan_Picture' in s_data.columns else 0
+                s_vn = len([l for l in s_data['Voice_Note_Link'].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Voice_Note_Link' in s_data.columns else 0
+                s_ph = len([l for l in s_data['Phonics_Evidence_Link'].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Phonics_Evidence_Link' in s_data.columns else 0
+                s_pf = len([l for l in s_data['Portfolio_Evidence_Link'].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Portfolio_Evidence_Link' in s_data.columns else 0
 
                 qual_agg.append({
                     'Institution': s_name,
@@ -2044,13 +2015,13 @@ else:
             school_stats = school_stats.merge(qual_df_school, on='Institution', how='left').fillna(0)
 
             def classify_school(row):
-                if not enable_quant_kpi_t5:
+                if not enable_quant_kpi:
                     return 'Active Portfolio'
-                ld_ok = row['Avg_Lesson_Prep_Mins'] >= daily_ld_target_t5
-                lib_ok = row['Avg_Library_Usage_Mins'] >= daily_lib_target_t5
+                ld_ok = row['Avg_Lesson_Prep_Mins'] >= daily_ld_target
+                lib_ok = row['Avg_Library_Usage_Mins'] >= daily_lib_target
                 qual_ok = True
-                if enable_qual_kpi_t5:
-                    qual_ok = (row['Activity_Videos'] >= target_vid_count_t5) or (row['Writing_Samples'] >= target_writing_count_t5)
+                if enable_qual_kpi:
+                    qual_ok = (row['Activity_Videos'] >= target_vid_count) or (row['Writing_Samples'] >= target_writing_count)
 
                 if ld_ok and lib_ok and qual_ok:
                     return '🌟 Pace Setters'
@@ -2082,75 +2053,52 @@ else:
             with col_bot2:
                 st.error(f"🚨 **Priority Focus ({len(priority_focus)} Schools)**\n\n" + (", ".join(priority_focus) if priority_focus else "None"))
 
-            display_school_stats = school_stats if t5_class_filter == "All Classifications" else school_stats[school_stats['Classification'] == t5_class_filter]
-
             st.subheader("📋 Complete School Performance Leaderboard")
-            display_qtable = display_school_stats[['Institution', 'Roster_Teachers', 'Avg_Lesson_Prep_Mins', 'Avg_Library_Usage_Mins', 'LP_Audio_Submissions', 'Activity_Videos', 'Writing_Samples', 'Phonics_Evidences', 'Portfolio_Artifacts', 'Classification']].rename(columns={
+            display_qtable = school_stats[['Institution', 'Roster_Teachers', 'Avg_Lesson_Prep_Mins', 'Avg_Library_Usage_Mins', 'LP_Audio_Submissions', 'Activity_Videos', 'Writing_Samples', 'Phonics_Evidences', 'Portfolio_Artifacts', 'Classification']].rename(columns={
                 'Institution': 'School Name', 'Roster_Teachers': 'Active Teachers', 'Avg_Lesson_Prep_Mins': 'Prep (m/day)', 'Avg_Library_Usage_Mins': 'Library (m/day)', 'LP_Audio_Submissions': 'LP/Audio Notes', 'Activity_Videos': 'Activity Videos', 'Writing_Samples': 'Writing Samples', 'Phonics_Evidences': 'Phonics Uploads', 'Portfolio_Artifacts': 'Portfolio Uploads'
             })
             st.dataframe(display_qtable, use_container_width=True)
 
             col_t5_d1, col_t5_d2 = st.columns(2)
             with col_t5_d1:
-                if st.button("⚙️ Compile Portfolio Overview PDF", key="prep_pdf_tab5_btn"):
-                    with st.spinner("Compiling Portfolio PDF..."):
-                        pdf_t5 = generate_pdf_report(
-                            title_text="🏛️ Academic Manager Portfolio Review",
-                            subtitle_text=f"Portfolio Performance Leaderboard ({selected_num_days} Working Days)",
-                            school_name="Multiple Portfolio Schools",
-                            summary_metrics={"Total Schools": len(display_school_stats), "Pace Setters": len(pace_setters), "Priority Focus": len(priority_focus)},
-                            dataframe=display_qtable
-                        ).getvalue()
-                        st.session_state["tab5_pdf_ready"] = pdf_t5
-
-                if "tab5_pdf_ready" in st.session_state:
-                    st.download_button("📄 Download Portfolio Overview Report (PDF)", data=st.session_state["tab5_pdf_ready"], file_name=f"Manager_Portfolio_Overview_{selected_month.replace(' ', '_')}.pdf", mime="application/pdf", key="btn_pdf_tab5")
-
+                pdf_tab5 = generate_pdf_report(
+                    title_text="🏛️ Academic Manager Portfolio Review",
+                    subtitle_text=f"Portfolio Performance Leaderboard ({selected_num_days} Working Days)",
+                    school_name="Multiple Portfolio Schools",
+                    summary_metrics={"Total Schools": len(school_stats), "Pace Setters": len(pace_setters), "Priority Focus": len(priority_focus)},
+                    dataframe=display_qtable
+                )
+                st.download_button("📄 Download Portfolio Overview Report (PDF)", data=pdf_tab5, file_name=f"Manager_Portfolio_Overview_{selected_month.replace(' ', '_')}.pdf", mime="application/pdf")
             with col_t5_d2:
-                if st.button("⚙️ Prepare Portfolio Leaderboard Excel", key="prep_xlsx_tab5_btn"):
-                    buf_t5_xlsx = BytesIO()
-                    with pd.ExcelWriter(buf_t5_xlsx, engine='openpyxl') as writer:
-                        display_qtable.to_excel(writer, index=False, sheet_name='Portfolio_Leaderboard')
-                    st.session_state["tab5_xlsx_ready"] = buf_t5_xlsx.getvalue()
-
-                if "tab5_xlsx_ready" in st.session_state:
-                    st.download_button("📥 Download Portfolio Leaderboard (Excel)", data=st.session_state["tab5_xlsx_ready"], file_name=f"Portfolio_Leaderboard_{selected_month.replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_xlsx_tab5")
+                buf_t5_xlsx = BytesIO()
+                with pd.ExcelWriter(buf_t5_xlsx, engine='openpyxl') as writer:
+                    display_qtable.to_excel(writer, index=False, sheet_name='Portfolio_Leaderboard')
+                buf_t5_xlsx.seek(0)
+                st.download_button("📥 Download Portfolio Leaderboard (Excel)", data=buf_t5_xlsx, file_name=f"Portfolio_Leaderboard_{selected_month.replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     # TAB 6: SCHOOL-LEVEL TEACHER PROGRESSION & EXECUTION TIERS
     with tab6:
         st.header("🏫 School-Level Teacher Progression & Execution Tiers")
-        
-        with st.expander("🎯 Progression Target Benchmark Settings", expanded=False):
-            t6_kcol1, t6_kcol2 = st.columns(2)
-            with t6_kcol1:
-                daily_ld_target_t6 = st.number_input("Lesson Prep Target (Mins/Day)", min_value=0.0, max_value=60.0, value=10.0, step=5.0, key="t6_ld_target")
-            with t6_kcol2:
-                daily_lib_target_t6 = st.number_input("Library Usage Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t6_lib_target")
-
-        calc_ld_kpi_t6 = daily_ld_target_t6 * selected_num_days
-        calc_lib_kpi_t6 = daily_lib_target_t6 * selected_num_days
-
         all_schools_list_t6 = sorted(school_master_roster['Institution'].unique())
         
         if not all_schools_list_t6:
             st.info("No schools found in roster.")
         else:
-            t6_col_f1, t6_col_f2 = st.columns(2)
-            with t6_col_f1:
-                target_school_t6 = st.selectbox("Select School to Inspect:", options=all_schools_list_t6, key="t6_school_sel")
-                
+            target_school_t6 = st.selectbox("Select School to Inspect:", options=all_schools_list_t6, key="t6_school_sel")
             school_t6_roster = school_master_roster[school_master_roster['Institution'] == target_school_t6]
             school_t6_data = school_filtered_df[school_filtered_df['Institution'] == target_school_t6]
 
-            t6_ld = school_t6_data[school_t6_data['Standard_Type'] == 'lessonDelivery'].groupby('FullName')['Duration_Min'].sum().reset_index()
-            t6_lib = school_t6_data[school_t6_data['Standard_Type'] == 'library'].groupby('FullName')['Duration_Min'].sum().reset_index()
+            st.markdown(f"### 🏫 School Audit: **{target_school_t6}** | Active Roster: **{len(school_t6_roster)} Teachers**")
+
+            t6_ld = school_t6_data[school_t6_data['Type'] == 'lessonDelivery'].groupby('FullName')['Duration_Min'].sum().reset_index()
+            t6_lib = school_t6_data[school_t6_data['Type'] == 'library'].groupby('FullName')['Duration_Min'].sum().reset_index()
 
             t6_teachers = school_t6_roster.merge(t6_ld.rename(columns={'Duration_Min': 'Lesson_Mins'}), on='FullName', how='left').fillna(0.0)
             t6_teachers = t6_teachers.merge(t6_lib.rename(columns={'Duration_Min': 'Library_Mins'}), on='FullName', how='left').fillna(0.0)
 
             def tier_teacher(row):
-                ld_pct = (row['Lesson_Mins'] / calc_ld_kpi_t6) if calc_ld_kpi_t6 > 0 else 1.0
-                lib_pct = (row['Library_Mins'] / calc_lib_kpi_t6) if calc_lib_kpi_t6 > 0 else 1.0
+                ld_pct = (row['Lesson_Mins'] / calc_ld_kpi) if calc_ld_kpi > 0 else 1.0
+                lib_pct = (row['Library_Mins'] / calc_lib_kpi) if calc_lib_kpi > 0 else 1.0
                 if ld_pct >= 1.0 and lib_pct >= 1.0:
                     return '🌟 Consistent Achiever (>= 100%)'
                 elif ld_pct < 0.40 and lib_pct < 0.40:
@@ -2159,16 +2107,6 @@ else:
                     return '⚠️ Fluctuating / Partial (40%-99%)'
 
             t6_teachers['Execution_Tier'] = t6_teachers.apply(tier_teacher, axis=1)
-
-            with t6_col_f2:
-                t6_tier_filter = st.selectbox("Filter by Execution Tier:", ["All Tiers", "🌟 Consistent Achiever (>= 100%)", "⚠️ Fluctuating / Partial (40%-99%)", "❌ Persistent Inactive (< 40%)"], key="t6_tier_filter")
-
-            if t6_tier_filter != "All Tiers":
-                t6_teachers_filtered = t6_teachers[t6_teachers['Execution_Tier'] == t6_tier_filter]
-            else:
-                t6_teachers_filtered = t6_teachers
-
-            st.markdown(f"### 🏫 School Audit: **{target_school_t6}** | Active Roster: **{len(school_t6_roster)} Teachers**")
 
             e1, e2, e3 = st.columns(3)
             num_ach = len(t6_teachers[t6_teachers['Execution_Tier'].str.startswith('🌟')])
@@ -2180,40 +2118,33 @@ else:
             e3.metric("❌ Persistent Inactive", num_inact)
 
             fig_t6_bar = px.bar(
-                t6_teachers_filtered, x="FullName", y=["Lesson_Mins", "Library_Mins"],
+                t6_teachers, x="FullName", y=["Lesson_Mins", "Library_Mins"],
                 title=f"Teacher Usage Breakdown for {target_school_t6} (Mins)",
                 labels={"FullName": "Teacher Name", "value": "Logged Minutes", "variable": "Feature"},
                 barmode="group", text_auto=".1f"
             )
             st.plotly_chart(fig_t6_bar, use_container_width=True)
 
-            display_t6_table = t6_teachers_filtered.rename(columns={'FullName': 'Teacher Name', 'Lesson_Mins': 'Lesson Prep (m)', 'Library_Mins': 'Library Usage (m)', 'Execution_Tier': 'Execution Tier'})
+            display_t6_table = t6_teachers.rename(columns={'FullName': 'Teacher Name', 'Lesson_Mins': 'Lesson Prep (m)', 'Library_Mins': 'Library Usage (m)', 'Execution_Tier': 'Execution Tier'})
             st.dataframe(display_t6_table, use_container_width=True)
 
     # TAB 7: LIVE EVIDENCE SUBMISSIONS FEED & QUALITATIVE TRACKER
     with tab7:
         st.header("📬 Live Evidence Submissions Feed & Qualitative Performance Indicator Tracker")
-        
-        with st.expander("🎯 Qualitative Artifact Threshold Controls", expanded=False):
-            t7_kcol1, t7_kcol2 = st.columns(2)
-            with t7_kcol1:
-                target_vid_count_t7 = st.number_input("Min. Activity Videos", min_value=1, max_value=20, value=3, step=1, key="t7_vid_cnt")
-                target_writing_count_t7 = st.number_input("Min. Writing Samples", min_value=1, max_value=20, value=3, step=1, key="t7_writing_cnt")
-            with t7_kcol2:
-                target_phonics_count_t7 = st.number_input("Min. Phonics Submissions", min_value=1, max_value=20, value=2, step=1, key="t7_ph_cnt")
-                target_portfolio_count_t7 = st.number_input("Min. Portfolio Artifacts", min_value=1, max_value=20, value=1, step=1, key="t7_pf_cnt")
+        if enable_qual_kpi:
+            st.caption(f"Track submissions against Qualitative Performance Indicators.")
 
         evidence_cols = ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link']
         avail_ev_cols = [c for c in evidence_cols if c in filtered_df.columns]
 
-        if not filtered_df.empty and avail_ev_cols:
-            url_mask = pd.concat([
-                filtered_df[c].fillna('').astype(str).str.strip().str.contains(r'https?://|drive\.google|supabase\.co', case=False, na=False)
-                for c in avail_ev_cols
-            ], axis=1).any(axis=1)
-            all_submissions_df = filtered_df[url_mask].copy()
-        else:
-            all_submissions_df = pd.DataFrame()
+        def has_valid_evidence(row):
+            for col in avail_ev_cols:
+                val = str(row[col]).strip()
+                if re.match(r'^https?://', val, re.IGNORECASE):
+                    return True
+            return False
+
+        all_submissions_df = filtered_df[filtered_df.apply(has_valid_evidence, axis=1)].copy() if not filtered_df.empty and avail_ev_cols else pd.DataFrame()
 
         if all_submissions_df.empty:
             st.info("No teacher evidence submissions match the currently selected global filter criteria.")
