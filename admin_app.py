@@ -21,7 +21,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 # Page layout configuration (Must be first Streamlit command)
-st.set_page_config(page_title="Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard", layout="wide")
+st.set_page_config(page_title="Academic Manager Portfolio & Teacher Performance Review Dashboard", layout="wide")
 
 # --- NATIVE POSTGRESQL & SUPABASE CLOUD SETUP ---
 conn = st.connection("postgresql", type="sql")
@@ -43,7 +43,7 @@ except Exception:
     ai_client = None
 
 
-# --- 1. CORE HELPER & NORMALIZATION FUNCTIONS ---
+# --- 1. CORE DATA NORMALIZATION & HELPER FUNCTIONS ---
 def _norm_text(value):
     if pd.isna(value):
         return ""
@@ -55,7 +55,7 @@ def _norm_key(value):
 
 
 def _categorize_record_type(val, book_val=""):
-    """Robustly categorizes a record into 'lessonDelivery', 'library', or 'other'."""
+    """Categorizes a record into 'lessonDelivery', 'library', or 'other'."""
     v = _norm_key(val)
     b = _norm_key(book_val)
     
@@ -398,6 +398,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     card_header = ParagraphStyle('CardHead', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748B'), fontName='Helvetica-Bold', alignment=1)
     card_value = ParagraphStyle('CardVal', parent=styles['Normal'], fontSize=11, leading=14, textColor=primary_color, fontName='Helvetica-Bold', alignment=1)
 
+    # Date-filtered slice for this school
     school_curr_df = filtered_df[filtered_df['Institution'] == school_name]
     if school_curr_df.empty and not school_filtered_df.empty:
         school_curr_df = school_filtered_df[school_filtered_df['Institution'] == school_name]
@@ -673,6 +674,64 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     doc.build(story)
     buffer.seek(0)
     return buffer
+
+
+def ingest_excel_to_postgresql(processed_dfs):
+    if not processed_dfs:
+        return
+    combined_df = pd.concat(processed_dfs, ignore_index=True)
+    combined_df = normalize_identity_columns(combined_df)
+    
+    db_cols = [
+        "State_Zone", "Uploaded_By", "Institution", "Center",
+        "FirstName", "LastName", "FullName", "Role", "Type",
+        "Grade", "Subject", "Book", "StartTime", "EndTime",
+        "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
+        "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
+        "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+        "Assessment_Score_Pct"
+    ]
+    
+    for col in db_cols:
+        if col not in combined_df.columns:
+            combined_df[col] = None
+
+    cleaned_df = combined_df[db_cols].copy()
+    
+    for dt_col in ['StartTime', 'EndTime']:
+        cleaned_df[dt_col] = pd.to_datetime(cleaned_df[dt_col], errors='coerce')
+
+    if 'Duration_Min' in cleaned_df.columns:
+        cleaned_df['Duration_Min'] = pd.to_numeric(cleaned_df['Duration_Min'], errors='coerce').fillna(0.0)
+
+    cleaned_df = cleaned_df.replace({np.nan: None})
+    records = cleaned_df.to_dict(orient="records")
+
+    insert_sql = text("""
+        INSERT INTO teacher_records (
+            "State_Zone", "Uploaded_By", "Institution", "Center",
+            "FirstName", "LastName", "FullName", "Role", "Type",
+            "Grade", "Subject", "Book", "StartTime", "EndTime",
+            "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
+            "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
+            "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+            "Assessment_Score_Pct"
+        ) VALUES (
+            :State_Zone, :Uploaded_By, :Institution, :Center,
+            :FirstName, :LastName, :FullName, :Role, :Type,
+            :Grade, :Subject, :Book, :StartTime, :EndTime,
+            :Duration_Min, :Voice_Note_Link, :Lesson_Plan_Picture,
+            :Video_Evidence_1, :Video_Evidence_2, :Video_Evidence_3,
+            :Writing_Sample_Link, :Phonics_Evidence_Link, :Portfolio_Evidence_Link,
+            :Assessment_Score_Pct
+        );
+    """)
+
+    with conn.session as s:
+        s.execute(insert_sql, records)
+        s.commit()
+        
+    fetch_master_db_from_supabase.clear()
 
 
 def render_school_audit_crm_box(tab_name, active_school, current_filter_description, school_audit_whatsapp_message):
@@ -987,84 +1046,11 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
             encoded_final_text = urllib.parse.quote(editable_wa_area)
             st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown(f"##### 📝 Post-Call Discussion Notes & Follow-up Scheduler ({target_crm_school} - {selected_entity_type})")
-    
-    with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}"):
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}_{target_crm_school}")
-        with col_f2:
-            next_followup_date = st.date_input("Next Scheduled Follow-up Date:", value=pd.Timestamp.now().date() + pd.Timedelta(days=7), key=f"fdate_{tab_name}_{target_crm_school}")
-            
-        discussion_notes = st.text_area("Discussion Summary / Notes from Call:", placeholder="Punch key talking points, agreed commitments, and action items...", key=f"dnotes_{tab_name}_{target_crm_school}")
-        call_status_opt = st.selectbox("Call Status / Resolution:", options=["Open Action Item", "In Progress", "Successfully Resolved"], key=f"cstat_{tab_name}_{target_crm_school}")
-        
-        submit_call_log = st.form_submit_button("💾 Save Call Note & Sync to Supabase Cloud")
-        
-        if submit_call_log:
-            if discussion_notes.strip():
-                new_log_entry = {
-                    "School": target_crm_school,
-                    "Entity Type": selected_entity_type,
-                    "Contact Name": input_contact_name or "N/A",
-                    "Module Tab": tab_name,
-                    "Filter Window": current_filter_description,
-                    "Call Date": str(call_date_punched),
-                    "Discussion Notes": discussion_notes.strip(),
-                    "Next Follow-up Date": str(next_followup_date),
-                    "Status": call_status_opt
-                }
-                st.session_state["crm_call_logs_store"].append(new_log_entry)
-                save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
-                st.success("✅ Call notes and follow-up schedule successfully saved and synced to Supabase Cloud!")
-            else:
-                st.warning("Please enter discussion notes before saving.")
-
-    if st.session_state["crm_call_logs_store"]:
-        st.markdown(f"##### 📊 Filterable Call Discussion Logs & Audit Trail for {target_crm_school}")
-        logs_df = pd.DataFrame(st.session_state["crm_call_logs_store"])
-        
-        if 'School' in logs_df.columns:
-            logs_df = logs_df[logs_df['School'] == target_crm_school]
-
-        if not logs_df.empty:
-            desired_cols = ['School', 'Entity Type', 'Contact Name', 'Module Tab', 'Filter Window', 'Call Date', 'Discussion Notes', 'Next Follow-up Date', 'Status']
-            available_log_cols = [c for c in desired_cols if c in logs_df.columns]
-            
-            st.dataframe(logs_df[available_log_cols], use_container_width=True)
-            
-            dl_col1, dl_col2 = st.columns(2)
-            with dl_col1:
-                output_buffer = BytesIO()
-                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-                    logs_df[available_log_cols].to_excel(writer, index=False, sheet_name='Call_Discussion_Logs')
-                output_buffer.seek(0)
-                
-                st.download_button(
-                    label="📥 Download Filtered Call Logs (Excel)",
-                    data=output_buffer,
-                    file_name=f"School_CRM_Call_Logs_{target_crm_school.replace(' ', '_')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_excel_{tab_name}_{target_crm_school}"
-                )
-            with dl_col2:
-                if st.button("🗑️ Clear Call Logs for this School", key=f"clear_logs_btn_{tab_name}_{target_crm_school}"):
-                    st.session_state["crm_call_logs_store"] = [l for l in st.session_state["crm_call_logs_store"] if l.get("School") != target_crm_school]
-                    save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
-                    st.success(f"Successfully cleared call logs for {target_crm_school}!")
-                    st.rerun()
-        else:
-            st.info(f"No call discussion logs recorded yet for {target_crm_school}.")
-
 
 # --- 2. MULTI-EMPLOYEE INGESTION SIDEBAR ---
-st.title("🏫 Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard")
-st.markdown("Track **School Portfolio Management**, **School WoW Velocity**, **Teacher Execution Tiers**, **Quantitative Performance Indicators (Lesson Prep / Library)**, and **360° Qualitative Evidences & Artifact Compliance**.")
-
 st.sidebar.header("📁 Multi-Employee Data Ingestion Portal")
 
-employee_name = st.sidebar.text_input("Enter Consultant Name:", value="Harshit Bhargava")[cite: 1]
+employee_name = st.sidebar.text_input("Enter Consultant Name:", value="Harshit Bhargava")
 employee_state = st.sidebar.selectbox("Select State / Zone (India Region):", [
     "Madhya Pradesh (MP)", "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", 
     "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", 
@@ -1094,7 +1080,7 @@ if uploaded_files:
 
                 temp_df = normalize_identity_columns(temp_df)
                 
-                temp_df['Uploaded_By'] = employee_name[cite: 1]
+                temp_df['Uploaded_By'] = employee_name
                 temp_df['State_Zone'] = employee_state
 
                 if temp_df['Institution'].eq('').all():
@@ -1298,7 +1284,7 @@ else:
     st.sidebar.header("🔍 Hierarchical Global Filters")
     
     all_states = sorted([str(s) for s in df['State_Zone'].unique() if str(s).strip() and str(s).lower() not in ['nan', 'none']])
-    default_states = ["Madhya Pradesh (MP)"] if "Madhya Pradesh (MP)" in all_states else all_states[cite: 1]
+    default_states = ["Madhya Pradesh (MP)"] if "Madhya Pradesh (MP)" in all_states else all_states
     
     if all_states:
         selected_states = st.sidebar.multiselect("1. Select State(s) / Zone(s)", options=all_states, default=default_states)
@@ -2516,7 +2502,7 @@ else:
 
         if not filtered_df.empty and avail_ev_cols:
             url_mask = pd.concat([
-                filtered_df[c].fillna('').astype(str).str.strip().str.startswith(('http://', 'https://'))
+                filtered_df[c].fillna('').astype(str).str.strip().str.contains(r'https?://|drive\.google|supabase\.co', case=False, na=False)
                 for c in avail_ev_cols
             ], axis=1).any(axis=1)
             all_submissions_df = filtered_df[url_mask].copy()
