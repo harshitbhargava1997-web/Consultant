@@ -1110,7 +1110,7 @@ def evidence_items_across_columns(df_src, columns):
 # --- EXCEL / CSV BATCH INGESTION TO POSTGRESQL ---
 def ingest_excel_to_postgresql(processed_dfs):
     if not processed_dfs:
-        return
+        return 0, 0
     combined_df = pd.concat(processed_dfs, ignore_index=True)
     combined_df = normalize_identity_columns(combined_df)
     
@@ -1152,7 +1152,8 @@ def ingest_excel_to_postgresql(processed_dfs):
             "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
             "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
             "Assessment_Score_Pct"
-        ) VALUES (
+        )
+        SELECT
             :State_Zone, :Uploaded_By, :Institution, :Center,
             :FirstName, :LastName, :FullName, :Role, :Type,
             :Grade, :Subject, :Book, :StartTime, :EndTime,
@@ -1160,14 +1161,48 @@ def ingest_excel_to_postgresql(processed_dfs):
             :Video_Evidence_1, :Video_Evidence_2, :Video_Evidence_3,
             :Writing_Sample_Link, :Phonics_Evidence_Link, :Portfolio_Evidence_Link,
             :Assessment_Score_Pct
-        );
+        WHERE NOT EXISTS (
+            SELECT 1 FROM teacher_records t
+            WHERE t."State_Zone" IS NOT DISTINCT FROM :State_Zone
+              AND t."Uploaded_By" IS NOT DISTINCT FROM :Uploaded_By
+              AND t."Institution" IS NOT DISTINCT FROM :Institution
+              AND t."Center" IS NOT DISTINCT FROM :Center
+              AND t."FirstName" IS NOT DISTINCT FROM :FirstName
+              AND t."LastName" IS NOT DISTINCT FROM :LastName
+              AND t."FullName" IS NOT DISTINCT FROM :FullName
+              AND t."Role" IS NOT DISTINCT FROM :Role
+              AND t."Type" IS NOT DISTINCT FROM :Type
+              AND t."Grade" IS NOT DISTINCT FROM :Grade
+              AND t."Subject" IS NOT DISTINCT FROM :Subject
+              AND t."Book" IS NOT DISTINCT FROM :Book
+              AND t."StartTime" IS NOT DISTINCT FROM :StartTime
+              AND t."EndTime" IS NOT DISTINCT FROM :EndTime
+              AND t."Duration_Min" IS NOT DISTINCT FROM :Duration_Min
+              AND t."Voice_Note_Link" IS NOT DISTINCT FROM :Voice_Note_Link
+              AND t."Lesson_Plan_Picture" IS NOT DISTINCT FROM :Lesson_Plan_Picture
+              AND t."Video_Evidence_1" IS NOT DISTINCT FROM :Video_Evidence_1
+              AND t."Video_Evidence_2" IS NOT DISTINCT FROM :Video_Evidence_2
+              AND t."Video_Evidence_3" IS NOT DISTINCT FROM :Video_Evidence_3
+              AND t."Writing_Sample_Link" IS NOT DISTINCT FROM :Writing_Sample_Link
+              AND t."Phonics_Evidence_Link" IS NOT DISTINCT FROM :Phonics_Evidence_Link
+              AND t."Portfolio_Evidence_Link" IS NOT DISTINCT FROM :Portfolio_Evidence_Link
+              AND t."Assessment_Score_Pct" IS NOT DISTINCT FROM :Assessment_Score_Pct
+        )
     """)
 
     with conn.session as s:
-        s.execute(insert_sql, records)
+        inserted_count = 0
+        skipped_duplicates = 0
+        for record in records:
+            result = s.execute(insert_sql, record)
+            if result.rowcount and result.rowcount > 0:
+                inserted_count += 1
+            else:
+                skipped_duplicates += 1
         s.commit()
-        
+
     fetch_master_db_from_supabase.clear()
+    return inserted_count, skipped_duplicates
 
 
 # Page layout title
@@ -1189,7 +1224,7 @@ employee_state = st.sidebar.selectbox("Select State / Zone (India Region):", [
 
 uploaded_files = st.sidebar.file_uploader("Upload UserMetrics Excel (.xlsx)", type=["xlsx"], accept_multiple_files=True)
 
-if uploaded_files:
+if uploaded_files and not st.session_state.pop("database_just_cleared", False):
     if "last_ingested_files" not in st.session_state:
         st.session_state["last_ingested_files"] = []
 
@@ -1281,10 +1316,10 @@ if uploaded_files:
                 st.sidebar.error(f"Error reading {file.name}: {e}")
 
         if new_processed_dfs:
-            ingest_excel_to_postgresql(new_processed_dfs)
+            inserted_count, duplicate_count = ingest_excel_to_postgresql(new_processed_dfs)
             for f in files_to_process:
                 st.session_state["last_ingested_files"].append(f"{f.name}_{f.size}")
-            st.sidebar.success(f"Synced {len(files_to_process)} file(s) directly into PostgreSQL Database!")
+            st.sidebar.success(f"Database sync complete: {inserted_count} new record(s) inserted; {duplicate_count} duplicate record(s) skipped.")
             st.rerun()
 
 df = fetch_master_db_from_supabase()
@@ -1331,8 +1366,8 @@ with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
 
             if not combined_legacy.empty:
                 combined_legacy = normalize_identity_columns(combined_legacy)
-                ingest_excel_to_postgresql([combined_legacy])
-                st.sidebar.success(f"🎉 Successfully imported {len(combined_legacy)} historical records into PostgreSQL!")
+                inserted_count, duplicate_count = ingest_excel_to_postgresql([combined_legacy])
+                st.sidebar.success(f"🎉 Historical import complete: {inserted_count} new record(s) inserted; {duplicate_count} duplicate record(s) skipped out of {len(combined_legacy)} source record(s).")
                 fetch_master_db_from_supabase.clear()
                 st.rerun()
             else:
@@ -1386,16 +1421,44 @@ if not df.empty:
                     st.error(f"Error deleting school data: {e}")
                     
         else:
-            if st.button("🚨 Clear Entire Database Table"):
+            if st.button("🚨 Clear Entire Database Table", key="clear_entire_teacher_db"):
                 try:
+                    # DELETE is safer than TRUNCATE when teacher_records has
+                    # foreign-key dependencies or restricted database permissions.
                     with conn.session as s:
-                        s.execute(text("TRUNCATE TABLE teacher_records;"))
+                        delete_result = s.execute(text("DELETE FROM teacher_records;"))
+                        deleted_count = delete_result.rowcount
+
+                        # Verify inside the same transaction before committing.
+                        remaining_count = int(
+                            s.execute(text("SELECT COUNT(*) FROM teacher_records;")).scalar() or 0
+                        )
+                        if remaining_count != 0:
+                            s.rollback()
+                            raise RuntimeError(
+                                f"{remaining_count} record(s) still remain after DELETE."
+                            )
                         s.commit()
+
+                    # Only invalidate the Streamlit cache after the DB commit.
                     fetch_master_db_from_supabase.clear()
-                    st.sidebar.error("Database table cleared!")
+                    st.session_state.pop("master_df", None)
+                    st.session_state.pop("df", None)
+                    st.session_state.pop("filtered_df", None)
+                    st.session_state.pop("school_filtered_df", None)
+
+                    # Prevent the currently attached Streamlit uploader from being
+                    # interpreted as a fresh upload immediately after the clear.
+                    st.session_state["database_just_cleared"] = True
+                    st.session_state["last_ingested_files"] = []
+                    st.sidebar.success(
+                        f"✅ Database cleared successfully: {deleted_count if deleted_count >= 0 else 'all'} record(s) deleted. "
+                        "Upload the Excel file again intentionally to repopulate the database."
+                    )
                     st.rerun()
                 except Exception as e:
-                    st.sidebar.error(f"Could not truncate table: {e}")
+                    fetch_master_db_from_supabase.clear()
+                    st.sidebar.error(f"❌ Could not clear teacher_records: {type(e).__name__}: {e}")
 
 if df.empty:
     st.info("👋 Upload your daily or weekly `UserMetrics.xlsx` files in the sidebar, or run the One-Time Import in the sidebar to populate your PostgreSQL database.")
