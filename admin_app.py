@@ -43,7 +43,7 @@ except Exception:
     ai_client = None
 
 
-# --- 1. CORE DATA NORMALIZATION & HELPER FUNCTIONS ---
+# --- 1. ROBUST DATA NORMALIZATION & MATHEMATICAL HELPER FUNCTIONS ---
 def _norm_text(value):
     if pd.isna(value):
         return ""
@@ -54,8 +54,31 @@ def _norm_key(value):
     return _norm_text(value).casefold()
 
 
+def _parse_time_mins(t_val):
+    """Accurately parses numerical minutes, float minutes, and HH:MM:SS or MM:SS time formats."""
+    if pd.isna(t_val) or str(t_val).strip() == "" or str(t_val).strip().lower() in ['none', 'nan', 'nat']:
+        return 0.0
+    val_str = str(t_val).strip()
+    try:
+        # Check if it's already a standard numerical float/int
+        return float(val_str)
+    except ValueError:
+        pass
+    
+    # Try parsing string HH:MM:SS or MM:SS
+    parts = val_str.split(':')
+    try:
+        if len(parts) == 3:
+            return float(parts[0]) * 60.0 + float(parts[1]) + float(parts[2]) / 60.0
+        elif len(parts) == 2:
+            return float(parts[0]) + float(parts[1]) / 60.0
+    except (ValueError, TypeError):
+        pass
+    return 0.0
+
+
 def _categorize_record_type(val, book_val=""):
-    """Categorizes a record into 'lessonDelivery', 'library', or 'other'."""
+    """Accurately maps variations in log naming to canonical types."""
     v = _norm_key(val)
     b = _norm_key(book_val)
     
@@ -90,16 +113,15 @@ def normalize_identity_columns(df):
 
     out["Standard_Type"] = out.apply(lambda r: _categorize_record_type(r.get("Type", ""), r.get("Book", "")), axis=1)
 
+    # Accurate duration extraction without arbitrary session span inflation
     if "Duration_Min" in out.columns:
-        out["Duration_Min"] = pd.to_numeric(out["Duration_Min"], errors='coerce').fillna(0.0)
+        out["Duration_Min"] = out["Duration_Min"].apply(_parse_time_mins)
+    elif "Duration (HH:MM:SS)" in out.columns:
+        out["Duration_Min"] = out["Duration (HH:MM:SS)"].apply(_parse_time_mins)
+    elif "Duration (Minutes)" in out.columns:
+        out["Duration_Min"] = out["Duration (Minutes)"].apply(_parse_time_mins)
     else:
         out["Duration_Min"] = 0.0
-
-    if 'StartTime' in out.columns and 'EndTime' in out.columns:
-        st_dt = pd.to_datetime(out['StartTime'], errors='coerce')
-        et_dt = pd.to_datetime(out['EndTime'], errors='coerce')
-        diff_mins = (et_dt - st_dt).dt.total_seconds() / 60.0
-        out.loc[out["Duration_Min"].le(0.0) & diff_mins.notna() & diff_mins.gt(0), "Duration_Min"] = diff_mins
 
     return out
 
@@ -398,7 +420,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     card_header = ParagraphStyle('CardHead', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748B'), fontName='Helvetica-Bold', alignment=1)
     card_value = ParagraphStyle('CardVal', parent=styles['Normal'], fontSize=11, leading=14, textColor=primary_color, fontName='Helvetica-Bold', alignment=1)
 
-    # Date-filtered slice for this school
+    # Respect full date-filtered data for this school
     school_curr_df = filtered_df[filtered_df['Institution'] == school_name]
     if school_curr_df.empty and not school_filtered_df.empty:
         school_curr_df = school_filtered_df[school_filtered_df['Institution'] == school_name]
@@ -734,323 +756,13 @@ def ingest_excel_to_postgresql(processed_dfs):
     fetch_master_db_from_supabase.clear()
 
 
-def render_school_audit_crm_box(tab_name, active_school, current_filter_description, school_audit_whatsapp_message):
-    st.markdown("---")
-    st.subheader(f"📞 School & Coordinator CRM, Call Notes & WhatsApp Generators ({tab_name})")
-    
-    if "crm_global_data" not in st.session_state:
-        st.session_state["crm_global_data"] = load_crm_data_from_supabase()
-
-    if "crm_call_logs_store" not in st.session_state:
-        st.session_state["crm_call_logs_store"] = load_call_logs_from_supabase()
-
-    crm_data = st.session_state["crm_global_data"]
-    if "contacts" not in crm_data:
-        crm_data["contacts"] = {}
-
-    target_crm_school = active_school
-
-    c_col1, c_col2 = st.columns([1, 2])
-    with c_col1:
-        st.write(f"🏫 **Target School:** `{target_crm_school}`")
-        
-        if target_crm_school not in crm_data["contacts"]:
-            crm_data["contacts"][target_crm_school] = {
-                "Principal": {"name": "", "phone": ""},
-                "Owner": {"name": "", "phone": ""},
-                "Coordinator": {"name": "", "phone": ""}
-            }
-
-        st.markdown("##### 👥 Select Entity & Contact Details")
-        selected_entity_type = st.selectbox("Target Entity Type:", options=["Principal", "Owner", "Coordinator"], key=f"entity_type_{tab_name}_{target_crm_school}")
-        
-        current_entity_data = crm_data["contacts"][target_crm_school].get(selected_entity_type, {"name": "", "phone": ""})
-        
-        input_contact_name = st.text_input(f"{selected_entity_type} Name:", value=current_entity_data.get("name", ""), key=f"cname_{tab_name}_{target_crm_school}_{selected_entity_type}")
-        input_phone = st.text_input(f"{selected_entity_type} Mobile (+91...):", value=current_entity_data.get("phone", ""), key=f"cphone_{tab_name}_{target_crm_school}_{selected_entity_type}")
-
-        if st.button(f"💾 Save {selected_entity_type} Contact to Supabase", key=f"save_contact_btn_{tab_name}_{target_crm_school}_{selected_entity_type}"):
-            crm_data["contacts"][target_crm_school][selected_entity_type] = {
-                "name": input_contact_name,
-                "phone": input_phone
-            }
-            save_crm_data_to_supabase(crm_data)
-            st.success(f"Successfully saved {selected_entity_type} details for {target_crm_school} to Supabase!")
-
-        active_phone = input_phone.strip()
-        if active_phone:
-            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
-            contact_greeting = input_contact_name if input_contact_name else selected_entity_type
-            quick_wa = urllib.parse.quote(f"Namaste {contact_greeting} ji, checking in from Onelearn Academic Team regarding school audit metrics for {target_crm_school} - {current_filter_description}.")
-            st.markdown(f'<a href="tel:{active_phone}" target="_blank" style="text-decoration:none;"><button style="background-color:#2CA02C;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;margin-bottom:6px;width:100%;">📞 Call {selected_entity_type}</button></a>', unsafe_allow_html=True)
-            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={quick_wa}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">📱 Quick WhatsApp Message</button></a>', unsafe_allow_html=True)
-        else:
-            st.warning(f"Please enter and save a mobile number for the selected {selected_entity_type}.")
-
-    with c_col2:
-        st.markdown("##### 💬 WhatsApp & Calling Generators (Indian Context)")
-        
-        custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}_{target_crm_school}")
-        
-        with st.expander("✨ AI-Driven Calling Script & Smart Message Generator (Voice & Text)"):
-            manager_voice_audio = st.audio_input(
-                "🎙️ Record Voice Instructions (Speak your custom prompt):",
-                key=f"voice_input_{tab_name}_{target_crm_school}"
-            )
-            user_custom_instruction = st.text_area(
-                "Or Type Custom Instructions (Alternative to voice):",
-                placeholder="e.g., Focus heavily on improving library engagement and phonics submissions...",
-                key=f"ai_custom_prompt_{tab_name}_{target_crm_school}"
-            )
-            
-            if st.button("Generate AI Script & Message", key=f"gen_ai_both_{tab_name}_{target_crm_school}"):
-                if not ai_client:
-                    st.error("Gemini API client is not initialized.")
-                else:
-                    ai_prompt = f"""
-                    You are an expert Academic Consultant. 
-                    Based on these school audit metrics for {target_crm_school} ({current_filter_description}):
-                    Metrics & Breakdown: {school_audit_whatsapp_message}
-                    Target Entity: {selected_entity_type} named {input_contact_name or 'Sir/Madam'}
-                    Tone: {custom_tone}
-                    Text Instructions Provided: {user_custom_instruction if user_custom_instruction else 'None'}
-                    
-                    Generate two distinct outputs:
-                    1. **Calling Script**: A structured phone conversation script calling out specific teacher data points, praises, and areas of concern to discuss with this {selected_entity_type}.
-                    2. **AI WhatsApp Follow-up Message**: A concise, professional message summarizing these exact findings and action items to send on WhatsApp afterward. Sign off with 'Onelearn Academic Team'.
-                    """
-                    with st.spinner("Processing voice/text instructions with Gemini..."):
-                        try:
-                            ai_result = get_gemini_summary(ai_prompt, audio_file_obj=manager_voice_audio)
-                            st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"] = ai_result
-                        except Exception as e:
-                            st.error(f"Error generating AI content: {e}")
-            
-            if f"ai_gen_output_{tab_name}_{target_crm_school}" in st.session_state:
-                st.markdown(st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"])
-
-        st.markdown("##### 📝 Quick WhatsApp Message Draft (Full School Audit)")
-        draft_state_key = f"wa_draft_text_{tab_name}_{target_crm_school}_{selected_entity_type}"
-        sync_track_key = f"last_raw_msg_{tab_name}_{target_crm_school}_{selected_entity_type}"
-        
-        if draft_state_key not in st.session_state or st.session_state.get(sync_track_key) != school_audit_whatsapp_message:
-            st.session_state[draft_state_key] = school_audit_whatsapp_message
-            st.session_state[sync_track_key] = school_audit_whatsapp_message
-
-        editable_wa_area = st.text_area(
-            "Confirm or Edit Final WhatsApp Message Draft:",
-            value=st.session_state[draft_state_key],
-            height=220,
-            key=f"wa_textarea_{tab_name}_{target_crm_school}_{selected_entity_type}"
-        )
-        st.session_state[draft_state_key] = editable_wa_area
-
-        if active_phone:
-            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
-            encoded_final_text = urllib.parse.quote(editable_wa_area)
-            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
-
-    # --- CALL DISCUSSION NOTES & FOLLOW-UP SYNC TO SUPABASE ---
-    st.markdown("---")
-    st.markdown(f"##### 📝 Post-Call Discussion Notes & Follow-up Scheduler ({target_crm_school} - {selected_entity_type})")
-    
-    with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}"):
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}_{target_crm_school}")
-        with col_f2:
-            next_followup_date = st.date_input("Next Scheduled Follow-up Date:", value=pd.Timestamp.now().date() + pd.Timedelta(days=7), key=f"fdate_{tab_name}_{target_crm_school}")
-            
-        discussion_notes = st.text_area("Discussion Summary / Notes from Call:", placeholder="Punch key talking points, agreed commitments, and action items...", key=f"dnotes_{tab_name}_{target_crm_school}")
-        call_status_opt = st.selectbox("Call Status / Resolution:", options=["Open Action Item", "In Progress", "Successfully Resolved"], key=f"cstat_{tab_name}_{target_crm_school}")
-        
-        submit_call_log = st.form_submit_button("💾 Save Call Note & Sync to Supabase Cloud")
-        
-        if submit_call_log:
-            if discussion_notes.strip():
-                new_log_entry = {
-                    "School": target_crm_school,
-                    "Entity Type": selected_entity_type,
-                    "Contact Name": input_contact_name or "N/A",
-                    "Module Tab": tab_name,
-                    "Filter Window": current_filter_description,
-                    "Call Date": str(call_date_punched),
-                    "Discussion Notes": discussion_notes.strip(),
-                    "Next Follow-up Date": str(next_followup_date),
-                    "Status": call_status_opt
-                }
-                st.session_state["crm_call_logs_store"].append(new_log_entry)
-                save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
-                st.success("✅ Call notes and follow-up schedule successfully saved and synced to Supabase Cloud!")
-            else:
-                st.warning("Please enter discussion notes before saving.")
-
-    if st.session_state["crm_call_logs_store"]:
-        st.markdown(f"##### 📊 Filterable Call Discussion Logs & Audit Trail for {target_crm_school}")
-        logs_df = pd.DataFrame(st.session_state["crm_call_logs_store"])
-        
-        if 'School' in logs_df.columns:
-            logs_df = logs_df[logs_df['School'] == target_crm_school]
-
-        if not logs_df.empty:
-            desired_cols = ['School', 'Entity Type', 'Contact Name', 'Module Tab', 'Filter Window', 'Call Date', 'Discussion Notes', 'Next Follow-up Date', 'Status']
-            available_log_cols = [c for c in desired_cols if c in logs_df.columns]
-            
-            st.dataframe(logs_df[available_log_cols], use_container_width=True)
-            
-            dl_col1, dl_col2 = st.columns(2)
-            with dl_col1:
-                output_buffer = BytesIO()
-                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-                    logs_df[available_log_cols].to_excel(writer, index=False, sheet_name='Call_Discussion_Logs')
-                output_buffer.seek(0)
-                
-                st.download_button(
-                    label="📥 Download Filtered Call Logs (Excel)",
-                    data=output_buffer,
-                    file_name=f"School_CRM_Call_Logs_{target_crm_school.replace(' ', '_')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_excel_{tab_name}_{target_crm_school}"
-                )
-            with dl_col2:
-                if st.button("🗑️ Clear Call Logs for this School", key=f"clear_logs_btn_{tab_name}_{target_crm_school}"):
-                    st.session_state["crm_call_logs_store"] = [l for l in st.session_state["crm_call_logs_store"] if l.get("School") != target_crm_school]
-                    save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
-                    st.success(f"Successfully cleared call logs for {target_crm_school}!")
-                    st.rerun()
-        else:
-            st.info(f"No call discussion logs recorded yet for {target_crm_school}.")
-
-
-def render_universal_crm_box(tab_name, active_selected_schools, current_filter_description, metrics_summary_text):
-    st.markdown("---")
-    st.subheader(f"📞 School & Coordinator CRM, Call Notes & WhatsApp Generators ({tab_name})")
-    
-    if "crm_global_data" not in st.session_state:
-        st.session_state["crm_global_data"] = load_crm_data_from_supabase()
-
-    if "crm_call_logs_store" not in st.session_state:
-        st.session_state["crm_call_logs_store"] = load_call_logs_from_supabase()
-
-    crm_data = st.session_state["crm_global_data"]
-    if "contacts" not in crm_data:
-        crm_data["contacts"] = {}
-
-    c_col1, c_col2 = st.columns([1, 2])
-    with c_col1:
-        if isinstance(active_selected_schools, str):
-            schools_list = [active_selected_schools]
-        elif isinstance(active_selected_schools, (list, tuple, pd.Series, np.ndarray)):
-            schools_list = [str(s) for s in active_selected_schools if str(s).strip()]
-        else:
-            schools_list = ["Default School"]
-            
-        if not schools_list:
-            schools_list = ["Default School"]
-
-        target_crm_school = st.selectbox("Select School:", options=schools_list, key=f"crm_school_{tab_name}")
-        
-        if target_crm_school not in crm_data["contacts"]:
-            crm_data["contacts"][target_crm_school] = {
-                "Principal": {"name": "", "phone": ""},
-                "Owner": {"name": "", "phone": ""},
-                "Coordinator": {"name": "", "phone": ""}
-            }
-
-        st.markdown("##### 👥 Select Entity & Contact Details")
-        selected_entity_type = st.selectbox("Target Entity Type:", options=["Principal", "Owner", "Coordinator"], key=f"entity_type_{tab_name}_{target_crm_school}")
-        
-        current_entity_data = crm_data["contacts"][target_crm_school].get(selected_entity_type, {"name": "", "phone": ""})
-        
-        input_contact_name = st.text_input(f"{selected_entity_type} Name:", value=current_entity_data.get("name", ""), key=f"cname_{tab_name}_{target_crm_school}_{selected_entity_type}")
-        input_phone = st.text_input(f"{selected_entity_type} Mobile (+91...):", value=current_entity_data.get("phone", ""), key=f"cphone_{tab_name}_{target_crm_school}_{selected_entity_type}")
-
-        if st.button(f"💾 Save {selected_entity_type} Contact to Supabase", key=f"save_contact_btn_{tab_name}_{target_crm_school}_{selected_entity_type}"):
-            crm_data["contacts"][target_crm_school][selected_entity_type] = {
-                "name": input_contact_name,
-                "phone": input_phone
-            }
-            save_crm_data_to_supabase(crm_data)
-            st.success(f"Successfully saved {selected_entity_type} details for {target_crm_school} to Supabase!")
-
-        active_phone = input_phone.strip()
-        if active_phone:
-            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
-            contact_greeting = input_contact_name if input_contact_name else selected_entity_type
-            quick_wa = urllib.parse.quote(f"Namaste {contact_greeting} ji, checking in from Onelearn Academic Team regarding {tab_name} metrics for {target_crm_school} - {current_filter_description}.")
-            st.markdown(f'<a href="tel:{active_phone}" target="_blank" style="text-decoration:none;"><button style="background-color:#2CA02C;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;margin-bottom:6px;width:100%;">📞 Call {selected_entity_type}</button></a>', unsafe_allow_html=True)
-            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={quick_wa}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">📱 Quick WhatsApp Message</button></a>', unsafe_allow_html=True)
-        else:
-            st.warning(f"Please enter and save a mobile number for the selected {selected_entity_type}.")
-
-    with c_col2:
-        st.markdown("##### 💬 WhatsApp & Calling Generators (Indian Context)")
-        custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}_{target_crm_school}")
-        
-        with st.expander("✨ AI-Driven Calling Script & Smart Message Generator (Voice & Text)"):
-            manager_voice_audio = st.audio_input("🎙️ Record Voice Instructions:", key=f"voice_input_{tab_name}_{target_crm_school}")
-            user_custom_instruction = st.text_area("Or Type Custom Instructions:", placeholder="e.g., Focus heavily on improving library engagement...", key=f"ai_custom_prompt_{tab_name}_{target_crm_school}")
-            
-            if st.button("Generate AI Script & Message", key=f"gen_ai_both_{tab_name}_{target_crm_school}"):
-                if not ai_client:
-                    st.error("Gemini API client is not initialized.")
-                else:
-                    ai_prompt = f"""
-                    You are an expert Academic Consultant. 
-                    Based on these filtered metrics for {tab_name} at {target_crm_school} ({current_filter_description}):
-                    Metrics & Breakdown: {metrics_summary_text}
-                    Target Entity: {selected_entity_type} named {input_contact_name or 'Sir/Madam'}
-                    Tone: {custom_tone}
-                    
-                    Generate two outputs: 1. Calling Script, 2. AI WhatsApp Follow-up Message. Sign off with 'Onelearn Academic Team'.
-                    """
-                    with st.spinner("Processing with Gemini..."):
-                        try:
-                            ai_result = get_gemini_summary(ai_prompt, audio_file_obj=manager_voice_audio)
-                            st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"] = ai_result
-                        except Exception as e:
-                            st.error(f"Error generating AI content: {e}")
-            
-            if f"ai_gen_output_{tab_name}_{target_crm_school}" in st.session_state:
-                st.markdown(st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"])
-
-        st.markdown("##### 📝 Quick WhatsApp Message Draft (Standard Template)")
-        draft_state_key = f"wa_draft_text_{tab_name}_{target_crm_school}_{selected_entity_type}"
-        name_prefix = f" {input_contact_name}" if input_contact_name and input_contact_name.strip() else ""
-        
-        default_template_string = (
-            f"Dear {name_prefix} ji,\n\n"
-            f"Here is the performance update for {target_crm_school} - {current_filter_description}:\n\n"
-            f"📊 *Module:* {tab_name}\n"
-            f"{metrics_summary_text}\n\n"
-            f"Regards,\n"
-            f"Harshit Bhargava,\n"
-            f"OneLearn Academic Team"
-        )
-
-        sync_track_key = f"last_raw_template_{tab_name}_{target_crm_school}_{selected_entity_type}"
-        if draft_state_key not in st.session_state or st.session_state.get(sync_track_key) != default_template_string:
-            st.session_state[draft_state_key] = default_template_string
-            st.session_state[sync_track_key] = default_template_string
-
-        editable_wa_area = st.text_area(
-            "Confirm or Edit Final WhatsApp Message Draft:",
-            value=st.session_state[draft_state_key],
-            height=140,
-            key=f"wa_textarea_{tab_name}_{target_crm_school}_{selected_entity_type}"
-        )
-        st.session_state[draft_state_key] = editable_wa_area
-
-        if active_phone:
-            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
-            encoded_final_text = urllib.parse.quote(editable_wa_area)
-            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
-
-
 # --- 2. MULTI-EMPLOYEE INGESTION SIDEBAR ---
+st.title("🏫 Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard")
+st.markdown("Track **School Portfolio Management**, **School WoW Velocity**, **Teacher Execution Tiers**, **Quantitative Performance Indicators (Lesson Prep / Library)**, and **360° Qualitative Evidences & Artifact Compliance**.")
+
 st.sidebar.header("📁 Multi-Employee Data Ingestion Portal")
 
-employee_name = st.sidebar.text_input("Enter Consultant Name:", value="Harshit Bhargava")
+employee_name = st.sidebar.text_input("Enter Consultant Name:", value="Harshit Bhargava")[cite: 1]
 employee_state = st.sidebar.selectbox("Select State / Zone (India Region):", [
     "Madhya Pradesh (MP)", "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", 
     "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", 
@@ -1072,54 +784,48 @@ if uploaded_files:
         for file in files_to_process:
             try:
                 temp_dict = pd.read_excel(file, sheet_name=None)
-                target_sheet = next((s for s in temp_dict.keys() if "usermetric" in s.lower()), list(temp_dict.keys())[0])
-                temp_df = temp_dict[target_sheet]
-                
-                if 'Institution' not in temp_df.columns:
-                    temp_df['Institution'] = "Default School"
+                # Ingest all valid sheets with logs, not just the first one
+                for sheet_name, temp_df in temp_dict.items():
+                    if temp_df is not None and not temp_df.empty:
+                        if 'Institution' not in temp_df.columns:
+                            temp_df['Institution'] = "Default School"
 
-                temp_df = normalize_identity_columns(temp_df)
-                
-                temp_df['Uploaded_By'] = employee_name
-                temp_df['State_Zone'] = employee_state
+                        temp_df = normalize_identity_columns(temp_df)
+                        temp_df['Uploaded_By'] = employee_name
+                        temp_df['State_Zone'] = employee_state
 
-                if temp_df['Institution'].eq('').all():
-                    temp_df['Institution'] = "Default School"
-                else:
-                    temp_df['Institution'] = temp_df['Institution'].replace('', 'Unknown School')
+                        if temp_df['Institution'].eq('').all():
+                            temp_df['Institution'] = "Default School"
+                        else:
+                            temp_df['Institution'] = temp_df['Institution'].replace('', 'Unknown School')
 
-                for col in ['Grade', 'Subject', 'Book']:
-                    if col not in temp_df.columns:
-                        temp_df[col] = ''
-                    else:
-                        temp_df[col] = temp_df[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
+                        for col in ['Grade', 'Subject', 'Book']:
+                            if col not in temp_df.columns:
+                                temp_df[col] = ''
+                            else:
+                                temp_df[col] = temp_df[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
 
-                def parse_time_mins(t_str):
-                    try:
-                        parts = str(t_str).split(':')
-                        return int(parts[0])*60 + int(parts[1]) + float(parts[2])/60.0
-                    except:
-                        return 0.0
+                        if 'Duration (HH:MM:SS)' in temp_df.columns:
+                            temp_df['Duration_Min'] = temp_df['Duration (HH:MM:SS)'].apply(_parse_time_mins)
+                        elif 'Duration (Minutes)' in temp_df.columns:
+                            temp_df['Duration_Min'] = temp_df['Duration (Minutes)'].apply(_parse_time_mins)
+                        elif 'Duration_Min' in temp_df.columns:
+                            temp_df['Duration_Min'] = temp_df['Duration_Min'].apply(_parse_time_mins)
+                        else:
+                            temp_df['Duration_Min'] = 0.0
 
-                if 'Duration (HH:MM:SS)' in temp_df.columns:
-                    temp_df['Duration_Min'] = temp_df['Duration (HH:MM:SS)'].apply(parse_time_mins)
-                elif 'Duration (Minutes)' in temp_df.columns:
-                    temp_df['Duration_Min'] = pd.to_numeric(temp_df['Duration (Minutes)'], errors='coerce').fillna(0.0)
-                else:
-                    temp_df['Duration_Min'] = 0.0
+                        if 'Type' in temp_df.columns:
+                            temp_df['Type'] = temp_df['Type'].fillna('Other').astype(str)
 
-                if 'Type' in temp_df.columns:
-                    temp_df['Type'] = temp_df['Type'].fillna('Other').astype(str)
+                        for dt_col in ['StartTime', 'EndTime']:
+                            if dt_col in temp_df.columns:
+                                temp_df[dt_col] = pd.to_datetime(temp_df[dt_col], errors='coerce')
 
-                for dt_col in ['StartTime', 'EndTime']:
-                    if dt_col in temp_df.columns:
-                        temp_df[dt_col] = pd.to_datetime(temp_df[dt_col], errors='coerce')
+                        for qual_col in ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Assessment_Score_Pct']:
+                            if qual_col not in temp_df.columns:
+                                temp_df[qual_col] = None
 
-                for qual_col in ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Assessment_Score_Pct']:
-                    if qual_col not in temp_df.columns:
-                        temp_df[qual_col] = None
-
-                new_processed_dfs.append(temp_df)
+                        new_processed_dfs.append(temp_df)
             except Exception as e:
                 st.sidebar.error(f"Error reading {file.name}: {e}")
 
