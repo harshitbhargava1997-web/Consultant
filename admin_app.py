@@ -76,7 +76,7 @@ def normalize_identity_columns(df):
     return out
 
 
-@st.cache_data(ttl=60, show_spinner="Querying PostgreSQL directly...")
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_master_db_from_supabase():
     """Fetches all teacher records directly using native PostgreSQL execution."""
     query = """
@@ -107,7 +107,7 @@ def fetch_master_db_from_supabase():
 
 
 # --- CACHED SUPABASE PERSISTENCE FOR CRM CONTACTS & CALL LOGS ---
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600, show_spinner=False)
 def load_crm_data_from_supabase():
     try:
         response = supabase.storage.from_(BUCKET_NAME).download(CRM_FILE_NAME)
@@ -131,7 +131,7 @@ def save_crm_data_to_supabase(crm_data):
         st.error(f"Could not sync CRM data to Supabase: {e}")
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600, show_spinner=False)
 def load_call_logs_from_supabase():
     try:
         response = supabase.storage.from_(BUCKET_NAME).download(CALL_LOGS_FILE_NAME)
@@ -171,7 +171,8 @@ def upload_pdf_to_supabase(pdf_buffer, school_name):
         return None
 
 
-def build_teacher_roster(df):
+@st.cache_data(show_spinner=False)
+def build_teacher_roster_cached(df):
     if df is None or df.empty:
         return pd.DataFrame(columns=["Institution", "Center", "FirstName", "LastName", "FullName", "Role", "Uploaded_By", "State_Zone"])
 
@@ -235,9 +236,10 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
     if "contacts" not in crm_data:
         crm_data["contacts"] = {}
 
+    target_crm_school = active_school
+
     c_col1, c_col2 = st.columns([1, 2])
     with c_col1:
-        target_crm_school = active_school
         st.write(f"🏫 **Target School:** `{target_crm_school}`")
         
         if target_crm_school not in crm_data["contacts"]:
@@ -248,14 +250,14 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
             }
 
         st.markdown("##### 👥 Select Entity & Contact Details")
-        selected_entity_type = st.selectbox("Target Entity Type:", options=["Principal", "Owner", "Coordinator"], key=f"entity_type_{tab_name}")
+        selected_entity_type = st.selectbox("Target Entity Type:", options=["Principal", "Owner", "Coordinator"], key=f"entity_type_{tab_name}_{target_crm_school}")
         
         current_entity_data = crm_data["contacts"][target_crm_school].get(selected_entity_type, {"name": "", "phone": ""})
         
-        input_contact_name = st.text_input(f"{selected_entity_type} Name:", value=current_entity_data.get("name", ""), key=f"cname_{tab_name}_{selected_entity_type}")
-        input_phone = st.text_input(f"{selected_entity_type} Mobile (+91...):", value=current_entity_data.get("phone", ""), key=f"cphone_{tab_name}_{selected_entity_type}")
+        input_contact_name = st.text_input(f"{selected_entity_type} Name:", value=current_entity_data.get("name", ""), key=f"cname_{tab_name}_{target_crm_school}_{selected_entity_type}")
+        input_phone = st.text_input(f"{selected_entity_type} Mobile (+91...):", value=current_entity_data.get("phone", ""), key=f"cphone_{tab_name}_{target_crm_school}_{selected_entity_type}")
 
-        if st.button(f"💾 Save {selected_entity_type} Contact to Supabase", key=f"save_contact_btn_{tab_name}_{selected_entity_type}"):
+        if st.button(f"💾 Save {selected_entity_type} Contact to Supabase", key=f"save_contact_btn_{tab_name}_{target_crm_school}_{selected_entity_type}"):
             crm_data["contacts"][target_crm_school][selected_entity_type] = {
                 "name": input_contact_name,
                 "phone": input_phone
@@ -276,7 +278,7 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
     with c_col2:
         st.markdown("##### 💬 WhatsApp & Calling Generators (Indian Context)")
         
-        custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}")
+        custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}_{target_crm_school}")
         
         with st.expander("✨ AI-Driven Calling Script & Smart Message Generator (Voice & Text)"):
             manager_voice_audio = st.audio_input(
@@ -289,7 +291,7 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
                 key=f"ai_custom_prompt_{tab_name}_{target_crm_school}"
             )
             
-            if st.button("Generate AI Script & Message", key=f"gen_ai_both_{tab_name}"):
+            if st.button("Generate AI Script & Message", key=f"gen_ai_both_{tab_name}_{target_crm_school}"):
                 if not ai_client:
                     st.error("Gemini API client is not initialized.")
                 else:
@@ -317,10 +319,18 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
 
         st.markdown("##### 📝 Quick WhatsApp Message Draft (Full School Audit)")
         draft_state_key = f"wa_draft_text_{tab_name}_{target_crm_school}_{selected_entity_type}"
-        if draft_state_key not in st.session_state:
+        sync_track_key = f"last_raw_msg_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        
+        if draft_state_key not in st.session_state or st.session_state.get(sync_track_key) != school_audit_whatsapp_message:
             st.session_state[draft_state_key] = school_audit_whatsapp_message
+            st.session_state[sync_track_key] = school_audit_whatsapp_message
 
-        editable_wa_area = st.text_area("Confirm or Edit Final WhatsApp Message Draft:", value=st.session_state[draft_state_key], height=220, key=f"wa_textarea_{tab_name}_{selected_entity_type}")
+        editable_wa_area = st.text_area(
+            "Confirm or Edit Final WhatsApp Message Draft:",
+            value=st.session_state[draft_state_key],
+            height=220,
+            key=f"wa_textarea_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        )
         st.session_state[draft_state_key] = editable_wa_area
 
         if active_phone:
@@ -335,12 +345,12 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
     with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}"):
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}")
+            call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}_{target_crm_school}")
         with col_f2:
-            next_followup_date = st.date_input("Next Scheduled Follow-up Date:", value=pd.Timestamp.now().date() + pd.Timedelta(days=7), key=f"fdate_{tab_name}")
+            next_followup_date = st.date_input("Next Scheduled Follow-up Date:", value=pd.Timestamp.now().date() + pd.Timedelta(days=7), key=f"fdate_{tab_name}_{target_crm_school}")
             
-        discussion_notes = st.text_area("Discussion Summary / Notes from Call:", placeholder="Punch key talking points, agreed commitments, and action items...", key=f"dnotes_{tab_name}")
-        call_status_opt = st.selectbox("Call Status / Resolution:", options=["Open Action Item", "In Progress", "Successfully Resolved"], key=f"cstat_{tab_name}")
+        discussion_notes = st.text_area("Discussion Summary / Notes from Call:", placeholder="Punch key talking points, agreed commitments, and action items...", key=f"dnotes_{tab_name}_{target_crm_school}")
+        call_status_opt = st.selectbox("Call Status / Resolution:", options=["Open Action Item", "In Progress", "Successfully Resolved"], key=f"cstat_{tab_name}_{target_crm_school}")
         
         submit_call_log = st.form_submit_button("💾 Save Call Note & Sync to Supabase Cloud")
         
@@ -388,10 +398,10 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
                     data=output_buffer,
                     file_name=f"School_CRM_Call_Logs_{target_crm_school.replace(' ', '_')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_excel_{tab_name}"
+                    key=f"dl_excel_{tab_name}_{target_crm_school}"
                 )
             with dl_col2:
-                if st.button("🗑️ Clear Call Logs for this School", key=f"clear_logs_btn_{tab_name}"):
+                if st.button("🗑️ Clear Call Logs for this School", key=f"clear_logs_btn_{tab_name}_{target_crm_school}"):
                     st.session_state["crm_call_logs_store"] = [l for l in st.session_state["crm_call_logs_store"] if l.get("School") != target_crm_school]
                     save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
                     st.success(f"Successfully cleared call logs for {target_crm_school}!")
@@ -436,14 +446,14 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
             }
 
         st.markdown("##### 👥 Select Entity & Contact Details")
-        selected_entity_type = st.selectbox("Target Entity Type:", options=["Principal", "Owner", "Coordinator"], key=f"entity_type_{tab_name}")
+        selected_entity_type = st.selectbox("Target Entity Type:", options=["Principal", "Owner", "Coordinator"], key=f"entity_type_{tab_name}_{target_crm_school}")
         
         current_entity_data = crm_data["contacts"][target_crm_school].get(selected_entity_type, {"name": "", "phone": ""})
         
-        input_contact_name = st.text_input(f"{selected_entity_type} Name:", value=current_entity_data.get("name", ""), key=f"cname_{tab_name}_{selected_entity_type}")
-        input_phone = st.text_input(f"{selected_entity_type} Mobile (+91...):", value=current_entity_data.get("phone", ""), key=f"cphone_{tab_name}_{selected_entity_type}")
+        input_contact_name = st.text_input(f"{selected_entity_type} Name:", value=current_entity_data.get("name", ""), key=f"cname_{tab_name}_{target_crm_school}_{selected_entity_type}")
+        input_phone = st.text_input(f"{selected_entity_type} Mobile (+91...):", value=current_entity_data.get("phone", ""), key=f"cphone_{tab_name}_{target_crm_school}_{selected_entity_type}")
 
-        if st.button(f"💾 Save {selected_entity_type} Contact to Supabase", key=f"save_contact_btn_{tab_name}_{selected_entity_type}"):
+        if st.button(f"💾 Save {selected_entity_type} Contact to Supabase", key=f"save_contact_btn_{tab_name}_{target_crm_school}_{selected_entity_type}"):
             crm_data["contacts"][target_crm_school][selected_entity_type] = {
                 "name": input_contact_name,
                 "phone": input_phone
@@ -463,13 +473,13 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
 
     with c_col2:
         st.markdown("##### 💬 WhatsApp & Calling Generators (Indian Context)")
-        custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}")
+        custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}_{target_crm_school}")
         
         with st.expander("✨ AI-Driven Calling Script & Smart Message Generator (Voice & Text)"):
             manager_voice_audio = st.audio_input("🎙️ Record Voice Instructions:", key=f"voice_input_{tab_name}_{target_crm_school}")
             user_custom_instruction = st.text_area("Or Type Custom Instructions:", placeholder="e.g., Focus heavily on improving library engagement...", key=f"ai_custom_prompt_{tab_name}_{target_crm_school}")
             
-            if st.button("Generate AI Script & Message", key=f"gen_ai_both_{tab_name}"):
+            if st.button("Generate AI Script & Message", key=f"gen_ai_both_{tab_name}_{target_crm_school}"):
                 if not ai_client:
                     st.error("Gemini API client is not initialized.")
                 else:
@@ -506,11 +516,17 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
             f"OneLearn Academic Team"
         )
 
-        if draft_state_key not in st.session_state or st.session_state.get(f"last_name_{tab_name}") != input_contact_name:
+        sync_track_key = f"last_raw_template_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        if draft_state_key not in st.session_state or st.session_state.get(sync_track_key) != default_template_string:
             st.session_state[draft_state_key] = default_template_string
-            st.session_state[f"last_name_{tab_name}"] = input_contact_name
+            st.session_state[sync_track_key] = default_template_string
 
-        editable_wa_area = st.text_area("Confirm or Edit Final WhatsApp Message Draft:", value=st.session_state[draft_state_key], height=140, key=f"wa_textarea_{tab_name}_{selected_entity_type}")
+        editable_wa_area = st.text_area(
+            "Confirm or Edit Final WhatsApp Message Draft:",
+            value=st.session_state[draft_state_key],
+            height=140,
+            key=f"wa_textarea_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        )
         st.session_state[draft_state_key] = editable_wa_area
 
         if active_phone:
@@ -524,12 +540,12 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
     with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}"):
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}")
+            call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}_{target_crm_school}")
         with col_f2:
-            next_followup_date = st.date_input("Next Scheduled Follow-up Date:", value=pd.Timestamp.now().date() + pd.Timedelta(days=7), key=f"fdate_{tab_name}")
+            next_followup_date = st.date_input("Next Scheduled Follow-up Date:", value=pd.Timestamp.now().date() + pd.Timedelta(days=7), key=f"fdate_{tab_name}_{target_crm_school}")
             
-        discussion_notes = st.text_area("Discussion Summary / Notes from Call:", placeholder="Punch key talking points, agreed commitments, and action items...", key=f"dnotes_{tab_name}")
-        call_status_opt = st.selectbox("Call Status / Resolution:", options=["Open Action Item", "In Progress", "Successfully Resolved"], key=f"cstat_{tab_name}")
+        discussion_notes = st.text_area("Discussion Summary / Notes from Call:", placeholder="Punch key talking points, agreed commitments, and action items...", key=f"dnotes_{tab_name}_{target_crm_school}")
+        call_status_opt = st.selectbox("Call Status / Resolution:", options=["Open Action Item", "In Progress", "Successfully Resolved"], key=f"cstat_{tab_name}_{target_crm_school}")
         
         submit_call_log = st.form_submit_button("💾 Save Call Note & Sync to Supabase Cloud")
         
@@ -577,10 +593,10 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
                     data=output_buffer,
                     file_name=f"School_CRM_Call_Logs_{target_crm_school.replace(' ', '_')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_excel_{tab_name}"
+                    key=f"dl_excel_{tab_name}_{target_crm_school}"
                 )
             with dl_col2:
-                if st.button("🗑️ Clear Call Logs for this School", key=f"clear_logs_btn_{tab_name}"):
+                if st.button("🗑️ Clear Call Logs for this School", key=f"clear_logs_btn_{tab_name}_{target_crm_school}"):
                     st.session_state["crm_call_logs_store"] = [l for l in st.session_state["crm_call_logs_store"] if l.get("School") != target_crm_school]
                     save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
                     st.success(f"Successfully cleared call logs for {target_crm_school}!")
@@ -936,7 +952,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         else:
             pdf_book_items.append("No textbooks or digital modules opened.")
 
-        # Clean, Masked Clickable Hyperlinks for PDF
         pdf_link_items = []
         for i, item in enumerate(v_voice, 1): 
             pdf_link_items.append(f'• 🎧 <a href="{item["url"]}"><u><b>Open Voice Reflection #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
@@ -1263,7 +1278,7 @@ else:
         df['Month_Name'] = "N/A"
         df['Week'] = "N/A"
 
-    master_teacher_roster = build_teacher_roster(df)
+    master_teacher_roster = build_teacher_roster_cached(df)
     if master_teacher_roster.empty:
         master_teacher_roster = pd.DataFrame(columns=['Institution', 'FullName', 'Uploaded_By', 'State_Zone'])
     else:
@@ -1401,19 +1416,22 @@ else:
     filtered_roster = school_master_roster[school_master_roster['FullName'].isin(selected_teachers)]
     filtered_df = filtered_df[filtered_df['FullName'].isin(selected_teachers)]
 
-    # --- SIDEBAR DIRECT EXCEL EXPORT ---
+    # --- SIDEBAR DIRECT EXCEL EXPORT (Only on click) ---
     st.sidebar.markdown("---")
     st.sidebar.subheader("📥 Direct Admin Master Export")
-    buf_master_xlsx = BytesIO()
-    with pd.ExcelWriter(buf_master_xlsx, engine='openpyxl') as writer:
-        filtered_df.to_excel(writer, index=False, sheet_name="Filtered_Database_Logs")
-    buf_master_xlsx.seek(0)
-    st.sidebar.download_button(
-        label="📥 Download Filtered Master DB (Excel)",
-        data=buf_master_xlsx,
-        file_name=f"Master_Database_Export_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    if st.sidebar.button("📦 Prepare Master DB Export"):
+        buf_master_xlsx = BytesIO()
+        with pd.ExcelWriter(buf_master_xlsx, engine='openpyxl') as writer:
+            filtered_df.to_excel(writer, index=False, sheet_name="Filtered_Database_Logs")
+        st.session_state["master_db_export_ready"] = buf_master_xlsx.getvalue()
+
+    if "master_db_export_ready" in st.session_state:
+        st.sidebar.download_button(
+            label="📥 Download Prepared Master DB (Excel)",
+            data=st.session_state["master_db_export_ready"],
+            file_name=f"Master_Database_Export_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     # 7 Dedicated Active Tabs
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
@@ -1430,7 +1448,6 @@ else:
     with tab1:
         st.header("📘 Lesson Plan Preparation Tracker")
         
-        # In-tab scoped filter
         tab1_col_f1, tab1_col_f2 = st.columns(2)
         with tab1_col_f1:
             tab1_schools = ["All Selected Schools"] + sorted([s for s in filtered_df['Institution'].unique() if str(s).strip()])
@@ -1501,43 +1518,53 @@ else:
 
         col_t1_d1, col_t1_d2 = st.columns(2)
         with col_t1_d1:
-            st.download_button(
-                label="📄 Download Tab 1 Report (PDF)",
-                data=lambda: generate_comprehensive_school_pdf_report(
-                    school_name=selected_schools[0] if len(selected_schools) == 1 else "Multiple Schools Portfolio",
-                    teachers_list=filtered_roster['FullName'].unique().tolist(),
-                    school_filtered_df=school_filtered_df,
-                    filtered_df=filtered_df,
-                    filter_desc=filter_description_text,
-                    calc_ld_kpi=calc_ld_kpi,
-                    calc_lib_kpi=calc_lib_kpi,
-                    daily_ld_target=daily_ld_target,
-                    daily_lib_target=daily_lib_target,
-                    selected_num_days=selected_num_days,
-                    target_vid_count=target_vid_count,
-                    target_writing_count=target_writing_count,
-                    target_lp_combo_count=target_lp_combo_count,
-                    target_phonics_count=target_phonics_count,
-                    target_portfolio_count=target_portfolio_count,
-                    enable_quant_kpi=enable_quant_kpi,
-                    enable_qual_kpi=enable_qual_kpi
-                ).getvalue(),
-                file_name=f"Lesson_Plan_Prep_Report_{selected_month.replace(' ', '_')}.pdf",
-                mime="application/pdf",
-                key="btn_pdf_tab1"
-            )
+            if st.button("⚙️ Compile Tab 1 PDF Report", key="prep_pdf_tab1_btn"):
+                with st.spinner("Compiling PDF report..."):
+                    pdf_bytes = generate_comprehensive_school_pdf_report(
+                        school_name=selected_schools[0] if len(selected_schools) == 1 else "Multiple Schools Portfolio",
+                        teachers_list=filtered_roster['FullName'].unique().tolist(),
+                        school_filtered_df=school_filtered_df,
+                        filtered_df=filtered_df,
+                        filter_desc=filter_description_text,
+                        calc_ld_kpi=calc_ld_kpi,
+                        calc_lib_kpi=calc_lib_kpi,
+                        daily_ld_target=daily_ld_target,
+                        daily_lib_target=daily_lib_target,
+                        selected_num_days=selected_num_days,
+                        target_vid_count=target_vid_count,
+                        target_writing_count=target_writing_count,
+                        target_lp_combo_count=target_lp_combo_count,
+                        target_phonics_count=target_phonics_count,
+                        target_portfolio_count=target_portfolio_count,
+                        enable_quant_kpi=enable_quant_kpi,
+                        enable_qual_kpi=enable_qual_kpi
+                    ).getvalue()
+                    st.session_state["tab1_pdf_ready"] = pdf_bytes
+
+            if "tab1_pdf_ready" in st.session_state:
+                st.download_button(
+                    label="📄 Download Tab 1 Report (PDF)",
+                    data=st.session_state["tab1_pdf_ready"],
+                    file_name=f"Lesson_Plan_Prep_Report_{selected_month.replace(' ', '_')}.pdf",
+                    mime="application/pdf",
+                    key="btn_pdf_tab1"
+                )
+
         with col_t1_d2:
-            buf_t1_xlsx = BytesIO()
-            with pd.ExcelWriter(buf_t1_xlsx, engine='openpyxl') as writer:
-                display_ld_table.to_excel(writer, index=False, sheet_name="Lesson_Prep_Logs")
-            buf_t1_xlsx.seek(0)
-            st.download_button(
-                label="📥 Download Tab 1 Data (Excel)",
-                data=buf_t1_xlsx,
-                file_name=f"Lesson_Plan_Prep_{selected_month.replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="btn_xlsx_tab1"
-            )
+            if st.button("⚙️ Prepare Tab 1 Excel Export", key="prep_xlsx_tab1_btn"):
+                buf_t1_xlsx = BytesIO()
+                with pd.ExcelWriter(buf_t1_xlsx, engine='openpyxl') as writer:
+                    display_ld_table.to_excel(writer, index=False, sheet_name="Lesson_Prep_Logs")
+                st.session_state["tab1_xlsx_ready"] = buf_t1_xlsx.getvalue()
+
+            if "tab1_xlsx_ready" in st.session_state:
+                st.download_button(
+                    label="📥 Download Tab 1 Data (Excel)",
+                    data=st.session_state["tab1_xlsx_ready"],
+                    file_name=f"Lesson_Plan_Prep_{selected_month.replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="btn_xlsx_tab1"
+                )
 
         teacher_prep_breakdown = "\n\n".join([f"• **{r['FullName']}**: {r['Duration_Min']:.1f} mins ({r['Performance Indicator Status']})" for _, r in ld_daily.iterrows()])
         tab1_metrics_summary = (
@@ -1551,7 +1578,6 @@ else:
     with tab2:
         st.header("📚 Library Usage Tracker")
         
-        # In-tab scoped filter
         tab2_col_f1, tab2_col_f2 = st.columns(2)
         with tab2_col_f1:
             tab2_schools = ["All Selected Schools"] + sorted([s for s in filtered_df['Institution'].unique() if str(s).strip()])
@@ -1622,43 +1648,53 @@ else:
 
         col_t2_d1, col_t2_d2 = st.columns(2)
         with col_t2_d1:
-            st.download_button(
-                label="📄 Download Tab 2 Report (PDF)",
-                data=lambda: generate_comprehensive_school_pdf_report(
-                    school_name=selected_schools[0] if len(selected_schools) == 1 else "Multiple Schools Portfolio",
-                    teachers_list=filtered_roster['FullName'].unique().tolist(),
-                    school_filtered_df=school_filtered_df,
-                    filtered_df=filtered_df,
-                    filter_desc=filter_description_text,
-                    calc_ld_kpi=calc_ld_kpi,
-                    calc_lib_kpi=calc_lib_kpi,
-                    daily_ld_target=daily_ld_target,
-                    daily_lib_target=daily_lib_target,
-                    selected_num_days=selected_num_days,
-                    target_vid_count=target_vid_count,
-                    target_writing_count=target_writing_count,
-                    target_lp_combo_count=target_lp_combo_count,
-                    target_phonics_count=target_phonics_count,
-                    target_portfolio_count=target_portfolio_count,
-                    enable_quant_kpi=enable_quant_kpi,
-                    enable_qual_kpi=enable_qual_kpi
-                ).getvalue(),
-                file_name=f"Library_Usage_Report_{selected_month.replace(' ', '_')}.pdf",
-                mime="application/pdf",
-                key="btn_pdf_tab2"
-            )
+            if st.button("⚙️ Compile Tab 2 PDF Report", key="prep_pdf_tab2_btn"):
+                with st.spinner("Compiling PDF report..."):
+                    pdf_bytes = generate_comprehensive_school_pdf_report(
+                        school_name=selected_schools[0] if len(selected_schools) == 1 else "Multiple Schools Portfolio",
+                        teachers_list=filtered_roster['FullName'].unique().tolist(),
+                        school_filtered_df=school_filtered_df,
+                        filtered_df=filtered_df,
+                        filter_desc=filter_description_text,
+                        calc_ld_kpi=calc_ld_kpi,
+                        calc_lib_kpi=calc_lib_kpi,
+                        daily_ld_target=daily_ld_target,
+                        daily_lib_target=daily_lib_target,
+                        selected_num_days=selected_num_days,
+                        target_vid_count=target_vid_count,
+                        target_writing_count=target_writing_count,
+                        target_lp_combo_count=target_lp_combo_count,
+                        target_phonics_count=target_phonics_count,
+                        target_portfolio_count=target_portfolio_count,
+                        enable_quant_kpi=enable_quant_kpi,
+                        enable_qual_kpi=enable_qual_kpi
+                    ).getvalue()
+                    st.session_state["tab2_pdf_ready"] = pdf_bytes
+
+            if "tab2_pdf_ready" in st.session_state:
+                st.download_button(
+                    label="📄 Download Tab 2 Report (PDF)",
+                    data=st.session_state["tab2_pdf_ready"],
+                    file_name=f"Library_Usage_Report_{selected_month.replace(' ', '_')}.pdf",
+                    mime="application/pdf",
+                    key="btn_pdf_tab2"
+                )
+
         with col_t2_d2:
-            buf_t2_xlsx = BytesIO()
-            with pd.ExcelWriter(buf_t2_xlsx, engine='openpyxl') as writer:
-                display_lib_table.to_excel(writer, index=False, sheet_name="Library_Usage_Logs")
-            buf_t2_xlsx.seek(0)
-            st.download_button(
-                label="📥 Download Tab 2 Data (Excel)",
-                data=buf_t2_xlsx,
-                file_name=f"Library_Usage_{selected_month.replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="btn_xlsx_tab2"
-            )
+            if st.button("⚙️ Prepare Tab 2 Excel Export", key="prep_xlsx_tab2_btn"):
+                buf_t2_xlsx = BytesIO()
+                with pd.ExcelWriter(buf_t2_xlsx, engine='openpyxl') as writer:
+                    display_lib_table.to_excel(writer, index=False, sheet_name="Library_Usage_Logs")
+                st.session_state["tab2_xlsx_ready"] = buf_t2_xlsx.getvalue()
+
+            if "tab2_xlsx_ready" in st.session_state:
+                st.download_button(
+                    label="📥 Download Tab 2 Data (Excel)",
+                    data=st.session_state["tab2_xlsx_ready"],
+                    file_name=f"Library_Usage_{selected_month.replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="btn_xlsx_tab2"
+                )
 
         teacher_lib_breakdown = "\n\n".join([f"• **{r['FullName']}**: {r['Duration_Min']:.1f} mins ({r['Performance Indicator Status']})" for _, r in lib_daily.iterrows()])
         tab2_metrics_summary = (
@@ -1759,35 +1795,44 @@ else:
 
                 col_d1, col_d2 = st.columns(2)
                 with col_d1:
-                    buf_t3_xlsx = BytesIO()
-                    with pd.ExcelWriter(buf_t3_xlsx, engine='openpyxl') as writer:
-                        display_content_log.to_excel(writer, index=False, sheet_name='Content_Log')
-                    buf_t3_xlsx.seek(0)
-                    st.download_button(
-                        label="📥 Download Content Log (Excel)",
-                        data=buf_t3_xlsx,
-                        file_name=f"Content_Log_{selected_month.replace(' ', '_')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="btn_xlsx_tab3"
-                    )
+                    if st.button("⚙️ Prepare Content Excel Export", key="prep_xlsx_tab3_btn"):
+                        buf_t3_xlsx = BytesIO()
+                        with pd.ExcelWriter(buf_t3_xlsx, engine='openpyxl') as writer:
+                            display_content_log.to_excel(writer, index=False, sheet_name='Content_Log')
+                        st.session_state["tab3_xlsx_ready"] = buf_t3_xlsx.getvalue()
+
+                    if "tab3_xlsx_ready" in st.session_state:
+                        st.download_button(
+                            label="📥 Download Content Log (Excel)",
+                            data=st.session_state["tab3_xlsx_ready"],
+                            file_name=f"Content_Log_{selected_month.replace(' ', '_')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="btn_xlsx_tab3"
+                        )
                 with col_d2:
-                    st.download_button(
-                        label="📄 Download Tab 3 Content Report (PDF)",
-                        data=lambda: generate_pdf_report(
-                            title_text="📖 Textbooks & Digital Content Usage Report",
-                            subtitle_text=f"Teacher: {t3_teacher} | Subject: {t3_subject}",
-                            school_name=t3_school,
-                            summary_metrics={
-                                "Chapters Opened": t3_df['Book'].nunique(),
-                                "Subjects Taught": t3_df['Subject'].nunique(),
-                                "Total Duration": f"{t3_df['Duration_Min'].sum():.1f} Mins"
-                            },
-                            dataframe=display_content_log[['School', 'Teacher Name', 'Grade', 'Subject', 'Book', 'Minutes']].head(30)
-                        ).getvalue(),
-                        file_name=f"Content_Usage_Report_{selected_month.replace(' ', '_')}.pdf",
-                        mime="application/pdf",
-                        key="btn_pdf_tab3"
-                    )
+                    if st.button("⚙️ Compile Content PDF Report", key="prep_pdf_tab3_btn"):
+                        with st.spinner("Compiling Content PDF..."):
+                            pdf_t3 = generate_pdf_report(
+                                title_text="📖 Textbooks & Digital Content Usage Report",
+                                subtitle_text=f"Teacher: {t3_teacher} | Subject: {t3_subject}",
+                                school_name=t3_school,
+                                summary_metrics={
+                                    "Chapters Opened": t3_df['Book'].nunique(),
+                                    "Subjects Taught": t3_df['Subject'].nunique(),
+                                    "Total Duration": f"{t3_df['Duration_Min'].sum():.1f} Mins"
+                                },
+                                dataframe=display_content_log[['School', 'Teacher Name', 'Grade', 'Subject', 'Book', 'Minutes']].head(30)
+                            ).getvalue()
+                            st.session_state["tab3_pdf_ready"] = pdf_t3
+
+                    if "tab3_pdf_ready" in st.session_state:
+                        st.download_button(
+                            label="📄 Download Tab 3 Content Report (PDF)",
+                            data=st.session_state["tab3_pdf_ready"],
+                            file_name=f"Content_Usage_Report_{selected_month.replace(' ', '_')}.pdf",
+                            mime="application/pdf",
+                            key="btn_pdf_tab3"
+                        )
 
                 book_breakdown_summary = "\n\n".join([f"• {r['Book']} ({r['Grade']} - {r['Subject']}): {r['Duration_Min']:.1f} mins" for _, r in t3_df.groupby(['Book', 'Grade', 'Subject'])['Duration_Min'].sum().reset_index().iterrows()])
                 tab3_metrics_summary = (
@@ -1801,7 +1846,6 @@ else:
         st.header("👤 Teacher 360° Performance Profile")
         st.caption("Review quantitative lesson metrics, detailed textbook time logs, and structured qualitative performance evidence with clickable artifact links.")
 
-        # In-tab scoped filter
         t4_fcol1, t4_fcol2 = st.columns(2)
         with t4_fcol1:
             t4_schools = ["All Selected Schools"] + sorted([s for s in school_master_roster['Institution'].unique() if str(s).strip()])
@@ -1818,8 +1862,6 @@ else:
                 target_teacher = st.selectbox("Select Teacher to Audit:", options=all_roster_teachers, key="top_teacher_select")
         
         if target_teacher:
-            col_btn_top, col_bulk_btn = st.columns(2)
-            
             teacher_all_data = school_filtered_df[school_filtered_df['FullName'] == target_teacher]
             teacher_date_data = filtered_df[filtered_df['FullName'] == target_teacher]
             teacher_school = school_master_roster[school_master_roster['FullName'] == target_teacher]['Institution'].values[0] if not school_master_roster[school_master_roster['FullName'] == target_teacher].empty else "N/A"
@@ -1899,61 +1941,68 @@ else:
                 "3. Activity Evidence, Activity Submission, and Artifact Evidence": pdf_link_items if pdf_link_items else ["No activity or evidence submission links recorded in active window."]
             }
 
-            def build_t4_summary_pdf():
-                return generate_pdf_report(
-                    title_text=f"🏫 Academic Performance Profile: {target_teacher}",
-                    subtitle_text=f"Observation Window: {filter_description_text}",
-                    school_name=teacher_school,
-                    summary_metrics={
-                        "Teacher": target_teacher,
-                        "Lesson Prep": f"{t_day_ld:.1f}m",
-                        "Library Usage": f"{t_day_lib:.1f}m",
-                        "Phonics / Portfolio": f"{len(v_phonics)} / {len(v_portfolio)}",
-                        "Activity Submissions": f"{total_artifacts}"
-                    },
-                    dataframe=None,
-                    custom_sections=pdf_custom_sections
-                ).getvalue()
-
-            def build_t4_bulk_pdf():
-                school_teachers_list = sorted(school_master_roster[school_master_roster['Institution'] == teacher_school]['FullName'].unique().tolist())
-                return generate_comprehensive_school_pdf_report(
-                    school_name=teacher_school,
-                    teachers_list=school_teachers_list,
-                    school_filtered_df=school_filtered_df,
-                    filtered_df=filtered_df,
-                    filter_desc=filter_description_text,
-                    calc_ld_kpi=calc_ld_kpi,
-                    calc_lib_kpi=calc_lib_kpi,
-                    daily_ld_target=daily_ld_target,
-                    daily_lib_target=daily_lib_target,
-                    selected_num_days=selected_num_days,
-                    target_vid_count=target_vid_count,
-                    target_writing_count=target_writing_count,
-                    target_lp_combo_count=target_lp_combo_count,
-                    target_phonics_count=target_phonics_count,
-                    target_portfolio_count=target_portfolio_count,
-                    enable_quant_kpi=enable_quant_kpi,
-                    enable_qual_kpi=enable_qual_kpi
-                ).getvalue()
-
+            col_btn_top, col_bulk_btn = st.columns(2)
             with col_btn_top:
-                st.download_button(
-                    label="📥 Download 360° Profile (PDF)",
-                    data=build_t4_summary_pdf,
-                    file_name=f"{target_teacher.replace(' ', '_')}_360_Profile_Report.pdf",
-                    mime="application/pdf",
-                    key="top_pdf_download_btn"
-                )
+                if st.button(f"⚙️ Compile 360° Profile PDF for {target_teacher}", key="btn_prep_single_pdf"):
+                    with st.spinner("Generating teacher profile PDF..."):
+                        single_pdf = generate_pdf_report(
+                            title_text=f"🏫 Academic Performance Profile: {target_teacher}",
+                            subtitle_text=f"Observation Window: {filter_description_text}",
+                            school_name=teacher_school,
+                            summary_metrics={
+                                "Teacher": target_teacher,
+                                "Lesson Prep": f"{t_day_ld:.1f}m",
+                                "Library Usage": f"{t_day_lib:.1f}m",
+                                "Phonics / Portfolio": f"{len(v_phonics)} / {len(v_portfolio)}",
+                                "Activity Submissions": f"{total_artifacts}"
+                            },
+                            dataframe=None,
+                            custom_sections=pdf_custom_sections
+                        ).getvalue()
+                        st.session_state[f"pdf_360_{target_teacher}"] = single_pdf
+
+                if f"pdf_360_{target_teacher}" in st.session_state:
+                    st.download_button(
+                        label="📥 Download 360° Profile (PDF)",
+                        data=st.session_state[f"pdf_360_{target_teacher}"],
+                        file_name=f"{target_teacher.replace(' ', '_')}_360_Profile_Report.pdf",
+                        mime="application/pdf",
+                        key="top_pdf_download_btn"
+                    )
 
             with col_bulk_btn:
-                st.download_button(
-                    label="📥 Download Bulk School 360 Profiles (PDF)",
-                    data=build_t4_bulk_pdf,
-                    file_name=f"{teacher_school.replace(' ', '_')}_Comprehensive_School_Report.pdf",
-                    mime="application/pdf",
-                    key="bulk_school_pdf_btn"
-                )
+                if st.button(f"⚙️ Compile Bulk School PDF for {teacher_school}", key="btn_prep_bulk_pdf"):
+                    with st.spinner("Generating comprehensive school audit..."):
+                        school_teachers_list = sorted(school_master_roster[school_master_roster['Institution'] == teacher_school]['FullName'].unique().tolist())
+                        bulk_pdf = generate_comprehensive_school_pdf_report(
+                            school_name=teacher_school,
+                            teachers_list=school_teachers_list,
+                            school_filtered_df=school_filtered_df,
+                            filtered_df=filtered_df,
+                            filter_desc=filter_description_text,
+                            calc_ld_kpi=calc_ld_kpi,
+                            calc_lib_kpi=calc_lib_kpi,
+                            daily_ld_target=daily_ld_target,
+                            daily_lib_target=daily_lib_target,
+                            selected_num_days=selected_num_days,
+                            target_vid_count=target_vid_count,
+                            target_writing_count=target_writing_count,
+                            target_lp_combo_count=target_lp_combo_count,
+                            target_phonics_count=target_phonics_count,
+                            target_portfolio_count=target_portfolio_count,
+                            enable_quant_kpi=enable_quant_kpi,
+                            enable_qual_kpi=enable_qual_kpi
+                        ).getvalue()
+                        st.session_state[f"bulk_pdf_{teacher_school}"] = bulk_pdf
+
+                if f"bulk_pdf_{teacher_school}" in st.session_state:
+                    st.download_button(
+                        label="📥 Download Bulk School 360 Profiles (PDF)",
+                        data=st.session_state[f"bulk_pdf_{teacher_school}"],
+                        file_name=f"{teacher_school.replace(' ', '_')}_Comprehensive_School_Report.pdf",
+                        mime="application/pdf",
+                        key="bulk_school_pdf_btn"
+                    )
 
             st.markdown(f"### 📋 Audit Profile: **{target_teacher}** | School: **{teacher_school}**")
 
@@ -2106,17 +2155,20 @@ else:
 
                 col_p1, col_p2 = st.columns(2)
                 with col_p1:
-                    buf_p1_xlsx = BytesIO()
-                    with pd.ExcelWriter(buf_p1_xlsx, engine='openpyxl') as writer:
-                        t_display_log.to_excel(writer, index=False, sheet_name='Teacher_Audit')
-                    buf_p1_xlsx.seek(0)
-                    st.download_button(
-                        label=f"📥 Download Full Excel Audit for {target_teacher}",
-                        data=buf_p1_xlsx,
-                        file_name=f"{target_teacher.replace(' ', '_')}_{selected_type_filter}_Audit.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="btn_xlsx_tab4"
-                    )
+                    if st.button("⚙️ Prepare Teacher Audit Excel", key=f"prep_audit_xlsx_{target_teacher}"):
+                        buf_p1_xlsx = BytesIO()
+                        with pd.ExcelWriter(buf_p1_xlsx, engine='openpyxl') as writer:
+                            t_display_log.to_excel(writer, index=False, sheet_name='Teacher_Audit')
+                        st.session_state[f"audit_xlsx_{target_teacher}"] = buf_p1_xlsx.getvalue()
+
+                    if f"audit_xlsx_{target_teacher}" in st.session_state:
+                        st.download_button(
+                            label=f"📥 Download Full Excel Audit for {target_teacher}",
+                            data=st.session_state[f"audit_xlsx_{target_teacher}"],
+                            file_name=f"{target_teacher.replace(' ', '_')}_{selected_type_filter}_Audit.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="btn_xlsx_tab4"
+                        )
 
             # --- EMBEDDED SCHOOL AUDIT & WHATSAPP DISPATCH HUB (SCHOOL BY SCHOOL) ---
             st.markdown("---")
@@ -2234,7 +2286,6 @@ else:
         if school_filtered_df.empty:
             st.warning("No data available for the selected school filter.")
         else:
-            # In-tab scoped classification filter
             t5_class_filter = st.selectbox("Filter Portfolio by Classification:", ["All Classifications", "🌟 Pace Setters", "📘 Lesson Focused", "📚 Library Focused", "🚨 Priority Focus"], key="t5_class_filter")
 
             school_stats = filtered_df.groupby(['Institution', 'Type'])['Duration_Min'].sum().unstack(fill_value=0.0).reset_index()
@@ -2325,25 +2376,29 @@ else:
 
             col_t5_d1, col_t5_d2 = st.columns(2)
             with col_t5_d1:
-                st.download_button(
-                    "📄 Download Portfolio Overview Report (PDF)",
-                    data=lambda: generate_pdf_report(
-                        title_text="🏛️ Academic Manager Portfolio Review",
-                        subtitle_text=f"Portfolio Performance Leaderboard ({selected_num_days} Working Days)",
-                        school_name="Multiple Portfolio Schools",
-                        summary_metrics={"Total Schools": len(display_school_stats), "Pace Setters": len(pace_setters), "Priority Focus": len(priority_focus)},
-                        dataframe=display_qtable
-                    ).getvalue(),
-                    file_name=f"Manager_Portfolio_Overview_{selected_month.replace(' ', '_')}.pdf",
-                    mime="application/pdf",
-                    key="btn_pdf_tab5"
-                )
+                if st.button("⚙️ Compile Portfolio Overview PDF", key="prep_pdf_tab5_btn"):
+                    with st.spinner("Compiling Portfolio PDF..."):
+                        pdf_t5 = generate_pdf_report(
+                            title_text="🏛️ Academic Manager Portfolio Review",
+                            subtitle_text=f"Portfolio Performance Leaderboard ({selected_num_days} Working Days)",
+                            school_name="Multiple Portfolio Schools",
+                            summary_metrics={"Total Schools": len(display_school_stats), "Pace Setters": len(pace_setters), "Priority Focus": len(priority_focus)},
+                            dataframe=display_qtable
+                        ).getvalue()
+                        st.session_state["tab5_pdf_ready"] = pdf_t5
+
+                if "tab5_pdf_ready" in st.session_state:
+                    st.download_button("📄 Download Portfolio Overview Report (PDF)", data=st.session_state["tab5_pdf_ready"], file_name=f"Manager_Portfolio_Overview_{selected_month.replace(' ', '_')}.pdf", mime="application/pdf", key="btn_pdf_tab5")
+
             with col_t5_d2:
-                buf_t5_xlsx = BytesIO()
-                with pd.ExcelWriter(buf_t5_xlsx, engine='openpyxl') as writer:
-                    display_qtable.to_excel(writer, index=False, sheet_name='Portfolio_Leaderboard')
-                buf_t5_xlsx.seek(0)
-                st.download_button("📥 Download Portfolio Leaderboard (Excel)", data=buf_t5_xlsx, file_name=f"Portfolio_Leaderboard_{selected_month.replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_xlsx_tab5")
+                if st.button("⚙️ Prepare Portfolio Leaderboard Excel", key="prep_xlsx_tab5_btn"):
+                    buf_t5_xlsx = BytesIO()
+                    with pd.ExcelWriter(buf_t5_xlsx, engine='openpyxl') as writer:
+                        display_qtable.to_excel(writer, index=False, sheet_name='Portfolio_Leaderboard')
+                    st.session_state["tab5_xlsx_ready"] = buf_t5_xlsx.getvalue()
+
+                if "tab5_xlsx_ready" in st.session_state:
+                    st.download_button("📥 Download Portfolio Leaderboard (Excel)", data=st.session_state["tab5_xlsx_ready"], file_name=f"Portfolio_Leaderboard_{selected_month.replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_xlsx_tab5")
 
     # TAB 6: SCHOOL-LEVEL TEACHER PROGRESSION & EXECUTION TIERS
     with tab6:
