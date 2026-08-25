@@ -20,7 +20,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-# Page layout configuration
+# Page layout configuration (Must be first Streamlit command)
 st.set_page_config(page_title="Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard", layout="wide")
 
 # --- NATIVE POSTGRESQL & SUPABASE CLOUD SETUP ---
@@ -43,6 +43,7 @@ except Exception:
     ai_client = None
 
 
+# --- 1. CORE DATA NORMALIZATION & MATHEMATICAL HELPER FUNCTIONS ---
 def _norm_text(value):
     if pd.isna(value):
         return ""
@@ -53,12 +54,47 @@ def _norm_key(value):
     return _norm_text(value).casefold()
 
 
+def _parse_time_mins(t_val):
+    """Accurately parses numerical minutes, float minutes, and HH:MM:SS / MM:SS formats."""
+    if pd.isna(t_val) or str(t_val).strip() == "" or str(t_val).strip().lower() in ['none', 'nan', 'nat']:
+        return 0.0
+    val_str = str(t_val).strip()
+    try:
+        return float(val_str)
+    except ValueError:
+        pass
+    
+    parts = val_str.split(':')
+    try:
+        if len(parts) == 3:
+            return float(parts[0]) * 60.0 + float(parts[1]) + float(parts[2]) / 60.0
+        elif len(parts) == 2:
+            return float(parts[0]) + float(parts[1]) / 60.0
+    except (ValueError, TypeError):
+        pass
+    return 0.0
+
+
+def _categorize_record_type(val, book_val=""):
+    """Accurately maps variations in log naming to canonical types."""
+    v = _norm_key(val)
+    b = _norm_key(book_val)
+    
+    if any(k in v for k in ['lessondelivery', 'lesson delivery', 'lesson_delivery', 'lessonplan', 'lesson plan', 'prep', 'delivery', 'teaching']):
+        return 'lessonDelivery'
+    if any(k in v for k in ['library', 'digital', 'resource', 'content', 'ebook', 'reading', 'book']):
+        return 'library'
+    if b.startswith('lesson plan') or b.startswith('lp'):
+        return 'lessonDelivery'
+    return 'other'
+
+
 def normalize_identity_columns(df):
     if df is None or df.empty:
         return pd.DataFrame()
     out = df.copy()
 
-    for col in ["Institution", "Center", "FirstName", "LastName", "FullName", "Role", "Uploaded_By", "State_Zone"]:
+    for col in ["Institution", "Center", "FirstName", "LastName", "FullName", "Role", "Uploaded_By", "State_Zone", "Type", "Grade", "Subject", "Book"]:
         if col not in out.columns:
             out[col] = ""
         out[col] = out[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
@@ -71,14 +107,36 @@ def normalize_identity_columns(df):
     ).str.replace(r'\s+', ' ', regex=True).str.strip()
     empty_full = out["FullName"].eq("")
     out.loc[empty_full, "FullName"] = calculated_full.loc[empty_full]
-
     out.loc[out["FullName"].eq(""), "FullName"] = "Unknown Teacher"
+
+    out["Standard_Type"] = out.apply(lambda r: _categorize_record_type(r.get("Type", ""), r.get("Book", "")), axis=1)
+
+    # Trust actual duration values without shift timestamp overwrite
+    if "Duration_Min" in out.columns:
+        out["Duration_Min"] = out["Duration_Min"].apply(_parse_time_mins)
+    elif "Duration (HH:MM:SS)" in out.columns:
+        out["Duration_Min"] = out["Duration (HH:MM:SS)"].apply(_parse_time_mins)
+    elif "Duration (Minutes)" in out.columns:
+        out["Duration_Min"] = out["Duration (Minutes)"].apply(_parse_time_mins)
+    else:
+        out["Duration_Min"] = 0.0
+
     return out
+
+
+def get_working_days(start_date, end_date, excluded_dates_list, exclude_sundays=True):
+    try:
+        start_np = np.datetime64(start_date)
+        end_np = np.datetime64(end_date) + np.timedelta64(1, 'D')
+        holidays_np = [np.datetime64(d) for d in excluded_dates_list] if excluded_dates_list else []
+        w_mask = '1111110' if exclude_sundays else '1111111'
+        return max(1, int(np.busday_count(start_np, end_np, weekmask=w_mask, holidays=holidays_np)))
+    except Exception:
+        return 1
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_master_db_from_supabase():
-    """Fetches all teacher records directly using native PostgreSQL execution."""
     query = """
         SELECT 
             "State_Zone", "Uploaded_By", "Institution", "Center",
@@ -106,7 +164,6 @@ def fetch_master_db_from_supabase():
         return pd.DataFrame()
 
 
-# --- CACHED SUPABASE PERSISTENCE FOR CRM CONTACTS & CALL LOGS ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_crm_data_from_supabase():
     try:
@@ -198,7 +255,6 @@ def build_teacher_roster_cached(df):
     return candidate.reset_index(drop=True)
 
 
-# --- AI HELPER FUNCTIONS (GEMINI MULTIMODAL INTEGRATION) ---
 def get_gemini_summary(context_prompt, audio_file_obj=None):
     if not ai_client:
         return "⚠️ Gemini API key not found in Streamlit secrets."
@@ -220,6 +276,482 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
         return response.text
     except Exception as e:
         return f"AI Generation Notice: {e}"
+
+
+def extract_evidence_items_vectorized(df_src, col_name):
+    if col_name not in df_src.columns or df_src.empty:
+        return []
+    
+    col_str = df_src[col_name].fillna('').astype(str).str.strip()
+    valid_mask = col_str.str.contains(r'https?://|drive\.google|supabase\.co', case=False, na=False)
+    valid_rows = df_src[valid_mask]
+    
+    if valid_rows.empty:
+        return []
+        
+    items = []
+    for _, r in valid_rows.iterrows():
+        val = str(r[col_name]).strip()
+        d_str = str(r['Date']) if 'Date' in r and pd.notna(r['Date']) else "Recent"
+        g_str = f"Grade {r['Grade']}" if 'Grade' in r and str(r['Grade']).strip() else "Grade N/A"
+        s_str = str(r['Subject']).strip() if 'Subject' in r and str(r['Subject']).strip() else "General Subject"
+        b_str = str(r['Book']).strip() if 'Book' in r and str(r['Book']).strip() else "Lesson Plan"
+        items.append({'url': val, 'date': d_str, 'grade': g_str, 'subject': s_str, 'lesson': b_str})
+        
+    seen = set()
+    deduped = []
+    for item in items:
+        if item['url'] not in seen:
+            seen.add(item['url'])
+            deduped.append(item)
+    return deduped
+
+
+def generate_pdf_report(title_text, subtitle_text, school_name, summary_metrics, dataframe=None, custom_sections=None):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    story = []
+    styles = getSampleStyleSheet()
+
+    primary_color = colors.HexColor('#2563EB')
+    dark_neutral = colors.HexColor('#1E293B')
+    light_bg = colors.HexColor('#F8FAFC')
+    border_color = colors.HexColor('#E2E8F0')
+    accent_color = colors.HexColor('#0F172A')
+
+    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=16, leading=20, textColor=primary_color, fontName='Helvetica-Bold')
+    subtitle_style = ParagraphStyle('DocSubTitle', parent=styles['Normal'], fontSize=9, leading=13, textColor=dark_neutral)
+    school_style = ParagraphStyle('SchoolHead', parent=styles['Normal'], fontSize=10, leading=14, textColor=accent_color, fontName='Helvetica-Bold')
+    sec_head_style = ParagraphStyle('SecHead', parent=styles['Heading2'], fontSize=11, leading=15, textColor=primary_color, fontName='Helvetica-Bold', spaceBefore=12, spaceAfter=5)
+    normal_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=8.5, leading=13, textColor=dark_neutral)
+    link_style = ParagraphStyle('LinkStyle', parent=styles['Normal'], fontSize=8, leading=11, textColor=colors.HexColor('#2563EB'), fontName='Helvetica-Bold')
+    card_header = ParagraphStyle('CardHead', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748B'), fontName='Helvetica-Bold', alignment=1)
+    card_value = ParagraphStyle('CardVal', parent=styles['Normal'], fontSize=11, leading=14, textColor=primary_color, fontName='Helvetica-Bold', alignment=1)
+    
+    story.append(Paragraph(f"<b>{title_text}</b>", title_style))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(f"🏫 <b>Institution / School Focus:</b> {school_name}", school_style))
+    story.append(Spacer(1, 3))
+    story.append(Paragraph(subtitle_text, subtitle_style))
+    story.append(Spacer(1, 8))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=primary_color, spaceAfter=12))
+
+    if summary_metrics:
+        headers_row = [Paragraph(k, card_header) for k in summary_metrics.keys()]
+        values_row = [Paragraph(str(v), card_value) for v in summary_metrics.values()]
+        col_w = 540 / len(summary_metrics)
+        kpi_table = Table([headers_row, values_row], colWidths=[col_w] * len(summary_metrics))
+        kpi_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), light_bg),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, border_color),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        story.append(kpi_table)
+        story.append(Spacer(1, 12))
+
+    if custom_sections:
+        for heading, body_items in custom_sections.items():
+            story.append(Paragraph(f"<b>{heading}</b>", sec_head_style))
+            story.append(HRFlowable(width="100%", thickness=0.5, color=border_color, spaceAfter=6))
+            for item in body_items:
+                if "<a href=" in item:
+                    story.append(Paragraph(f"{item}", link_style))
+                else:
+                    story.append(Paragraph(f"• {item}", normal_style))
+            story.append(Spacer(1, 10))
+
+    if dataframe is not None and not dataframe.empty:
+        story.append(Spacer(1, 4))
+        raw_data = [dataframe.columns.tolist()] + dataframe.astype(str).values.tolist()
+        cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=8, leading=12, textColor=dark_neutral)
+        header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontSize=8.5, leading=12, textColor=colors.white, fontName='Helvetica-Bold')
+
+        formatted_data = []
+        for i, row in enumerate(raw_data):
+            formatted_row = []
+            for cell in row:
+                st_to_use = header_style if i == 0 else cell_style
+                formatted_row.append(Paragraph(str(cell), st_to_use))
+            formatted_data.append(formatted_row)
+
+        num_cols = len(dataframe.columns)
+        col_width = 540 / num_cols
+
+        pdf_table = Table(formatted_data, colWidths=[col_width] * num_cols, repeatRows=1)
+        pdf_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.4, border_color),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(pdf_table)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_lib_kpi, daily_ld_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    story = []
+    styles = getSampleStyleSheet()
+
+    primary_color = colors.HexColor('#2563EB')
+    dark_neutral = colors.HexColor('#1E293B')
+    light_bg = colors.HexColor('#F8FAFC')
+    border_color = colors.HexColor('#E2E8F0')
+    accent_color = colors.HexColor('#0F172A')
+
+    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=16, leading=20, textColor=primary_color, fontName='Helvetica-Bold')
+    subtitle_style = ParagraphStyle('DocSubTitle', parent=styles['Normal'], fontSize=9, leading=13, textColor=dark_neutral)
+    school_style = ParagraphStyle('SchoolHead', parent=styles['Normal'], fontSize=10, leading=14, textColor=accent_color, fontName='Helvetica-Bold')
+    sec_head_style = ParagraphStyle('SecHead', parent=styles['Heading2'], fontSize=11, leading=15, textColor=primary_color, fontName='Helvetica-Bold', spaceBefore=12, spaceAfter=5)
+    normal_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=8.5, leading=13, textColor=dark_neutral)
+    link_style = ParagraphStyle('LinkStyle', parent=styles['Normal'], fontSize=8, leading=11, textColor=colors.HexColor('#2563EB'), fontName='Helvetica-Bold')
+    card_header = ParagraphStyle('CardHead', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748B'), fontName='Helvetica-Bold', alignment=1)
+    card_value = ParagraphStyle('CardVal', parent=styles['Normal'], fontSize=11, leading=14, textColor=primary_color, fontName='Helvetica-Bold', alignment=1)
+
+    # Respect full date-filtered data for this school
+    school_curr_df = filtered_df[filtered_df['Institution'] == school_name]
+    if school_curr_df.empty and not school_filtered_df.empty:
+        school_curr_df = school_filtered_df[school_filtered_df['Institution'] == school_name]
+
+    story.append(Paragraph(f"<b>Comprehensive School Audit & Feature-Wise Report</b>", title_style))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(f"<b>Institution / School Focus:</b> {school_name}", school_style))
+    story.append(Spacer(1, 3))
+    story.append(Paragraph(f"Observation Window: {filter_desc}", subtitle_style))
+    story.append(Spacer(1, 8))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=primary_color, spaceAfter=12))
+
+    ld_df = school_curr_df[school_curr_df['Standard_Type'] == 'lessonDelivery']
+    ld_usage = ld_df.groupby('FullName')['Duration_Min'].sum().to_dict()
+    
+    lib_df = school_curr_df[school_curr_df['Standard_Type'] == 'library']
+    lib_usage = lib_df.groupby('FullName')['Duration_Min'].sum().to_dict()
+
+    total_teachers_count = len(teachers_list)
+    met_ld_count = 0
+    met_lib_count = 0
+
+    for t_name in teachers_list:
+        t_ld = ld_usage.get(t_name, 0.0)
+        t_lib = lib_usage.get(t_name, 0.0)
+        
+        if (calc_ld_kpi > 0 and t_ld >= calc_ld_kpi) or (calc_ld_kpi == 0 and t_ld > 0):
+            met_ld_count += 1
+        if (calc_lib_kpi > 0 and t_lib >= calc_lib_kpi) or (calc_lib_kpi == 0 and t_lib > 0):
+            met_lib_count += 1
+
+    school_summary_metrics = {
+        "Active Roster Teachers": total_teachers_count,
+        "Working Days Evaluated": f"{selected_num_days} Days"
+    }
+    if enable_quant_kpi:
+        school_summary_metrics["Met Lesson Prep KPI"] = f"{met_ld_count} / {total_teachers_count}"
+        school_summary_metrics["Met Library KPI"] = f"{met_lib_count} / {total_teachers_count}"
+
+    headers_row = [Paragraph(k, card_header) for k in school_summary_metrics.keys()]
+    values_row = [Paragraph(str(v), card_value) for v in school_summary_metrics.values()]
+    col_w = 540 / len(school_summary_metrics)
+    kpi_table = Table([headers_row, values_row], colWidths=[col_w] * len(school_summary_metrics))
+    kpi_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), light_bg),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, border_color),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    story.append(kpi_table)
+    story.append(Spacer(1, 10))
+
+    if enable_quant_kpi:
+        story.append(Paragraph("<b>School-Level Feature Performance Summary & Guidelines</b>", sec_head_style))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=border_color, spaceAfter=6))
+        story.append(Paragraph(f"• <b>Lesson Plan Performance Standard:</b> {daily_ld_target:.0f} mins/day × {selected_num_days} working days ({calc_ld_kpi:.0f} mins total benchmark standard)", normal_style))
+        story.append(Paragraph(f"• <b>Library Usage Performance Standard:</b> {daily_lib_target:.0f} mins/day × {selected_num_days} working days ({calc_lib_kpi:.0f} mins total benchmark standard)", normal_style))
+        story.append(Spacer(1, 10))
+
+    # 1. Lesson Plan Preparation Consolidated Report
+    story.append(Paragraph("<b>1. Lesson Plan Preparation Consolidated Report</b>", sec_head_style))
+    ld_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Performance Indicator Status"]]
+    for t_name in teachers_list:
+        t_mins = ld_usage.get(t_name, 0.0)
+        t_avg = t_mins / selected_num_days if selected_num_days > 0 else 0.0
+        if not enable_quant_kpi or calc_ld_kpi == 0:
+            t_stat = "Activity Logged" if t_mins > 0 else "No Activity Logged"
+        elif t_mins >= calc_ld_kpi:
+            t_stat = f"Met Performance Indicator (>= {calc_ld_kpi:.0f}m)"
+        elif t_mins > 0.0:
+            t_stat = f"Below Performance Indicator (< {calc_ld_kpi:.0f}m)"
+        else:
+            t_stat = "Inactive (0 Mins)"
+        ld_summary_table_data.append([t_name, f"{t_mins:.1f}m", f"{t_avg:.1f}m/day", t_stat])
+
+    ld_table_obj = Table(ld_summary_table_data, colWidths=[140, 110, 100, 190])
+    ld_table_obj.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.4, border_color),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.append(ld_table_obj)
+    story.append(Spacer(1, 14))
+
+    # 2. Library Usage Consolidated Report
+    story.append(Paragraph("<b>2. Library Usage Consolidated Report</b>", sec_head_style))
+    lib_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Performance Indicator Status"]]
+    for t_name in teachers_list:
+        t_lib_mins = lib_usage.get(t_name, 0.0)
+        t_lib_avg = t_lib_mins / selected_num_days if selected_num_days > 0 else 0.0
+        if not enable_quant_kpi or calc_lib_kpi == 0:
+            t_lib_stat = "Activity Logged" if t_lib_mins > 0 else "No Activity Logged"
+        elif t_lib_mins >= calc_lib_kpi:
+            t_lib_stat = f"Met Performance Indicator (>= {calc_lib_kpi:.0f}m)"
+        elif t_lib_mins > 0.0:
+            t_lib_stat = f"Below Performance Indicator (< {calc_lib_kpi:.0f}m)"
+        else:
+            t_lib_stat = "Inactive (0 Mins)"
+        lib_summary_table_data.append([t_name, f"{t_lib_mins:.1f}m", f"{t_lib_avg:.1f}m/day", t_lib_stat])
+
+    lib_table_obj = Table(lib_summary_table_data, colWidths=[140, 110, 100, 190])
+    lib_table_obj.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.4, border_color),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.append(lib_table_obj)
+    story.append(Spacer(1, 14))
+
+    # 3. Qualitative Submissions & Evidence Compliance
+    if enable_qual_kpi:
+        story.append(Paragraph("<b>3. Qualitative Submissions & Evidence Compliance</b>", sec_head_style))
+        qual_summary_table_data = [["Teacher Name", "LP / Audio Notes", "Activity Videos", "Writing Samples", "Phonics Evidences", "Portfolio Artifacts", "Status"]]
+        
+        for t_name in teachers_list:
+            sub_t = school_curr_df[school_curr_df['FullName'] == t_name]
+            v_cnt = sum([len(extract_evidence_items_vectorized(sub_t, col)) for col in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']])
+            w_cnt = len(extract_evidence_items_vectorized(sub_t, 'Writing_Sample_Link'))
+            lp_cnt = len(extract_evidence_items_vectorized(sub_t, 'Lesson_Plan_Picture'))
+            vn_cnt = len(extract_evidence_items_vectorized(sub_t, 'Voice_Note_Link'))
+            ph_cnt = len(extract_evidence_items_vectorized(sub_t, 'Phonics_Evidence_Link'))
+            pf_cnt = len(extract_evidence_items_vectorized(sub_t, 'Portfolio_Evidence_Link'))
+            
+            is_q_ok = (v_cnt >= target_vid_count and w_cnt >= target_writing_count and (lp_cnt + vn_cnt) >= target_lp_combo_count and ph_cnt >= target_phonics_count and pf_cnt >= target_portfolio_count)
+            q_stat = "Met Standard" if is_q_ok else "In Progress"
+            qual_summary_table_data.append([t_name, str(lp_cnt + vn_cnt), str(v_cnt), str(w_cnt), str(ph_cnt), str(pf_cnt), q_stat])
+
+        qual_table_obj = Table(qual_summary_table_data, colWidths=[130, 80, 70, 70, 75, 75, 40])
+        qual_table_obj.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+            ('GRID', (0, 0), (-1, -1), 0.4, border_color),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(qual_table_obj)
+        story.append(Spacer(1, 12))
+
+    # PART 2: INDIVIDUAL TEACHER 360° PROFILES
+    for target_teacher in teachers_list:
+        story.append(PageBreak())
+
+        teacher_date_data = school_curr_df[school_curr_df['FullName'] == target_teacher]
+        teacher_all_data = school_filtered_df[(school_filtered_df['FullName'] == target_teacher) & (school_filtered_df['Institution'] == school_name)]
+
+        t_day_ld = teacher_date_data[teacher_date_data['Standard_Type'] == 'lessonDelivery']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
+        t_day_lib = teacher_date_data[teacher_date_data['Standard_Type'] == 'library']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
+        
+        ld_pct = (t_day_ld / calc_ld_kpi) * 100 if calc_ld_kpi > 0 else (100.0 if t_day_ld >= 0 else 0)
+        lib_pct = (t_day_lib / calc_lib_kpi) * 100 if calc_lib_kpi > 0 else (100.0 if t_day_lib >= 0 else 0)
+
+        ld_advice = f"Steady Execution ({t_day_ld:.1f}m logged)" if (calc_ld_kpi > 0 and t_day_ld >= calc_ld_kpi) else (f"In-Progress ({t_day_ld:.1f}m logged)" if t_day_ld > 0 else "Pending Activity")
+        lib_advice = f"Steady Execution ({t_day_lib:.1f}m logged)" if (calc_lib_kpi > 0 and t_day_lib >= calc_lib_kpi) else (f"In-Progress ({t_day_lib:.1f}m logged)" if t_day_lib > 0 else "Pending Activity")
+
+        t_books_raw = teacher_date_data[teacher_date_data['Book'].str.len() > 0]
+        if t_books_raw.empty:
+            t_books_raw = teacher_all_data[teacher_all_data['Book'].str.len() > 0]
+        teacher_books = t_books_raw[~t_books_raw['Book'].str.match(r'^Lesson Plan', case=False, na=False)]
+
+        evidence_source = teacher_date_data if not teacher_date_data.empty else teacher_all_data
+
+        v_voice = extract_evidence_items_vectorized(evidence_source, 'Voice_Note_Link')
+        v_pic = extract_evidence_items_vectorized(evidence_source, 'Lesson_Plan_Picture')
+        v_writing = extract_evidence_items_vectorized(evidence_source, 'Writing_Sample_Link')
+        v_phonics = extract_evidence_items_vectorized(evidence_source, 'Phonics_Evidence_Link')
+        v_portfolio = extract_evidence_items_vectorized(evidence_source, 'Portfolio_Evidence_Link')
+
+        v_vid = []
+        for col in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']:
+            v_vid.extend(extract_evidence_items_vectorized(evidence_source, col))
+        seen_v = set()
+        deduped_v = []
+        for item in v_vid:
+            if item['url'] not in seen_v:
+                seen_v.add(item['url'])
+                deduped_v.append(item)
+            v_vid = deduped_v
+
+        lp_combo_total = len(v_voice) + len(v_pic)
+        total_artifacts = lp_combo_total + len(v_vid) + len(v_writing) + len(v_phonics) + len(v_portfolio)
+
+        pdf_book_items = []
+        if not teacher_books.empty:
+            b_summary_df = teacher_books.groupby(['Book', 'Grade', 'Subject'])['Duration_Min'].sum().reset_index()
+            for _, br in b_summary_df.iterrows():
+                pdf_book_items.append(f"Book: {br['Book']} ({br['Grade']} - {br['Subject']}) | Time Spent: {br['Duration_Min']:.1f} Mins")
+        else:
+            pdf_book_items.append("No textbooks or digital modules opened.")
+
+        pdf_link_items = []
+        for i, item in enumerate(v_voice, 1): 
+            pdf_link_items.append(f'• 🎧 <a href="{item["url"]}"><u><b>Open Voice Reflection #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
+        for i, item in enumerate(v_pic, 1): 
+            pdf_link_items.append(f'• 🖼️ <a href="{item["url"]}"><u><b>View Lesson Plan Photo #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
+        for i, item in enumerate(v_vid, 1): 
+            pdf_link_items.append(f'• 🎥 <a href="{item["url"]}"><u><b>Watch Classroom Activity Video #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
+        for i, item in enumerate(v_writing, 1): 
+            pdf_link_items.append(f'• 📝 <a href="{item["url"]}"><u><b>View Student Writing Sample #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
+        for i, item in enumerate(v_phonics, 1): 
+            pdf_link_items.append(f'• 🔤 <a href="{item["url"]}"><u><b>Open Phonics Evidence #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
+        for i, item in enumerate(v_portfolio, 1): 
+            pdf_link_items.append(f'• 📁 <a href="{item["url"]}"><u><b>View Teacher Portfolio Showcase #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
+
+        story.append(Paragraph(f"<b>Academic Performance Profile: {target_teacher}</b>", title_style))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(f"<b>Institution / School Focus:</b> {school_name}", school_style))
+        story.append(Spacer(1, 3))
+        story.append(Paragraph(f"Observation Window: {filter_desc}", subtitle_style))
+        story.append(Spacer(1, 6))
+        story.append(HRFlowable(width="100%", thickness=1.5, color=primary_color, spaceAfter=10))
+
+        summary_metrics = {
+            "Teacher": target_teacher,
+            "Lesson Prep": f"{t_day_ld:.1f}m",
+            "Library Usage": f"{t_day_lib:.1f}m",
+            "Phonics / Portfolio": f"{len(v_phonics)} / {len(v_portfolio)}",
+            "Activity Submissions": f"{total_artifacts}"
+        }
+        headers_row = [Paragraph(k, card_header) for k in summary_metrics.keys()]
+        values_row = [Paragraph(str(v), card_value) for v in summary_metrics.values()]
+        col_w = 540 / len(summary_metrics)
+        kpi_table = Table([headers_row, values_row], colWidths=[col_w] * len(summary_metrics))
+        kpi_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), light_bg),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, border_color),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(kpi_table)
+        story.append(Spacer(1, 10))
+
+        sections = {
+            "1. Lesson Preparation, Lesson Delivery, and Library Usage": [
+                f"Lesson Preparation Duration: {t_day_ld:.1f} Minutes" + (f" ({ld_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""),
+                f"Library & Digital Resources Duration: {t_day_lib:.1f} Minutes" + (f" ({lib_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""),
+                f"Consultant Assessment: {ld_advice} in lesson preparation, {lib_advice} in library integration."
+            ],
+            "2. Content / Digital Book Content Usage": pdf_book_items,
+            "3. Activity Evidence, Activity Submission, and Artifact Evidence": pdf_link_items if pdf_link_items else ["No activity or evidence submission links recorded in active window."]
+        }
+
+        for heading, body_items in sections.items():
+            story.append(Paragraph(f"<b>{heading}</b>", sec_head_style))
+            story.append(HRFlowable(width="100%", thickness=0.5, color=border_color, spaceAfter=4))
+            for item in body_items:
+                if "<a href=" in item:
+                    story.append(Paragraph(f"{item}", link_style))
+                else:
+                    story.append(Paragraph(f"• {item}", normal_style))
+            story.append(Spacer(1, 8))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+def ingest_excel_to_postgresql(processed_dfs):
+    if not processed_dfs:
+        return
+    combined_df = pd.concat(processed_dfs, ignore_index=True)
+    combined_df = normalize_identity_columns(combined_df)
+    
+    db_cols = [
+        "State_Zone", "Uploaded_By", "Institution", "Center",
+        "FirstName", "LastName", "FullName", "Role", "Type",
+        "Grade", "Subject", "Book", "StartTime", "EndTime",
+        "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
+        "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
+        "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+        "Assessment_Score_Pct"
+    ]
+    
+    for col in db_cols:
+        if col not in combined_df.columns:
+            combined_df[col] = None
+
+    cleaned_df = combined_df[db_cols].copy()
+    
+    for dt_col in ['StartTime', 'EndTime']:
+        cleaned_df[dt_col] = pd.to_datetime(cleaned_df[dt_col], errors='coerce')
+
+    if 'Duration_Min' in cleaned_df.columns:
+        cleaned_df['Duration_Min'] = pd.to_numeric(cleaned_df['Duration_Min'], errors='coerce').fillna(0.0)
+
+    cleaned_df = cleaned_df.replace({np.nan: None})
+    records = cleaned_df.to_dict(orient="records")
+
+    insert_sql = text("""
+        INSERT INTO teacher_records (
+            "State_Zone", "Uploaded_By", "Institution", "Center",
+            "FirstName", "LastName", "FullName", "Role", "Type",
+            "Grade", "Subject", "Book", "StartTime", "EndTime",
+            "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
+            "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
+            "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+            "Assessment_Score_Pct"
+        ) VALUES (
+            :State_Zone, :Uploaded_By, :Institution, :Center,
+            :FirstName, :LastName, :FullName, :Role, :Type,
+            :Grade, :Subject, :Book, :StartTime, :EndTime,
+            :Duration_Min, :Voice_Note_Link, :Lesson_Plan_Picture,
+            :Video_Evidence_1, :Video_Evidence_2, :Video_Evidence_3,
+            :Writing_Sample_Link, :Phonics_Evidence_Link, :Portfolio_Evidence_Link,
+            :Assessment_Score_Pct
+        );
+    """)
+
+    with conn.session as s:
+        s.execute(insert_sql, records)
+        s.commit()
+        
+    fetch_master_db_from_supabase.clear()
 
 
 def render_school_audit_crm_box(tab_name, active_school, current_filter_description, school_audit_whatsapp_message):
@@ -534,6 +1066,7 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
             encoded_final_text = urllib.parse.quote(editable_wa_area)
             st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
 
+    # --- CALL DISCUSSION NOTES & FOLLOW-UP SYNC TO SUPABASE ---
     st.markdown("---")
     st.markdown(f"##### 📝 Post-Call Discussion Notes & Follow-up Scheduler ({target_crm_school} - {selected_entity_type})")
     
@@ -605,502 +1138,7 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
             st.info(f"No call discussion logs recorded yet for {target_crm_school}.")
 
 
-# --- PDF REPORT GENERATOR HELPERS ---
-def generate_pdf_report(title_text, subtitle_text, school_name, summary_metrics, dataframe=None, custom_sections=None):
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
-    story = []
-    styles = getSampleStyleSheet()
-
-    primary_color = colors.HexColor('#2563EB')
-    dark_neutral = colors.HexColor('#1E293B')
-    light_bg = colors.HexColor('#F8FAFC')
-    border_color = colors.HexColor('#E2E8F0')
-    accent_color = colors.HexColor('#0F172A')
-
-    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=16, leading=20, textColor=primary_color, fontName='Helvetica-Bold')
-    subtitle_style = ParagraphStyle('DocSubTitle', parent=styles['Normal'], fontSize=9, leading=13, textColor=dark_neutral)
-    school_style = ParagraphStyle('SchoolHead', parent=styles['Normal'], fontSize=10, leading=14, textColor=accent_color, fontName='Helvetica-Bold')
-    sec_head_style = ParagraphStyle('SecHead', parent=styles['Heading2'], fontSize=11, leading=15, textColor=primary_color, fontName='Helvetica-Bold', spaceBefore=12, spaceAfter=5)
-    normal_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=8.5, leading=13, textColor=dark_neutral)
-    link_style = ParagraphStyle('LinkStyle', parent=styles['Normal'], fontSize=8, leading=11, textColor=colors.HexColor('#2563EB'), fontName='Helvetica-Bold')
-    card_header = ParagraphStyle('CardHead', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748B'), fontName='Helvetica-Bold', alignment=1)
-    card_value = ParagraphStyle('CardVal', parent=styles['Normal'], fontSize=11, leading=14, textColor=primary_color, fontName='Helvetica-Bold', alignment=1)
-    
-    story.append(Paragraph(f"<b>{title_text}</b>", title_style))
-    story.append(Spacer(1, 4))
-    story.append(Paragraph(f"🏫 <b>Institution / School Focus:</b> {school_name}", school_style))
-    story.append(Spacer(1, 3))
-    story.append(Paragraph(subtitle_text, subtitle_style))
-    story.append(Spacer(1, 8))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=primary_color, spaceAfter=12))
-
-    if summary_metrics:
-        headers_row = [Paragraph(k, card_header) for k in summary_metrics.keys()]
-        values_row = [Paragraph(str(v), card_value) for v in summary_metrics.values()]
-        col_w = 540 / len(summary_metrics)
-        kpi_table = Table([headers_row, values_row], colWidths=[col_w] * len(summary_metrics))
-        kpi_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), light_bg),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('GRID', (0, 0), (-1, -1), 0.5, border_color),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ]))
-        story.append(kpi_table)
-        story.append(Spacer(1, 12))
-
-    if custom_sections:
-        for heading, body_items in custom_sections.items():
-            story.append(Paragraph(f"<b>{heading}</b>", sec_head_style))
-            story.append(HRFlowable(width="100%", thickness=0.5, color=border_color, spaceAfter=6))
-            for item in body_items:
-                if "<a href=" in item:
-                    story.append(Paragraph(f"{item}", link_style))
-                else:
-                    story.append(Paragraph(f"• {item}", normal_style))
-            story.append(Spacer(1, 10))
-
-    if dataframe is not None and not dataframe.empty:
-        story.append(Spacer(1, 4))
-        raw_data = [dataframe.columns.tolist()] + dataframe.astype(str).values.tolist()
-        cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=8, leading=12, textColor=dark_neutral)
-        header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontSize=8.5, leading=12, textColor=colors.white, fontName='Helvetica-Bold')
-
-        formatted_data = []
-        for i, row in enumerate(raw_data):
-            formatted_row = []
-            for cell in row:
-                st_to_use = header_style if i == 0 else cell_style
-                formatted_row.append(Paragraph(str(cell), st_to_use))
-            formatted_data.append(formatted_row)
-
-        num_cols = len(dataframe.columns)
-        col_width = 540 / num_cols
-
-        pdf_table = Table(formatted_data, colWidths=[col_width] * num_cols, repeatRows=1)
-        pdf_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('GRID', (0, 0), (-1, -1), 0.4, border_color),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        story.append(pdf_table)
-
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
-
-
-def extract_evidence_items_vectorized(df_src, col_name):
-    if col_name not in df_src.columns or df_src.empty:
-        return []
-    
-    col_str = df_src[col_name].fillna('').astype(str).str.strip()
-    valid_mask = col_str.str.startswith(('http://', 'https://'))
-    valid_rows = df_src[valid_mask]
-    
-    if valid_rows.empty:
-        return []
-        
-    items = []
-    for _, r in valid_rows.iterrows():
-        val = str(r[col_name]).strip()
-        d_str = str(r['Date']) if 'Date' in r and pd.notna(r['Date']) else "Recent"
-        g_str = f"Grade {r['Grade']}" if 'Grade' in r and str(r['Grade']).strip() else "Grade N/A"
-        s_str = str(r['Subject']).strip() if 'Subject' in r and str(r['Subject']).strip() else "General Subject"
-        b_str = str(r['Book']).strip() if 'Book' in r and str(r['Book']).strip() else "Lesson Plan"
-        items.append({'url': val, 'date': d_str, 'grade': g_str, 'subject': s_str, 'lesson': b_str})
-        
-    seen = set()
-    deduped = []
-    for item in items:
-        if item['url'] not in seen:
-            seen.add(item['url'])
-            deduped.append(item)
-    return deduped
-
-
-def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_lib_kpi, daily_ld_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True):
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
-    story = []
-    styles = getSampleStyleSheet()
-
-    primary_color = colors.HexColor('#2563EB')
-    dark_neutral = colors.HexColor('#1E293B')
-    light_bg = colors.HexColor('#F8FAFC')
-    border_color = colors.HexColor('#E2E8F0')
-    accent_color = colors.HexColor('#0F172A')
-
-    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=16, leading=20, textColor=primary_color, fontName='Helvetica-Bold')
-    subtitle_style = ParagraphStyle('DocSubTitle', parent=styles['Normal'], fontSize=9, leading=13, textColor=dark_neutral)
-    school_style = ParagraphStyle('SchoolHead', parent=styles['Normal'], fontSize=10, leading=14, textColor=accent_color, fontName='Helvetica-Bold')
-    sec_head_style = ParagraphStyle('SecHead', parent=styles['Heading2'], fontSize=11, leading=15, textColor=primary_color, fontName='Helvetica-Bold', spaceBefore=12, spaceAfter=5)
-    normal_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=8.5, leading=13, textColor=dark_neutral)
-    link_style = ParagraphStyle('LinkStyle', parent=styles['Normal'], fontSize=8, leading=11, textColor=colors.HexColor('#2563EB'), fontName='Helvetica-Bold')
-    card_header = ParagraphStyle('CardHead', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748B'), fontName='Helvetica-Bold', alignment=1)
-    card_value = ParagraphStyle('CardVal', parent=styles['Normal'], fontSize=11, leading=14, textColor=primary_color, fontName='Helvetica-Bold', alignment=1)
-
-    # Scope to school and ensure date filtering is respected across all teachers
-    school_curr_df = filtered_df[filtered_df['Institution'] == school_name]
-    if school_curr_df.empty and not school_filtered_df.empty:
-        school_curr_df = school_filtered_df[school_filtered_df['Institution'] == school_name]
-
-    # PART 1: CONSOLIDATED TABLES
-    story.append(Paragraph(f"<b>Comprehensive School Audit & Feature-Wise Report</b>", title_style))
-    story.append(Spacer(1, 4))
-    story.append(Paragraph(f"<b>Institution / School Focus:</b> {school_name}", school_style))
-    story.append(Spacer(1, 3))
-    story.append(Paragraph(f"Observation Window: {filter_desc}", subtitle_style))
-    story.append(Spacer(1, 8))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=primary_color, spaceAfter=12))
-
-    ld_df = school_curr_df[school_curr_df['Type'] == 'lessonDelivery']
-    ld_usage = ld_df.groupby('FullName')['Duration_Min'].sum().to_dict()
-    
-    lib_df = school_curr_df[school_curr_df['Type'] == 'library']
-    lib_usage = lib_df.groupby('FullName')['Duration_Min'].sum().to_dict()
-
-    total_teachers_count = len(teachers_list)
-    met_ld_count = 0
-    met_lib_count = 0
-
-    for t_name in teachers_list:
-        t_ld = ld_usage.get(t_name, 0.0)
-        t_lib = lib_usage.get(t_name, 0.0)
-        
-        if (calc_ld_kpi > 0 and t_ld >= calc_ld_kpi) or (calc_ld_kpi == 0 and t_ld > 0):
-            met_ld_count += 1
-        if (calc_lib_kpi > 0 and t_lib >= calc_lib_kpi) or (calc_lib_kpi == 0 and t_lib > 0):
-            met_lib_count += 1
-
-    school_summary_metrics = {
-        "Active Roster Teachers": total_teachers_count,
-        "Working Days Evaluated": f"{selected_num_days} Days"
-    }
-    if enable_quant_kpi:
-        school_summary_metrics["Met Lesson Prep KPI"] = f"{met_ld_count} / {total_teachers_count}"
-        school_summary_metrics["Met Library KPI"] = f"{met_lib_count} / {total_teachers_count}"
-
-    headers_row = [Paragraph(k, card_header) for k in school_summary_metrics.keys()]
-    values_row = [Paragraph(str(v), card_value) for v in school_summary_metrics.values()]
-    col_w = 540 / len(school_summary_metrics)
-    kpi_table = Table([headers_row, values_row], colWidths=[col_w] * len(school_summary_metrics))
-    kpi_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), light_bg),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('GRID', (0, 0), (-1, -1), 0.5, border_color),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-    ]))
-    story.append(kpi_table)
-    story.append(Spacer(1, 10))
-
-    if enable_quant_kpi:
-        story.append(Paragraph("<b>School-Level Feature Performance Summary & Guidelines</b>", sec_head_style))
-        story.append(HRFlowable(width="100%", thickness=0.5, color=border_color, spaceAfter=6))
-        story.append(Paragraph(f"• <b>Lesson Plan Performance Standard:</b> {daily_ld_target:.0f} mins/day × {selected_num_days} working days ({calc_ld_kpi:.0f} mins total benchmark standard)", normal_style))
-        story.append(Paragraph(f"• <b>Library Usage Performance Standard:</b> {daily_lib_target:.0f} mins/day × {selected_num_days} working days ({calc_lib_kpi:.0f} mins total benchmark standard)", normal_style))
-        story.append(Spacer(1, 10))
-
-    # 1. Lesson Plan Preparation Consolidated Report
-    story.append(Paragraph("<b>1. Lesson Plan Preparation Consolidated Report</b>", sec_head_style))
-    ld_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Performance Indicator Status"]]
-    for t_name in teachers_list:
-        t_mins = ld_usage.get(t_name, 0.0)
-        t_avg = t_mins / selected_num_days if selected_num_days > 0 else 0.0
-        if not enable_quant_kpi or calc_ld_kpi == 0:
-            t_stat = "Activity Logged" if t_mins > 0 else "No Activity Logged"
-        elif t_mins >= calc_ld_kpi:
-            t_stat = f"Met Performance Indicator (>= {calc_ld_kpi:.0f}m)"
-        elif t_mins > 0.0:
-            t_stat = f"Below Performance Indicator (< {calc_ld_kpi:.0f}m)"
-        else:
-            t_stat = "Inactive (0 Mins)"
-        ld_summary_table_data.append([t_name, f"{t_mins:.1f}m", f"{t_avg:.1f}m/day", t_stat])
-
-    ld_table_obj = Table(ld_summary_table_data, colWidths=[140, 110, 100, 190])
-    ld_table_obj.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), primary_color),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('GRID', (0, 0), (-1, -1), 0.4, border_color),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
-        ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-    ]))
-    story.append(ld_table_obj)
-    story.append(Spacer(1, 14))
-
-    # 2. Library Usage Consolidated Report
-    story.append(Paragraph("<b>2. Library Usage Consolidated Report</b>", sec_head_style))
-    lib_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Performance Indicator Status"]]
-    for t_name in teachers_list:
-        t_lib_mins = lib_usage.get(t_name, 0.0)
-        t_lib_avg = t_lib_mins / selected_num_days if selected_num_days > 0 else 0.0
-        if not enable_quant_kpi or calc_lib_kpi == 0:
-            t_lib_stat = "Activity Logged" if t_lib_mins > 0 else "No Activity Logged"
-        elif t_lib_mins >= calc_lib_kpi:
-            t_lib_stat = f"Met Performance Indicator (>= {calc_lib_kpi:.0f}m)"
-        elif t_lib_mins > 0.0:
-            t_lib_stat = f"Below Performance Indicator (< {calc_lib_kpi:.0f}m)"
-        else:
-            t_lib_stat = "Inactive (0 Mins)"
-        lib_summary_table_data.append([t_name, f"{t_lib_mins:.1f}m", f"{t_lib_avg:.1f}m/day", t_lib_stat])
-
-    lib_table_obj = Table(lib_summary_table_data, colWidths=[140, 110, 100, 190])
-    lib_table_obj.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), primary_color),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('GRID', (0, 0), (-1, -1), 0.4, border_color),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
-        ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-    ]))
-    story.append(lib_table_obj)
-    story.append(Spacer(1, 14))
-
-    # 3. Qualitative Submissions & Evidence Compliance
-    if enable_qual_kpi:
-        story.append(Paragraph("<b>3. Qualitative Submissions & Evidence Compliance</b>", sec_head_style))
-        qual_summary_table_data = [["Teacher Name", "LP / Audio Notes", "Activity Videos", "Writing Samples", "Phonics Evidences", "Portfolio Artifacts", "Status"]]
-        
-        for t_name in teachers_list:
-            sub_t = school_curr_df[school_curr_df['FullName'] == t_name]
-            v_cnt = sum([len(extract_evidence_items_vectorized(sub_t, col)) for col in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']])
-            w_cnt = len(extract_evidence_items_vectorized(sub_t, 'Writing_Sample_Link'))
-            lp_cnt = len(extract_evidence_items_vectorized(sub_t, 'Lesson_Plan_Picture'))
-            vn_cnt = len(extract_evidence_items_vectorized(sub_t, 'Voice_Note_Link'))
-            ph_cnt = len(extract_evidence_items_vectorized(sub_t, 'Phonics_Evidence_Link'))
-            pf_cnt = len(extract_evidence_items_vectorized(sub_t, 'Portfolio_Evidence_Link'))
-            
-            is_q_ok = (v_cnt >= target_vid_count and w_cnt >= target_writing_count and (lp_cnt + vn_cnt) >= target_lp_combo_count and ph_cnt >= target_phonics_count and pf_cnt >= target_portfolio_count)
-            q_stat = "Met Standard" if is_q_ok else "In Progress"
-            qual_summary_table_data.append([t_name, str(lp_cnt + vn_cnt), str(v_cnt), str(w_cnt), str(ph_cnt), str(pf_cnt), q_stat])
-
-        qual_table_obj = Table(qual_summary_table_data, colWidths=[130, 80, 70, 70, 75, 75, 40])
-        qual_table_obj.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 7.5),
-            ('GRID', (0, 0), (-1, -1), 0.4, border_color),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ]))
-        story.append(qual_table_obj)
-        story.append(Spacer(1, 12))
-
-    # PART 2: INDIVIDUAL TEACHER 360° PROFILES
-    for target_teacher in teachers_list:
-        story.append(PageBreak())
-
-        teacher_date_data = school_curr_df[school_curr_df['FullName'] == target_teacher]
-        teacher_all_data = school_filtered_df[(school_filtered_df['FullName'] == target_teacher) & (school_filtered_df['Institution'] == school_name)]
-
-        t_day_ld = teacher_date_data[teacher_date_data['Type'] == 'lessonDelivery']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
-        t_day_lib = teacher_date_data[teacher_date_data['Type'] == 'library']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
-        
-        ld_pct = (t_day_ld / calc_ld_kpi) * 100 if calc_ld_kpi > 0 else (100.0 if t_day_ld >= 0 else 0)
-        lib_pct = (t_day_lib / calc_lib_kpi) * 100 if calc_lib_kpi > 0 else (100.0 if t_day_lib >= 0 else 0)
-
-        ld_advice = f"Steady Execution ({t_day_ld:.1f}m logged)" if (calc_ld_kpi > 0 and t_day_ld >= calc_ld_kpi) else (f"In-Progress ({t_day_ld:.1f}m logged)" if t_day_ld > 0 else "Pending Activity")
-        lib_advice = f"Steady Execution ({t_day_lib:.1f}m logged)" if (calc_lib_kpi > 0 and t_day_lib >= calc_lib_kpi) else (f"In-Progress ({t_day_lib:.1f}m logged)" if t_day_lib > 0 else "Pending Activity")
-
-        t_books_raw = teacher_date_data[teacher_date_data['Book'].str.len() > 0]
-        if t_books_raw.empty:
-            t_books_raw = teacher_all_data[teacher_all_data['Book'].str.len() > 0]
-        teacher_books = t_books_raw[~t_books_raw['Book'].str.match(r'^Lesson Plan', case=False, na=False)]
-
-        evidence_source = teacher_date_data if not teacher_date_data.empty else teacher_all_data
-
-        v_voice = extract_evidence_items_vectorized(evidence_source, 'Voice_Note_Link')
-        v_pic = extract_evidence_items_vectorized(evidence_source, 'Lesson_Plan_Picture')
-        v_writing = extract_evidence_items_vectorized(evidence_source, 'Writing_Sample_Link')
-        v_phonics = extract_evidence_items_vectorized(evidence_source, 'Phonics_Evidence_Link')
-        v_portfolio = extract_evidence_items_vectorized(evidence_source, 'Portfolio_Evidence_Link')
-
-        v_vid = []
-        for col in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']:
-            v_vid.extend(extract_evidence_items_vectorized(evidence_source, col))
-        seen_v = set()
-        deduped_v = []
-        for item in v_vid:
-            if item['url'] not in seen_v:
-                seen_v.add(item['url'])
-                deduped_v.append(item)
-        v_vid = deduped_v
-
-        lp_combo_total = len(v_voice) + len(v_pic)
-        total_artifacts = lp_combo_total + len(v_vid) + len(v_writing) + len(v_phonics) + len(v_portfolio)
-
-        pdf_book_items = []
-        if not teacher_books.empty:
-            b_summary_df = teacher_books.groupby(['Book', 'Grade', 'Subject'])['Duration_Min'].sum().reset_index()
-            for _, br in b_summary_df.iterrows():
-                pdf_book_items.append(f"Book: {br['Book']} ({br['Grade']} - {br['Subject']}) | Time Spent: {br['Duration_Min']:.1f} Mins")
-        else:
-            pdf_book_items.append("No textbooks or digital modules opened.")
-
-        pdf_link_items = []
-        for i, item in enumerate(v_voice, 1): 
-            pdf_link_items.append(f'• 🎧 <a href="{item["url"]}"><u><b>Open Voice Reflection #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
-        for i, item in enumerate(v_pic, 1): 
-            pdf_link_items.append(f'• 🖼️ <a href="{item["url"]}"><u><b>View Lesson Plan Photo #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
-        for i, item in enumerate(v_vid, 1): 
-            pdf_link_items.append(f'• 🎥 <a href="{item["url"]}"><u><b>Watch Classroom Activity Video #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
-        for i, item in enumerate(v_writing, 1): 
-            pdf_link_items.append(f'• 📝 <a href="{item["url"]}"><u><b>View Student Writing Sample #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
-        for i, item in enumerate(v_phonics, 1): 
-            pdf_link_items.append(f'• 🔤 <a href="{item["url"]}"><u><b>Open Phonics Evidence #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
-        for i, item in enumerate(v_portfolio, 1): 
-            pdf_link_items.append(f'• 📁 <a href="{item["url"]}"><u><b>View Teacher Portfolio Showcase #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
-
-        story.append(Paragraph(f"<b>Academic Performance Profile: {target_teacher}</b>", title_style))
-        story.append(Spacer(1, 4))
-        story.append(Paragraph(f"<b>Institution / School Focus:</b> {school_name}", school_style))
-        story.append(Spacer(1, 3))
-        story.append(Paragraph(f"Observation Window: {filter_desc}", subtitle_style))
-        story.append(Spacer(1, 6))
-        story.append(HRFlowable(width="100%", thickness=1.5, color=primary_color, spaceAfter=10))
-
-        summary_metrics = {
-            "Teacher": target_teacher,
-            "Lesson Prep": f"{t_day_ld:.1f}m",
-            "Library Usage": f"{t_day_lib:.1f}m",
-            "Phonics / Portfolio": f"{len(v_phonics)} / {len(v_portfolio)}",
-            "Activity Submissions": f"{total_artifacts}"
-        }
-        headers_row = [Paragraph(k, card_header) for k in summary_metrics.keys()]
-        values_row = [Paragraph(str(v), card_value) for v in summary_metrics.values()]
-        col_w = 540 / len(summary_metrics)
-        kpi_table = Table([headers_row, values_row], colWidths=[col_w] * len(summary_metrics))
-        kpi_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), light_bg),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('GRID', (0, 0), (-1, -1), 0.5, border_color),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        story.append(kpi_table)
-        story.append(Spacer(1, 10))
-
-        sections = {
-            "1. Lesson Preparation, Lesson Delivery, and Library Usage": [
-                f"Lesson Preparation Duration: {t_day_ld:.1f} Minutes" + (f" ({ld_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""),
-                f"Library & Digital Resources Duration: {t_day_lib:.1f} Minutes" + (f" ({lib_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""),
-                f"Consultant Assessment: {ld_advice} in lesson preparation, {lib_advice} in library integration."
-            ],
-            "2. Content / Digital Book Content Usage": pdf_book_items,
-            "3. Activity Evidence, Activity Submission, and Artifact Evidence": pdf_link_items if pdf_link_items else ["No activity or evidence submission links recorded in active window."]
-        }
-
-        for heading, body_items in sections.items():
-            story.append(Paragraph(f"<b>{heading}</b>", sec_head_style))
-            story.append(HRFlowable(width="100%", thickness=0.5, color=border_color, spaceAfter=4))
-            for item in body_items:
-                if "<a href=" in item:
-                    story.append(Paragraph(f"{item}", link_style))
-                else:
-                    story.append(Paragraph(f"• {item}", normal_style))
-            story.append(Spacer(1, 8))
-
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
-
-
-def get_working_days(start_date, end_date, excluded_dates_list, exclude_sundays=True):
-    try:
-        start_np = np.datetime64(start_date)
-        end_np = np.datetime64(end_date) + np.timedelta64(1, 'D')
-        holidays_np = [np.datetime64(d) for d in excluded_dates_list] if excluded_dates_list else []
-        w_mask = '1111110' if exclude_sundays else '1111111'
-        return max(1, int(np.busday_count(start_np, end_np, weekmask=w_mask, holidays=holidays_np)))
-    except Exception:
-        return 1
-
-
-# --- EXCEL / CSV BATCH INGESTION TO POSTGRESQL ---
-def ingest_excel_to_postgresql(processed_dfs):
-    if not processed_dfs:
-        return
-    combined_df = pd.concat(processed_dfs, ignore_index=True)
-    combined_df = normalize_identity_columns(combined_df)
-    
-    db_cols = [
-        "State_Zone", "Uploaded_By", "Institution", "Center",
-        "FirstName", "LastName", "FullName", "Role", "Type",
-        "Grade", "Subject", "Book", "StartTime", "EndTime",
-        "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
-        "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
-        "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
-        "Assessment_Score_Pct"
-    ]
-    
-    for col in db_cols:
-        if col not in combined_df.columns:
-            combined_df[col] = None
-
-    cleaned_df = combined_df[db_cols].copy()
-    
-    for dt_col in ['StartTime', 'EndTime']:
-        cleaned_df[dt_col] = pd.to_datetime(cleaned_df[dt_col], errors='coerce')
-
-    if 'Duration_Min' in cleaned_df.columns:
-        cleaned_df['Duration_Min'] = pd.to_numeric(cleaned_df['Duration_Min'], errors='coerce').fillna(0.0)
-
-    cleaned_df = cleaned_df.replace({np.nan: None})
-    records = cleaned_df.to_dict(orient="records")
-
-    insert_sql = text("""
-        INSERT INTO teacher_records (
-            "State_Zone", "Uploaded_By", "Institution", "Center",
-            "FirstName", "LastName", "FullName", "Role", "Type",
-            "Grade", "Subject", "Book", "StartTime", "EndTime",
-            "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
-            "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
-            "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
-            "Assessment_Score_Pct"
-        ) VALUES (
-            :State_Zone, :Uploaded_By, :Institution, :Center,
-            :FirstName, :LastName, :FullName, :Role, :Type,
-            :Grade, :Subject, :Book, :StartTime, :EndTime,
-            :Duration_Min, :Voice_Note_Link, :Lesson_Plan_Picture,
-            :Video_Evidence_1, :Video_Evidence_2, :Video_Evidence_3,
-            :Writing_Sample_Link, :Phonics_Evidence_Link, :Portfolio_Evidence_Link,
-            :Assessment_Score_Pct
-        );
-    """)
-
-    with conn.session as s:
-        s.execute(insert_sql, records)
-        s.commit()
-        
-    fetch_master_db_from_supabase.clear()
-
-
-# Page layout title
-st.title("🏫 Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard")
-st.markdown("Track **School Portfolio Management**, **School WoW Velocity**, **Teacher Execution Tiers**, **Quantitative Performance Indicators (Lesson Prep / Library)**, and **360° Qualitative Evidences & Artifact Compliance**.")
-
-
-# --- 2. MULTI-EMPLOYEE HIERARCHY & DATA UPLOAD MANAGER ---
+# --- 2. MULTI-EMPLOYEE INGESTION SIDEBAR ---
 st.sidebar.header("📁 Multi-Employee Data Ingestion Portal")
 
 employee_name = st.sidebar.text_input("Enter Consultant Name:", value="Harshit Bhargava")
@@ -1183,9 +1221,10 @@ if uploaded_files:
             st.sidebar.success(f"Synced {len(files_to_process)} file(s) directly into PostgreSQL Database!")
             st.rerun()
 
+# Fetch DB Records
 df = fetch_master_db_from_supabase()
 
-# --- 3. GRANULAR CLOUD DATABASE MANAGEMENT & CONSULTANT FILTERED DELETION ---
+# --- 3. DATABASE MANAGEMENT & ONE-TIME HISTORICAL IMPORT ---
 st.sidebar.markdown("---")
 st.sidebar.header("🗄️ Granular Database Management")
 
@@ -1193,7 +1232,6 @@ if st.sidebar.button("🔄 Sync Latest Records"):
     fetch_master_db_from_supabase.clear()
     st.rerun()
 
-# --- ONE-TIME DATA IMPORT SECTION FOR HISTORICAL PARQUET & JSON SUBMISSIONS ---
 with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
     st.caption("Imports all historical records from legacy `master_database.parquet` and the `submissions/` JSON folder into PostgreSQL.")
     if st.button("🚀 Run One-Time Import", key="btn_run_historical_import"):
@@ -1201,9 +1239,9 @@ with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
             base_df = pd.DataFrame()
             try:
                 res = supabase.storage.from_(BUCKET_NAME).download("master_database.parquet")
-                if res:
-                    base_df = pd.read_parquet(BytesIO(res))
-                    st.sidebar.info(f"Loaded {len(base_df)} rows from master_database.parquet")
+            if res:
+                base_df = pd.read_parquet(BytesIO(res))
+                st.sidebar.info(f"Loaded {len(base_df)} rows from master_database.parquet")
             except Exception as e:
                 st.sidebar.warning(f"Parquet check notice: {e}")
 
@@ -1250,23 +1288,23 @@ if not df.empty:
                 "Uttarakhand", "West Bengal", "Delhi NCR", "Jammu and Kashmir", "Ladakh"
             ], key="del_state_select")
             
-            if st.button("🗑️ Delete Consultant Records from SQL DB"):
-                try:
-                    if not del_emp_name.strip():
-                        st.error("Please enter the consultant name.")
-                    else:
-                        with conn.session as s:
-                            s.execute(
-                                text('DELETE FROM teacher_records WHERE LOWER("Uploaded_By") = LOWER(:name) AND "State_Zone" = :state'),
-                                {"name": del_emp_name.strip(), "state": del_state_zone}
-                            )
-                            s.commit()
-                        fetch_master_db_from_supabase.clear()
-                        st.success(f"Successfully deleted records for {del_emp_name} in {del_state_zone}!")
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Error deleting consultant data: {e}")
-                    
+        if st.button("🗑️ Delete Consultant Records from SQL DB"):
+            try:
+                if not del_emp_name.strip():
+                    st.error("Please enter the consultant name.")
+                else:
+                    with conn.session as s:
+                        s.execute(
+                            text('DELETE FROM teacher_records WHERE LOWER("Uploaded_By") = LOWER(:name) AND "State_Zone" = :state'),
+                            {"name": del_emp_name.strip(), "state": del_state_zone}
+                        )
+                        s.commit()
+                    fetch_master_db_from_supabase.clear()
+                    st.success(f"Successfully deleted records for {del_emp_name} in {del_state_zone}!")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error deleting consultant data: {e}")
+                
         elif clean_mode == "By School":
             schools_in_db = sorted(df['Institution'].dropna().unique().tolist()) if 'Institution' in df.columns else []
             target_del_school = st.selectbox("Select School to Delete:", options=schools_in_db)
@@ -1280,7 +1318,7 @@ if not df.empty:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error deleting school data: {e}")
-                    
+                
         else:
             if st.button("🚨 Clear Entire Database Table"):
                 try:
@@ -1290,8 +1328,8 @@ if not df.empty:
                     fetch_master_db_from_supabase.clear()
                     st.sidebar.error("Database table cleared!")
                     st.rerun()
-                except Exception as e:
-                    st.sidebar.error(f"Could not truncate table: {e}")
+            except Exception as e:
+                st.sidebar.error(f"Could not truncate table: {e}")
 
 if df.empty:
     st.info("👋 Upload your daily or weekly `UserMetrics.xlsx` files in the sidebar, or run the One-Time Import in the sidebar to populate your PostgreSQL database.")
@@ -1348,7 +1386,7 @@ else:
     all_employees = sorted([str(e) for e in df_state['Uploaded_By'].unique() if str(e).strip() and str(e).lower() not in ['nan', 'none']])
     if all_employees:
         selected_employees = st.sidebar.multiselect("2. Select Consultant(s)", options=all_employees, default=all_employees)
-        df_emp = df_state[df_state['Uploaded_By'].isin(selected_employees)]
+    df_emp = df_state[df_state['Uploaded_By'].isin(selected_employees)]
     else:
         df_emp = df_state
 
@@ -1485,7 +1523,7 @@ else:
         with tab1_col_f2:
             tab1_teachers = ["All Teachers"] + sorted([t for t in tab1_active_roster['FullName'].unique() if str(t).strip()])
             tab1_selected_teacher = st.selectbox("Filter Tab by Teacher:", tab1_teachers, key="tab1_teacher_filter")
-            
+        
         if tab1_selected_teacher != "All Teachers":
             tab1_active_df = tab1_active_df[tab1_active_df['FullName'] == tab1_selected_teacher]
             tab1_active_roster = tab1_active_roster[tab1_active_roster['FullName'] == tab1_selected_teacher]
@@ -1525,8 +1563,8 @@ else:
             if st.button("Generate AI Lesson Prep Summary", key="ai_btn_tab1"):
                 with st.spinner("Analyzing lesson prep metrics with Gemini..."):
                     summary_prompt = f"Analyze these lesson prep statistics: Total Teachers: {total_teachers}, Met Standard: {met_count}, Inactive: {inactive_count}. Provide 3 key actionable takeaways for the academic manager."
-                    ai_text = get_gemini_summary(summary_prompt)
-                    st.markdown(ai_text)
+                ai_text = get_gemini_summary(summary_prompt)
+                st.markdown(ai_text)
 
         fig_ld = px.bar(
             ld_daily, x="FullName", y="Duration_Min", color="Performance Indicator Status",
@@ -1625,7 +1663,7 @@ else:
         with tab2_col_f2:
             tab2_teachers = ["All Teachers"] + sorted([t for t in tab2_active_roster['FullName'].unique() if str(t).strip()])
             tab2_selected_teacher = st.selectbox("Filter Tab by Teacher:", tab2_teachers, key="tab2_teacher_filter")
-            
+        
         if tab2_selected_teacher != "All Teachers":
             tab2_active_df = tab2_active_df[tab2_active_df['FullName'] == tab2_selected_teacher]
             tab2_active_roster = tab2_active_roster[tab2_active_roster['FullName'] == tab2_selected_teacher]
@@ -1957,8 +1995,8 @@ else:
             deduped_v = []
             for item in v_vid:
                 if item['url'] not in seen_v:
-                    seen_v.add(item['url'])
-                    deduped_v.append(item)
+                seen_v.add(item['url'])
+                deduped_v.append(item)
             v_vid = deduped_v
 
             lp_combo_total = len(v_voice) + len(v_pic)
@@ -2379,228 +2417,4 @@ else:
             for s_name in school_stats['Institution'].unique():
                 s_data = filtered_df[filtered_df['Institution'] == s_name]
                 s_vids = sum([len(extract_evidence_items_vectorized(s_data, vc)) for vc in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']])
-                s_w = len(extract_evidence_items_vectorized(s_data, 'Writing_Sample_Link'))
-                s_lp = len(extract_evidence_items_vectorized(s_data, 'Lesson_Plan_Picture'))
-                s_vn = len(extract_evidence_items_vectorized(s_data, 'Voice_Note_Link'))
-                s_ph = len(extract_evidence_items_vectorized(s_data, 'Phonics_Evidence_Link'))
-                s_pf = len(extract_evidence_items_vectorized(s_data, 'Portfolio_Evidence_Link'))
-
-                qual_agg.append({
-                    'Institution': s_name,
-                    'Activity_Videos': s_vids,
-                    'Writing_Samples': s_w,
-                    'LP_Audio_Submissions': s_lp + s_vn,
-                    'Phonics_Evidences': s_ph,
-                    'Portfolio_Artifacts': s_pf
-                })
-            
-            qual_df_school = pd.DataFrame(qual_agg)
-            school_stats = school_stats.merge(qual_df_school, on='Institution', how='left').fillna(0)
-
-            def classify_school(row):
-                if not enable_quant_kpi_t5:
-                    return 'Active Portfolio'
-                ld_ok = row['Avg_Lesson_Prep_Mins'] >= daily_ld_target_t5
-                lib_ok = row['Avg_Library_Usage_Mins'] >= daily_lib_target_t5
-                qual_ok = True
-                if enable_qual_kpi_t5:
-                    qual_ok = (row['Activity_Videos'] >= target_vid_count_t5) or (row['Writing_Samples'] >= target_writing_count_t5)
-
-                if ld_ok and lib_ok and qual_ok:
-                    return '🌟 Pace Setters'
-                elif ld_ok and not lib_ok:
-                    return '📘 Lesson Focused'
-                elif not ld_ok and lib_ok:
-                    return '📚 Library Focused'
-                else:
-                    return '🚨 Priority Focus'
-
-            school_stats['Classification'] = school_stats.apply(classify_school, axis=1)
-
-            st.subheader("🖼️ 2x2 Portfolio Classification Matrix")
-            
-            pace_setters = school_stats[school_stats['Classification'] == '🌟 Pace Setters']['Institution'].tolist()
-            lesson_focused = school_stats[school_stats['Classification'] == '📘 Lesson Focused']['Institution'].tolist()
-            library_focused = school_stats[school_stats['Classification'] == '📚 Library Focused']['Institution'].tolist()
-            priority_focus = school_stats[school_stats['Classification'] == '🚨 Priority Focus']['Institution'].tolist()
-
-            col_top1, col_top2 = st.columns(2)
-            with col_top1:
-                st.success(f"🌟 **Pace Setters ({len(pace_setters)} Schools)**\n\n*Met Standards*\n\n" + (", ".join(pace_setters) if pace_setters else "None"))
-            with col_top2:
-                st.info(f"📘 **Lesson Focused ({len(lesson_focused)} Schools)**\n\n" + (", ".join(lesson_focused) if lesson_focused else "None"))
-
-            col_bot1, col_bot2 = st.columns(2)
-            with col_bot1:
-                st.warning(f"📚 **Library Focused ({len(library_focused)} Schools)**\n\n" + (", ".join(library_focused) if library_focused else "None"))
-            with col_bot2:
-                st.error(f"🚨 **Priority Focus ({len(priority_focus)} Schools)**\n\n" + (", ".join(priority_focus) if priority_focus else "None"))
-
-            display_school_stats = school_stats if t5_class_filter == "All Classifications" else school_stats[school_stats['Classification'] == t5_class_filter]
-
-            st.subheader("📋 Complete School Performance Leaderboard")
-            display_qtable = display_school_stats[['Institution', 'Roster_Teachers', 'Avg_Lesson_Prep_Mins', 'Avg_Library_Usage_Mins', 'LP_Audio_Submissions', 'Activity_Videos', 'Writing_Samples', 'Phonics_Evidences', 'Portfolio_Artifacts', 'Classification']].rename(columns={
-                'Institution': 'School Name', 'Roster_Teachers': 'Active Teachers', 'Avg_Lesson_Prep_Mins': 'Prep (m/day)', 'Avg_Library_Usage_Mins': 'Library (m/day)', 'LP_Audio_Submissions': 'LP/Audio Notes', 'Activity_Videos': 'Activity Videos', 'Writing_Samples': 'Writing Samples', 'Phonics_Evidences': 'Phonics Uploads', 'Portfolio_Artifacts': 'Portfolio Uploads'
-            })
-            st.dataframe(display_qtable, use_container_width=True)
-
-            col_t5_d1, col_t5_d2 = st.columns(2)
-            with col_t5_d1:
-                if st.button("⚙️ Compile Portfolio Overview PDF", key="prep_pdf_tab5_btn"):
-                    with st.spinner("Compiling Portfolio PDF..."):
-                        pdf_t5 = generate_pdf_report(
-                            title_text="🏛️ Academic Manager Portfolio Review",
-                            subtitle_text=f"Portfolio Performance Leaderboard ({selected_num_days} Working Days)",
-                            school_name="Multiple Portfolio Schools",
-                            summary_metrics={"Total Schools": len(display_school_stats), "Pace Setters": len(pace_setters), "Priority Focus": len(priority_focus)},
-                            dataframe=display_qtable
-                        ).getvalue()
-                        st.session_state["tab5_pdf_ready"] = pdf_t5
-
-                if "tab5_pdf_ready" in st.session_state:
-                    st.download_button("📄 Download Portfolio Overview Report (PDF)", data=st.session_state["tab5_pdf_ready"], file_name=f"Manager_Portfolio_Overview_{selected_month.replace(' ', '_')}.pdf", mime="application/pdf", key="btn_pdf_tab5")
-
-            with col_t5_d2:
-                if st.button("⚙️ Prepare Portfolio Leaderboard Excel", key="prep_xlsx_tab5_btn"):
-                    buf_t5_xlsx = BytesIO()
-                    with pd.ExcelWriter(buf_t5_xlsx, engine='openpyxl') as writer:
-                        display_qtable.to_excel(writer, index=False, sheet_name='Portfolio_Leaderboard')
-                    st.session_state["tab5_xlsx_ready"] = buf_t5_xlsx.getvalue()
-
-                if "tab5_xlsx_ready" in st.session_state:
-                    st.download_button("📥 Download Portfolio Leaderboard (Excel)", data=st.session_state["tab5_xlsx_ready"], file_name=f"Portfolio_Leaderboard_{selected_month.replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_xlsx_tab5")
-
-    # TAB 6: SCHOOL-LEVEL TEACHER PROGRESSION & EXECUTION TIERS
-    with tab6:
-        st.header("🏫 School-Level Teacher Progression & Execution Tiers")
-        
-        # Scoped In-Tab KPI Controls
-        with st.expander("🎯 Progression Target Benchmark Settings", expanded=False):
-            t6_kcol1, t6_kcol2 = st.columns(2)
-            with t6_kcol1:
-                daily_ld_target_t6 = st.number_input("Lesson Prep Target (Mins/Day)", min_value=0.0, max_value=60.0, value=10.0, step=5.0, key="t6_ld_target")
-            with t6_kcol2:
-                daily_lib_target_t6 = st.number_input("Library Usage Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t6_lib_target")
-
-        calc_ld_kpi_t6 = daily_ld_target_t6 * selected_num_days
-        calc_lib_kpi_t6 = daily_lib_target_t6 * selected_num_days
-
-        all_schools_list_t6 = sorted(school_master_roster['Institution'].unique())
-        
-        if not all_schools_list_t6:
-            st.info("No schools found in roster.")
-        else:
-            t6_col_f1, t6_col_f2 = st.columns(2)
-            with t6_col_f1:
-                target_school_t6 = st.selectbox("Select School to Inspect:", options=all_schools_list_t6, key="t6_school_sel")
-                
-            school_t6_roster = school_master_roster[school_master_roster['Institution'] == target_school_t6]
-            school_t6_data = school_filtered_df[school_filtered_df['Institution'] == target_school_t6]
-
-            t6_ld = school_t6_data[school_t6_data['Type'] == 'lessonDelivery'].groupby('FullName')['Duration_Min'].sum().reset_index()
-            t6_lib = school_t6_data[school_t6_data['Type'] == 'library'].groupby('FullName')['Duration_Min'].sum().reset_index()
-
-            t6_teachers = school_t6_roster.merge(t6_ld.rename(columns={'Duration_Min': 'Lesson_Mins'}), on='FullName', how='left').fillna(0.0)
-            t6_teachers = t6_teachers.merge(t6_lib.rename(columns={'Duration_Min': 'Library_Mins'}), on='FullName', how='left').fillna(0.0)
-
-            def tier_teacher(row):
-                ld_pct = (row['Lesson_Mins'] / calc_ld_kpi_t6) if calc_ld_kpi_t6 > 0 else 1.0
-                lib_pct = (row['Library_Mins'] / calc_lib_kpi_t6) if calc_lib_kpi_t6 > 0 else 1.0
-                if ld_pct >= 1.0 and lib_pct >= 1.0:
-                    return '🌟 Consistent Achiever (>= 100%)'
-                elif ld_pct < 0.40 and lib_pct < 0.40:
-                    return '❌ Persistent Inactive (< 40%)'
-                else:
-                    return '⚠️ Fluctuating / Partial (40%-99%)'
-
-            t6_teachers['Execution_Tier'] = t6_teachers.apply(tier_teacher, axis=1)
-
-            with t6_col_f2:
-                t6_tier_filter = st.selectbox("Filter by Execution Tier:", ["All Tiers", "🌟 Consistent Achiever (>= 100%)", "⚠️ Fluctuating / Partial (40%-99%)", "❌ Persistent Inactive (< 40%)"], key="t6_tier_filter")
-
-            if t6_tier_filter != "All Tiers":
-                t6_teachers_filtered = t6_teachers[t6_teachers['Execution_Tier'] == t6_tier_filter]
-            else:
-                t6_teachers_filtered = t6_teachers
-
-            st.markdown(f"### 🏫 School Audit: **{target_school_t6}** | Active Roster: **{len(school_t6_roster)} Teachers**")
-
-            e1, e2, e3 = st.columns(3)
-            num_ach = len(t6_teachers[t6_teachers['Execution_Tier'].str.startswith('🌟')])
-            num_fluc = len(t6_teachers[t6_teachers['Execution_Tier'].str.startswith('⚠️')])
-            num_inact = len(t6_teachers[t6_teachers['Execution_Tier'].str.startswith('❌')])
-
-            e1.metric("🌟 Consistent Achievers", num_ach)
-            e2.metric("⚠️ Fluctuating / Partial", num_fluc)
-            e3.metric("❌ Persistent Inactive", num_inact)
-
-            fig_t6_bar = px.bar(
-                t6_teachers_filtered, x="FullName", y=["Lesson_Mins", "Library_Mins"],
-                title=f"Teacher Usage Breakdown for {target_school_t6} (Mins)",
-                labels={"FullName": "Teacher Name", "value": "Logged Minutes", "variable": "Feature"},
-                barmode="group", text_auto=".1f"
-            )
-            st.plotly_chart(fig_t6_bar, use_container_width=True)
-
-            display_t6_table = t6_teachers_filtered.rename(columns={'FullName': 'Teacher Name', 'Lesson_Mins': 'Lesson Prep (m)', 'Library_Mins': 'Library Usage (m)', 'Execution_Tier': 'Execution Tier'})
-            st.dataframe(display_t6_table, use_container_width=True)
-
-    # TAB 7: LIVE EVIDENCE SUBMISSIONS FEED & QUALITATIVE TRACKER
-    with tab7:
-        st.header("📬 Live Evidence Submissions Feed & Qualitative Performance Indicator Tracker")
-        
-        # Scoped In-Tab KPI Controls
-        with st.expander("🎯 Qualitative Artifact Threshold Controls", expanded=False):
-            t7_kcol1, t7_kcol2 = st.columns(2)
-            with t7_kcol1:
-                target_vid_count_t7 = st.number_input("Min. Activity Videos", min_value=1, max_value=20, value=3, step=1, key="t7_vid_cnt")
-                target_writing_count_t7 = st.number_input("Min. Writing Samples", min_value=1, max_value=20, value=3, step=1, key="t7_writing_cnt")
-            with t7_kcol2:
-                target_phonics_count_t7 = st.number_input("Min. Phonics Submissions", min_value=1, max_value=20, value=2, step=1, key="t7_ph_cnt")
-                target_portfolio_count_t7 = st.number_input("Min. Portfolio Artifacts", min_value=1, max_value=20, value=1, step=1, key="t7_pf_cnt")
-
-        evidence_cols = ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link']
-        avail_ev_cols = [c for c in evidence_cols if c in filtered_df.columns]
-
-        if not filtered_df.empty and avail_ev_cols:
-            url_mask = pd.concat([
-                filtered_df[c].fillna('').astype(str).str.strip().str.startswith(('http://', 'https://'))
-                for c in avail_ev_cols
-            ], axis=1).any(axis=1)
-            all_submissions_df = filtered_df[url_mask].copy()
-        else:
-            all_submissions_df = pd.DataFrame()
-
-        if all_submissions_df.empty:
-            st.info("No teacher evidence submissions match the currently selected global filter criteria.")
-        else:
-            col_t7_f1, col_t7_f2, col_t7_f3 = st.columns(3)
-            with col_t7_f1:
-                t7_schools = ["All Schools"] + sorted([s for s in all_submissions_df['Institution'].unique() if str(s).strip()])
-                t7_selected_school = st.selectbox("Filter by School:", t7_schools, key="t7_school")
-            
-            t7_filtered = all_submissions_df if t7_selected_school == "All Schools" else all_submissions_df[all_submissions_df['Institution'] == t7_selected_school]
-
-            with col_t7_f2:
-                t7_teachers = ["All Teachers"] + sorted([t for t in t7_filtered['FullName'].unique() if str(t).strip()])
-                t7_selected_teacher = st.selectbox("Filter by Teacher:", t7_teachers, key="t7_teacher")
-
-            if t7_selected_teacher != "All Teachers":
-                t7_filtered = t7_filtered[t7_filtered['FullName'] == t7_selected_teacher]
-
-            with col_t7_f3:
-                t7_grades = ["All Grades"] + sorted([g for g in t7_filtered['Grade'].unique() if str(g).strip()])
-                t7_selected_grade = st.selectbox("Filter by Grade:", t7_grades, key="t7_grade")
-
-            if t7_selected_grade != "All Grades":
-                t7_filtered = t7_filtered[t7_filtered['Grade'] == t7_selected_grade]
-
-            st.markdown("---")
-            tot_subs = len(t7_filtered)
-            st.metric("📋 Total Submissions Found", tot_subs)
-
-            t7_display_cols = ['StartTime', 'Institution', 'FullName', 'Grade', 'Subject', 'Book', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Writing_Sample_Link']
-            t7_avail = [c for c in t7_display_cols if c in t7_filtered.columns]
-            
-            t7_table = t7_filtered[t7_avail].sort_values(by='StartTime', ascending=False)
-            st.dataframe(t7_table, use_container_width=True)
+                s_w = len(extract_evidence_items_vectorized(s_data, 'I encountered an error doing what you asked. Could you try again?
