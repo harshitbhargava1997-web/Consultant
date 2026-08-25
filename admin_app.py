@@ -1063,6 +1063,42 @@ def safe_percentage(numerator, denominator):
     return float(numerator) / float(denominator) * 100.0
 
 
+def get_period_bounds_for_view(selected_month, view_mode, month_filtered_df, custom_start=None, custom_end=None):
+    """Return true calendar boundaries for the selected review period."""
+    if view_mode == "Full Month Summary":
+        try:
+            start = pd.to_datetime(selected_month, format="%B %Y").normalize()
+            return start.date(), (start + pd.offsets.MonthEnd(1)).date()
+        except Exception:
+            pass
+    if view_mode == "Custom Date Range":
+        return custom_start, custom_end
+    if month_filtered_df is not None and not month_filtered_df.empty:
+        return month_filtered_df['Date'].min(), month_filtered_df['Date'].max()
+    return None, None
+
+def get_teacher_eligible_working_days(teacher_df, period_start, period_end, excluded_dates=None, exclude_sundays=True):
+    """Optional denominator based on first-to-last recorded activity in the period."""
+    if teacher_df is None or teacher_df.empty or period_start is None or period_end is None:
+        return 0
+    dates = pd.to_datetime(teacher_df['Date'], errors='coerce').dropna()
+    if dates.empty:
+        return 0
+    dates = dates[(dates.dt.date >= pd.Timestamp(period_start).date()) & (dates.dt.date <= pd.Timestamp(period_end).date())]
+    if dates.empty:
+        return 0
+    return get_working_days(dates.min().date(), dates.max().date(), excluded_dates, exclude_sundays)
+
+def teacher_days_map(roster_df, activity_df, period_start, period_end, excluded_dates=None, exclude_sundays=True):
+    result = {}
+    if roster_df is None or roster_df.empty:
+        return result
+    for _, row in roster_df[['Institution','FullName']].drop_duplicates().iterrows():
+        inst, teacher = row['Institution'], row['FullName']
+        tdf = activity_df[(activity_df['Institution'] == inst) & (activity_df['FullName'] == teacher)] if activity_df is not None and not activity_df.empty else pd.DataFrame()
+        result[(inst, teacher)] = get_teacher_eligible_working_days(tdf, period_start, period_end, excluded_dates, exclude_sundays)
+    return result
+
 def duration_sum(df, mask=None):
     """Return a clean non-negative duration sum in minutes."""
     if df is None or df.empty:
@@ -1205,6 +1241,35 @@ def ingest_excel_to_postgresql(processed_dfs):
     return inserted_count, skipped_duplicates
 
 
+def database_integrity_audit(df):
+    """Return high-value integrity checks used to catch duplicate or invalid data."""
+    result = {
+        "rows": int(len(df)) if df is not None else 0,
+        "duplicate_rows": 0,
+        "invalid_duration_rows": 0,
+        "negative_duration_rows": 0,
+        "missing_starttime_rows": 0,
+    }
+    if df is None or df.empty:
+        return result
+    key_cols = [c for c in [
+        "State_Zone", "Uploaded_By", "Institution", "Center", "FullName",
+        "Type", "Grade", "Subject", "Book", "StartTime", "EndTime",
+        "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
+        "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
+        "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link"
+    ] if c in df.columns]
+    if key_cols:
+        result["duplicate_rows"] = int(df.duplicated(subset=key_cols, keep=False).sum())
+    if "Duration_Min" in df.columns:
+        numeric = pd.to_numeric(df["Duration_Min"], errors="coerce")
+        result["invalid_duration_rows"] = int(numeric.isna().sum())
+        result["negative_duration_rows"] = int((numeric < 0).fillna(False).sum())
+    if "StartTime" in df.columns:
+        result["missing_starttime_rows"] = int(pd.to_datetime(df["StartTime"], errors="coerce").isna().sum())
+    return result
+
+
 # Page layout title
 st.title("🏫 Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard")
 st.markdown("Track **School Portfolio Management**, **School WoW Velocity**, **Teacher Execution Tiers**, **Quantitative Performance Indicators (Lesson Prep / Library)**, and **360° Qualitative Evidences & Artifact Compliance**.")
@@ -1222,9 +1287,11 @@ employee_state = st.sidebar.selectbox("Select State / Zone (India Region):", [
     "Uttarakhand", "West Bengal", "Delhi NCR", "Jammu and Kashmir", "Ladakh"
 ])
 
-uploaded_files = st.sidebar.file_uploader("Upload UserMetrics Excel (.xlsx)", type=["xlsx"], accept_multiple_files=True)
+uploader_version = int(st.session_state.get("metrics_uploader_version", 0))
+uploader_key = f"metrics_uploader_{uploader_version}"
+uploaded_files = st.sidebar.file_uploader("Upload UserMetrics Excel (.xlsx)", type=["xlsx"], accept_multiple_files=True, key=uploader_key)
 
-if uploaded_files and not st.session_state.pop("database_just_cleared", False):
+if uploaded_files:
     if "last_ingested_files" not in st.session_state:
         st.session_state["last_ingested_files"] = []
 
@@ -1447,10 +1514,13 @@ if not df.empty:
                     st.session_state.pop("filtered_df", None)
                     st.session_state.pop("school_filtered_df", None)
 
-                    # Prevent the currently attached Streamlit uploader from being
-                    # interpreted as a fresh upload immediately after the clear.
-                    st.session_state["database_just_cleared"] = True
+                    # Reset the uploader widget itself. This is stronger than merely
+                    # skipping one rerun: it prevents the same still-attached Excel file
+                    # from being automatically reinserted on the next interaction.
                     st.session_state["last_ingested_files"] = []
+                    st.session_state["metrics_uploader_version"] = int(
+                        st.session_state.get("metrics_uploader_version", 0)
+                    ) + 1
                     st.sidebar.success(
                         f"✅ Database cleared successfully: {deleted_count if deleted_count >= 0 else 'all'} record(s) deleted. "
                         "Upload the Excel file again intentionally to repopulate the database."
@@ -1536,16 +1606,23 @@ else:
     month_filtered_df = school_filtered_df[school_filtered_df['Month_Name'] == selected_month]
     
     exclude_sundays_flag = st.sidebar.checkbox("🗓️ Exclude Sundays from Performance Indicators", value=True)
+    use_teacher_eligible_days = st.sidebar.checkbox(
+        "👤 Use teacher-specific eligible working days", value=False,
+        help="Default OFF uses actual calendar working days. ON uses working days between each teacher's first and last recorded activity in the selected period."
+    )
 
     user_excluded_dates = []
-    if not month_filtered_df['Date'].isna().all() and not month_filtered_df.empty:
-        m_min_date = month_filtered_df['Date'].min()
-        m_max_date = month_filtered_df['Date'].max()
-        all_month_possible_dates = [d.date() for d in pd.date_range(start=m_min_date, end=m_max_date)]
-        
+    try:
+        selected_month_start = pd.to_datetime(selected_month, format="%B %Y").date()
+        selected_month_end = (pd.Timestamp(selected_month_start) + pd.offsets.MonthEnd(1)).date()
+    except Exception:
+        selected_month_start = month_filtered_df['Date'].min() if not month_filtered_df.empty else None
+        selected_month_end = month_filtered_df['Date'].max() if not month_filtered_df.empty else None
+
+    if selected_month_start is not None and selected_month_end is not None:
+        all_month_possible_dates = [d.date() for d in pd.date_range(selected_month_start, selected_month_end)]
         user_excluded_dates = st.sidebar.multiselect(
-            f"🗓️ Punch Holidays for {selected_month}:",
-            options=all_month_possible_dates,
+            f"🗓️ Punch Holidays for {selected_month}:", options=all_month_possible_dates,
             format_func=lambda x: x.strftime('%Y-%m-%d')
         )
 
@@ -1562,8 +1639,8 @@ else:
         filter_description_text = f"Full Month: {selected_month} - 0 Records / 0 Working Days"
     elif view_mode == "Full Month Summary":
         filtered_df = month_filtered_df
-        selected_num_days = get_working_days(month_filtered_df['Date'].min(), month_filtered_df['Date'].max(), user_excluded_dates, exclude_sundays=exclude_sundays_flag)
-        filter_description_text = f"Full Month: {selected_month} - {selected_num_days} Working Days"
+        selected_num_days = get_working_days(selected_month_start, selected_month_end, user_excluded_dates, exclude_sundays=exclude_sundays_flag)
+        filter_description_text = f"Full Month: {selected_month} - {selected_num_days} Working Days ({selected_month_start} to {selected_month_end})"
     elif view_mode == "Specific Week of Month":
         selected_week_label = st.sidebar.selectbox("Select Week:", options=available_month_weeks)
         filtered_df = month_filtered_df[month_filtered_df['Month_Week_Label'] == selected_week_label]
@@ -1594,6 +1671,8 @@ else:
 
     if selected_num_days == 0:
         st.sidebar.warning('The selected period contains 0 valid working days. Quantitative benchmarks are set to 0 and teachers are not marked as meeting a performance target.')
+    if use_teacher_eligible_days:
+        st.sidebar.info('Teacher-specific eligibility is ON for teacher-level KPIs. School/portfolio summaries continue to use the full calendar working-day denominator.')
 
     # 4. Global Teacher Filter
     available_teachers = sorted([str(t) for t in school_master_roster['FullName'].unique() if str(t).strip()])
@@ -1601,6 +1680,16 @@ else:
     
     filtered_roster = school_master_roster[school_master_roster['FullName'].isin(selected_teachers)]
     filtered_df = filtered_df[filtered_df['FullName'].isin(selected_teachers)]
+
+    period_start, period_end = get_period_bounds_for_view(
+        selected_month, view_mode, month_filtered_df,
+        c_start if view_mode == "Custom Date Range" else None,
+        c_end if view_mode == "Custom Date Range" else None
+    )
+    teacher_days = teacher_days_map(
+        filtered_roster, filtered_df, period_start, period_end,
+        user_excluded_dates, exclude_sundays_flag
+    ) if use_teacher_eligible_days else {}
 
     # --- SIDEBAR DIRECT EXCEL EXPORT (Only on click) ---
     st.sidebar.markdown("---")
@@ -1668,15 +1757,17 @@ else:
         ld_df = tab1_active_df[tab1_active_df['Type'] == 'lessonDelivery']
         ld_usage = ld_df.groupby(['Institution', 'FullName'])['Duration_Min'].sum().reset_index()
         ld_daily = tab1_active_roster.merge(ld_usage, on=['Institution', 'FullName'], how='left').fillna(0.0)
+        ld_daily['Eligible Working Days'] = ld_daily.apply(lambda r: teacher_days.get((r['Institution'], r['FullName']), selected_num_days) if use_teacher_eligible_days else selected_num_days, axis=1)
+        ld_daily['Performance Benchmark (Min)'] = ld_daily['Eligible Working Days'] * daily_ld_target_t1
+
+        def get_ld_status_row(r):
+            return calculate_kpi_status(r['Duration_Min'], r['Performance Benchmark (Min)'], enable_quant_kpi_t1, r['Eligible Working Days'] == 0)
         
-        def get_ld_status(x):
-            return calculate_kpi_status(x, calc_ld_kpi_t1, enable_quant_kpi_t1, selected_num_days == 0)
-        
-        ld_daily['Performance Indicator Status'] = ld_daily['Duration_Min'].apply(get_ld_status)
+        ld_daily['Performance Indicator Status'] = ld_daily.apply(get_ld_status_row, axis=1)
 
         c1, c2, c3, c4 = st.columns(4)
         total_teachers = len(ld_daily)
-        met_count = len(ld_daily[ld_daily['Duration_Min'] >= calc_ld_kpi_t1]) if (enable_quant_kpi_t1 and calc_ld_kpi_t1 > 0) else len(ld_daily[ld_daily['Duration_Min'] > 0])
+        met_count = len(ld_daily[(ld_daily['Duration_Min'] >= ld_daily['Performance Benchmark (Min)']) & (ld_daily['Performance Benchmark (Min)'] > 0)]) if enable_quant_kpi_t1 else len(ld_daily[ld_daily['Duration_Min'] > 0])
         inactive_count = len(ld_daily[ld_daily['Duration_Min'] == 0.0])
         
         c1.metric("Total Roster Teachers", total_teachers)
@@ -1717,9 +1808,9 @@ else:
                             filtered_df=filtered_df,
                             filter_desc=filter_description_text,
                             calc_ld_kpi=calc_ld_kpi_t1,
-                            calc_lib_kpi=calc_lib_kpi_t2 if 'calc_lib_kpi_t2' in locals() else calculate_kpi_target(30.0, selected_num_days, True),
+                            calc_lib_kpi=calc_lib_kpi_t2 if 'calc_lib_kpi_t2' in locals() else 0.0,
                             daily_ld_target=daily_ld_target_t1,
-                            daily_lib_target=daily_lib_target_t2 if 'daily_lib_target_t2' in locals() else 30.0,
+                            daily_lib_target=daily_lib_target_t2 if 'daily_lib_target_t2' in locals() else 0.0,
                         selected_num_days=selected_num_days,
                         target_vid_count=3,
                         target_writing_count=3,
@@ -1739,8 +1830,16 @@ else:
                         portfolio_summary = portfolio_summary.merge(roster_counts, on='Institution', how='left').fillna({'Teachers': 0})
                         portfolio_summary['Lesson Prep Total (m)'] = portfolio_summary['lessonDelivery'].astype(float).round(1)
                         portfolio_summary['Library Total (m)'] = portfolio_summary['library'].astype(float).round(1)
-                        portfolio_summary['Lesson Avg/Teacher/Day (m)'] = np.where(portfolio_summary['Teachers'] * max(selected_num_days,1) > 0, portfolio_summary['lessonDelivery'] / portfolio_summary['Teachers'] / max(selected_num_days,1), 0).round(1)
-                        portfolio_summary['Library Avg/Teacher/Day (m)'] = np.where(portfolio_summary['Teachers'] * max(selected_num_days,1) > 0, portfolio_summary['library'] / portfolio_summary['Teachers'] / max(selected_num_days,1), 0).round(1)
+                        portfolio_summary['Lesson Avg/Teacher/Day (m)'] = np.where(
+                            (portfolio_summary['Teachers'] > 0) & (selected_num_days > 0),
+                            portfolio_summary['lessonDelivery'] / portfolio_summary['Teachers'] / selected_num_days,
+                            0.0
+                        ).round(1)
+                        portfolio_summary['Library Avg/Teacher/Day (m)'] = np.where(
+                            (portfolio_summary['Teachers'] > 0) & (selected_num_days > 0),
+                            portfolio_summary['library'] / portfolio_summary['Teachers'] / selected_num_days,
+                            0.0
+                        ).round(1)
                         pdf_bytes = generate_pdf_report(
                             title_text='📘 Lesson Plan Preparation Portfolio Report',
                             subtitle_text=filter_description_text,
@@ -1821,15 +1920,17 @@ else:
         lib_df = tab2_active_df[tab2_active_df['Type'] == 'library']
         lib_usage = lib_df.groupby(['Institution', 'FullName'])['Duration_Min'].sum().reset_index()
         lib_daily = tab2_active_roster.merge(lib_usage, on=['Institution', 'FullName'], how='left').fillna(0.0)
+        lib_daily['Eligible Working Days'] = lib_daily.apply(lambda r: teacher_days.get((r['Institution'], r['FullName']), selected_num_days) if use_teacher_eligible_days else selected_num_days, axis=1)
+        lib_daily['Performance Benchmark (Min)'] = lib_daily['Eligible Working Days'] * daily_lib_target_t2
         
-        def get_lib_status(x):
-            return calculate_kpi_status(x, calc_lib_kpi_t2, enable_quant_kpi_t2, selected_num_days == 0)
+        def get_lib_status_row(r):
+            return calculate_kpi_status(r['Duration_Min'], r['Performance Benchmark (Min)'], enable_quant_kpi_t2, r['Eligible Working Days'] == 0)
 
-        lib_daily['Performance Indicator Status'] = lib_daily['Duration_Min'].apply(get_lib_status)
+        lib_daily['Performance Indicator Status'] = lib_daily.apply(get_lib_status_row, axis=1)
 
         m1, m2, m3, m4 = st.columns(4)
         lib_total_teachers = len(lib_daily)
-        lib_met_count = len(lib_daily[lib_daily['Duration_Min'] >= calc_lib_kpi_t2]) if (enable_quant_kpi_t2 and calc_lib_kpi_t2 > 0) else len(lib_daily[lib_daily['Duration_Min'] > 0])
+        lib_met_count = len(lib_daily[(lib_daily['Duration_Min'] >= lib_daily['Performance Benchmark (Min)']) & (lib_daily['Performance Benchmark (Min)'] > 0)]) if enable_quant_kpi_t2 else len(lib_daily[lib_daily['Duration_Min'] > 0])
         lib_inactive_count = len(lib_daily[lib_daily['Duration_Min'] == 0.0])
         
         m1.metric("Total Roster Teachers", lib_total_teachers)
@@ -1892,7 +1993,11 @@ else:
                         portfolio_summary = portfolio_summary.merge(roster_counts, on='Institution', how='left').fillna({'Teachers': 0})
                         portfolio_summary['Lesson Prep Total (m)'] = portfolio_summary['lessonDelivery'].astype(float).round(1)
                         portfolio_summary['Library Total (m)'] = portfolio_summary['library'].astype(float).round(1)
-                        portfolio_summary['Library Avg/Teacher/Day (m)'] = np.where(portfolio_summary['Teachers'] * max(selected_num_days,1) > 0, portfolio_summary['library'] / portfolio_summary['Teachers'] / max(selected_num_days,1), 0).round(1)
+                        portfolio_summary['Library Avg/Teacher/Day (m)'] = np.where(
+                            (portfolio_summary['Teachers'] > 0) & (selected_num_days > 0),
+                            portfolio_summary['library'] / portfolio_summary['Teachers'] / selected_num_days,
+                            0.0
+                        ).round(1)
                         pdf_bytes = generate_pdf_report(
                             title_text='📚 Library Usage Portfolio Report',
                             subtitle_text=filter_description_text,
@@ -2118,17 +2223,20 @@ else:
 
             t_day_ld = teacher_date_data[teacher_date_data['Type'] == 'lessonDelivery']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
             t_day_lib = teacher_date_data[teacher_date_data['Type'] == 'library']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
+            t_eligible_days = teacher_days.get((teacher_school, target_teacher), selected_num_days) if use_teacher_eligible_days else selected_num_days
+            t_calc_ld_kpi = calculate_kpi_target(daily_ld_target_t4, t_eligible_days, enable_quant_kpi_t4)
+            t_calc_lib_kpi = calculate_kpi_target(daily_lib_target_t4, t_eligible_days, enable_quant_kpi_t4)
             
-            ld_pct = safe_percentage(t_day_ld, calc_ld_kpi_t4)
-            lib_pct = safe_percentage(t_day_lib, calc_lib_kpi_t4)
+            ld_pct = safe_percentage(t_day_ld, t_calc_ld_kpi)
+            lib_pct = safe_percentage(t_day_lib, t_calc_lib_kpi)
 
-            if calc_ld_kpi_t4 > 0:
-                ld_advice = f"🌟 Steady Execution ({t_day_ld:.1f}m logged)" if t_day_ld >= calc_ld_kpi_t4 else (f"⚠️ In-Progress ({t_day_ld:.1f}m logged)" if t_day_ld > 0 else "❌ Pending Activity")
+            if t_calc_ld_kpi > 0:
+                ld_advice = f"🌟 Steady Execution ({t_day_ld:.1f}m logged)" if t_day_ld >= t_calc_ld_kpi else (f"⚠️ In-Progress ({t_day_ld:.1f}m logged)" if t_day_ld > 0 else "❌ Pending Activity")
             else:
                 ld_advice = "✅ Holiday / Scheduled Break"
 
-            if calc_lib_kpi_t4 > 0:
-                lib_advice = f"🌟 Steady Execution ({t_day_lib:.1f}m logged)" if t_day_lib >= calc_lib_kpi_t4 else (f"⚠️ In-Progress ({t_day_lib:.1f}m logged)" if t_day_lib > 0 else "❌ Pending Activity")
+            if t_calc_lib_kpi > 0:
+                lib_advice = f"🌟 Steady Execution ({t_day_lib:.1f}m logged)" if t_day_lib >= t_calc_lib_kpi else (f"⚠️ In-Progress ({t_day_lib:.1f}m logged)" if t_day_lib > 0 else "❌ Pending Activity")
             else:
                 lib_advice = "✅ Holiday / Scheduled Break"
 
