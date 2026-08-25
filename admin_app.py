@@ -20,7 +20,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-# Page layout configuration
+# Page layout configuration (Must be first Streamlit command)
 st.set_page_config(page_title="Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard", layout="wide")
 
 # --- NATIVE POSTGRESQL & SUPABASE CLOUD SETUP ---
@@ -43,6 +43,7 @@ except Exception:
     ai_client = None
 
 
+# --- 1. CORE HELPER & NORMALIZATION FUNCTIONS ---
 def _norm_text(value):
     if pd.isna(value):
         return ""
@@ -101,6 +102,17 @@ def normalize_identity_columns(df):
         out.loc[out["Duration_Min"].le(0.0) & diff_mins.notna() & diff_mins.gt(0), "Duration_Min"] = diff_mins
 
     return out
+
+
+def get_working_days(start_date, end_date, excluded_dates_list, exclude_sundays=True):
+    try:
+        start_np = np.datetime64(start_date)
+        end_np = np.datetime64(end_date) + np.timedelta64(1, 'D')
+        holidays_np = [np.datetime64(d) for d in excluded_dates_list] if excluded_dates_list else []
+        w_mask = '1111110' if exclude_sundays else '1111111'
+        return max(1, int(np.busday_count(start_np, end_np, weekmask=w_mask, holidays=holidays_np)))
+    except Exception:
+        return 1
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -664,6 +676,64 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     return buffer
 
 
+def ingest_excel_to_postgresql(processed_dfs):
+    if not processed_dfs:
+        return
+    combined_df = pd.concat(processed_dfs, ignore_index=True)
+    combined_df = normalize_identity_columns(combined_df)
+    
+    db_cols = [
+        "State_Zone", "Uploaded_By", "Institution", "Center",
+        "FirstName", "LastName", "FullName", "Role", "Type",
+        "Grade", "Subject", "Book", "StartTime", "EndTime",
+        "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
+        "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
+        "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+        "Assessment_Score_Pct"
+    ]
+    
+    for col in db_cols:
+        if col not in combined_df.columns:
+            combined_df[col] = None
+
+    cleaned_df = combined_df[db_cols].copy()
+    
+    for dt_col in ['StartTime', 'EndTime']:
+        cleaned_df[dt_col] = pd.to_datetime(cleaned_df[dt_col], errors='coerce')
+
+    if 'Duration_Min' in cleaned_df.columns:
+        cleaned_df['Duration_Min'] = pd.to_numeric(cleaned_df['Duration_Min'], errors='coerce').fillna(0.0)
+
+    cleaned_df = cleaned_df.replace({np.nan: None})
+    records = cleaned_df.to_dict(orient="records")
+
+    insert_sql = text("""
+        INSERT INTO teacher_records (
+            "State_Zone", "Uploaded_By", "Institution", "Center",
+            "FirstName", "LastName", "FullName", "Role", "Type",
+            "Grade", "Subject", "Book", "StartTime", "EndTime",
+            "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
+            "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
+            "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+            "Assessment_Score_Pct"
+        ) VALUES (
+            :State_Zone, :Uploaded_By, :Institution, :Center,
+            :FirstName, :LastName, :FullName, :Role, :Type,
+            :Grade, :Subject, :Book, :StartTime, :EndTime,
+            :Duration_Min, :Voice_Note_Link, :Lesson_Plan_Picture,
+            :Video_Evidence_1, :Video_Evidence_2, :Video_Evidence_3,
+            :Writing_Sample_Link, :Phonics_Evidence_Link, :Portfolio_Evidence_Link,
+            :Assessment_Score_Pct
+        );
+    """)
+
+    with conn.session as s:
+        s.execute(insert_sql, records)
+        s.commit()
+        
+    fetch_master_db_from_supabase.clear()
+
+
 def render_school_audit_crm_box(tab_name, active_school, current_filter_description, school_audit_whatsapp_message):
     st.markdown("---")
     st.subheader(f"📞 School & Coordinator CRM, Call Notes & WhatsApp Generators ({tab_name})")
@@ -780,7 +850,6 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
             encoded_final_text = urllib.parse.quote(editable_wa_area)
             st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
 
-    # --- CALL DISCUSSION NOTES & FOLLOW-UP SYNC TO SUPABASE ---
     st.markdown("---")
     st.markdown(f"##### 📝 Post-Call Discussion Notes & Follow-up Scheduler ({target_crm_school} - {selected_entity_type})")
     
@@ -1047,11 +1116,13 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
             st.info(f"No call discussion logs recorded yet for {target_crm_school}.")
 
 
-# --- DATA SCOPE & MAIN APP SETUP ---
-# 1. Multi-Employee Hierarchy & Ingestion Portal
+# --- 2. MULTI-EMPLOYEE INGESTION SIDEBAR ---
+st.title("🏫 Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard")
+st.markdown("Track **School Portfolio Management**, **School WoW Velocity**, **Teacher Execution Tiers**, **Quantitative Performance Indicators (Lesson Prep / Library)**, and **360° Qualitative Evidences & Artifact Compliance**.")
+
 st.sidebar.header("📁 Multi-Employee Data Ingestion Portal")
 
-employee_name = st.sidebar.text_input("Enter Consultant Name:", value="Harshit Bhargava")
+employee_name = st.sidebar.text_input("Enter Consultant Name:", value="Harshit Bhargava")[cite: 1]
 employee_state = st.sidebar.selectbox("Select State / Zone (India Region):", [
     "Madhya Pradesh (MP)", "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", 
     "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", 
@@ -1081,7 +1152,7 @@ if uploaded_files:
 
                 temp_df = normalize_identity_columns(temp_df)
                 
-                temp_df['Uploaded_By'] = employee_name
+                temp_df['Uploaded_By'] = employee_name[cite: 1]
                 temp_df['State_Zone'] = employee_state
 
                 if temp_df['Institution'].eq('').all():
@@ -1131,9 +1202,10 @@ if uploaded_files:
             st.sidebar.success(f"Synced {len(files_to_process)} file(s) directly into PostgreSQL Database!")
             st.rerun()
 
+# Fetch DB Records
 df = fetch_master_db_from_supabase()
 
-# --- 2. Granular Database Operations & One-Time Migration Tool ---
+# --- 3. DATABASE MANAGEMENT & ONE-TIME HISTORICAL IMPORT ---
 st.sidebar.markdown("---")
 st.sidebar.header("🗄️ Granular Database Management")
 
@@ -1243,6 +1315,7 @@ if not df.empty:
 if df.empty:
     st.info("👋 Upload your daily or weekly `UserMetrics.xlsx` files in the sidebar, or run the One-Time Import in the sidebar to populate your PostgreSQL database.")
 else:
+    # --- 4. DATE AND GLOBAL SCOPE FILTERS ---
     if 'StartTime' in df.columns and not df['StartTime'].isna().all():
         df['Date'] = df['StartTime'].dt.date
         df['Month_Name'] = df['StartTime'].dt.strftime('%B %Y')
@@ -1279,12 +1352,11 @@ else:
     else:
         master_teacher_roster = master_teacher_roster[['Institution', 'FullName', 'Uploaded_By', 'State_Zone']].drop_duplicates()
 
-    # --- 3. Hierarchical Global Scope Filters ---
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Hierarchical Global Filters")
     
     all_states = sorted([str(s) for s in df['State_Zone'].unique() if str(s).strip() and str(s).lower() not in ['nan', 'none']])
-    default_states = ["Madhya Pradesh (MP)"] if "Madhya Pradesh (MP)" in all_states else all_states
+    default_states = ["Madhya Pradesh (MP)"] if "Madhya Pradesh (MP)" in all_states else all_states[cite: 1]
     
     if all_states:
         selected_states = st.sidebar.multiselect("1. Select State(s) / Zone(s)", options=all_states, default=default_states)
@@ -1305,7 +1377,6 @@ else:
     school_master_roster = master_teacher_roster[master_teacher_roster['Institution'].isin(selected_schools)]
     school_filtered_df = df_emp[df_emp['Institution'].isin(selected_schools)]
 
-    # --- Calendar & Holiday Manager ---
     st.sidebar.markdown("---")
     st.sidebar.header("📅 Calendar & Holiday Manager")
     
@@ -1329,7 +1400,6 @@ else:
             format_func=lambda x: x.strftime('%Y-%m-%d')
         )
 
-    # --- Granularity Selector ---
     st.sidebar.subheader("🔍 Review View Level")
     available_month_weeks = sorted(month_filtered_df['Month_Week_Label'].dropna().unique())
     available_dates = sorted(month_filtered_df['Date'].dropna().unique(), reverse=True)
@@ -1378,7 +1448,7 @@ else:
     filtered_roster = school_master_roster[school_master_roster['FullName'].isin(selected_teachers)]
     filtered_df = filtered_df[filtered_df['FullName'].isin(selected_teachers)]
 
-    # --- SIDEBAR DIRECT EXCEL EXPORT (Only on click) ---
+    # Direct Master DB Excel Export
     st.sidebar.markdown("---")
     st.sidebar.subheader("📥 Direct Admin Master Export")
     if st.sidebar.button("📦 Prepare Master DB Export"):
@@ -1395,7 +1465,7 @@ else:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-    # --- 7 DEDICATED TABS ---
+    # --- 5. TAB-BY-TAB RENDERING ---
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📘 1. Lesson Plan Preparation Tracker", 
         "📚 2. Library Usage Tracker", 
