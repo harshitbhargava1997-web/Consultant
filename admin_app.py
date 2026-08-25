@@ -20,8 +20,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-# Page layout configuration (Must be first Streamlit command)
-st.set_page_config(page_title="Academic Manager Portfolio & Teacher Performance Review Dashboard", layout="wide")
+# Page layout configuration
+st.set_page_config(page_title="Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard", layout="wide")
 
 # --- NATIVE POSTGRESQL & SUPABASE CLOUD SETUP ---
 conn = st.connection("postgresql", type="sql")
@@ -43,7 +43,6 @@ except Exception:
     ai_client = None
 
 
-# --- 1. CORE DATA NORMALIZATION & MATHEMATICAL HELPER FUNCTIONS ---
 def _norm_text(value):
     if pd.isna(value):
         return ""
@@ -54,47 +53,12 @@ def _norm_key(value):
     return _norm_text(value).casefold()
 
 
-def _parse_time_mins(t_val):
-    """Accurately parses numerical minutes, float minutes, and HH:MM:SS / MM:SS formats."""
-    if pd.isna(t_val) or str(t_val).strip() == "" or str(t_val).strip().lower() in ['none', 'nan', 'nat']:
-        return 0.0
-    val_str = str(t_val).strip()
-    try:
-        return float(val_str)
-    except ValueError:
-        pass
-    
-    parts = val_str.split(':')
-    try:
-        if len(parts) == 3:
-            return float(parts[0]) * 60.0 + float(parts[1]) + float(parts[2]) / 60.0
-        elif len(parts) == 2:
-            return float(parts[0]) + float(parts[1]) / 60.0
-    except (ValueError, TypeError):
-        pass
-    return 0.0
-
-
-def _categorize_record_type(val, book_val=""):
-    """Accurately maps variations in log naming to canonical types."""
-    v = _norm_key(val)
-    b = _norm_key(book_val)
-    
-    if any(k in v for k in ['lessondelivery', 'lesson delivery', 'lesson_delivery', 'lessonplan', 'lesson plan', 'prep', 'delivery', 'teaching']):
-        return 'lessonDelivery'
-    if any(k in v for k in ['library', 'digital', 'resource', 'content', 'ebook', 'reading', 'book']):
-        return 'library'
-    if b.startswith('lesson plan') or b.startswith('lp'):
-        return 'lessonDelivery'
-    return 'other'
-
-
 def normalize_identity_columns(df):
     if df is None or df.empty:
         return pd.DataFrame()
     out = df.copy()
 
-    for col in ["Institution", "Center", "FirstName", "LastName", "FullName", "Role", "Uploaded_By", "State_Zone", "Type", "Grade", "Subject", "Book"]:
+    for col in ["Institution", "Center", "FirstName", "LastName", "FullName", "Role", "Uploaded_By", "State_Zone"]:
         if col not in out.columns:
             out[col] = ""
         out[col] = out[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
@@ -107,36 +71,14 @@ def normalize_identity_columns(df):
     ).str.replace(r'\s+', ' ', regex=True).str.strip()
     empty_full = out["FullName"].eq("")
     out.loc[empty_full, "FullName"] = calculated_full.loc[empty_full]
+
     out.loc[out["FullName"].eq(""), "FullName"] = "Unknown Teacher"
-
-    out["Standard_Type"] = out.apply(lambda r: _categorize_record_type(r.get("Type", ""), r.get("Book", "")), axis=1)
-
-    # Accurate duration extraction preserving original Excel values
-    if "Duration_Min" in out.columns:
-        out["Duration_Min"] = out["Duration_Min"].apply(_parse_time_mins)
-    elif "Duration (HH:MM:SS)" in out.columns:
-        out["Duration_Min"] = out["Duration (HH:MM:SS)"].apply(_parse_time_mins)
-    elif "Duration (Minutes)" in out.columns:
-        out["Duration_Min"] = out["Duration (Minutes)"].apply(_parse_time_mins)
-    else:
-        out["Duration_Min"] = 0.0
-
     return out
-
-
-def get_working_days(start_date, end_date, excluded_dates_list, exclude_sundays=True):
-    try:
-        start_np = np.datetime64(start_date)
-        end_np = np.datetime64(end_date) + np.timedelta64(1, 'D')
-        holidays_np = [np.datetime64(d) for d in excluded_dates_list] if excluded_dates_list else []
-        w_mask = '1111110' if exclude_sundays else '1111111'
-        return max(1, int(np.busday_count(start_np, end_np, weekmask=w_mask, holidays=holidays_np)))
-    except Exception:
-        return 1
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_master_db_from_supabase():
+    """Fetches all teacher records directly using native PostgreSQL execution."""
     query = """
         SELECT 
             "State_Zone", "Uploaded_By", "Institution", "Center",
@@ -164,6 +106,7 @@ def fetch_master_db_from_supabase():
         return pd.DataFrame()
 
 
+# --- CACHED SUPABASE PERSISTENCE FOR CRM CONTACTS & CALL LOGS ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_crm_data_from_supabase():
     try:
@@ -255,6 +198,7 @@ def build_teacher_roster_cached(df):
     return candidate.reset_index(drop=True)
 
 
+# --- AI HELPER FUNCTIONS (GEMINI MULTIMODAL INTEGRATION) ---
 def get_gemini_summary(context_prompt, audio_file_obj=None):
     if not ai_client:
         return "⚠️ Gemini API key not found in Streamlit secrets."
@@ -278,35 +222,390 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
         return f"AI Generation Notice: {e}"
 
 
-def extract_evidence_items_vectorized(df_src, col_name):
-    if col_name not in df_src.columns or df_src.empty:
-        return []
+def render_school_audit_crm_box(tab_name, active_school, current_filter_description, school_audit_whatsapp_message):
+    st.markdown("---")
+    st.subheader(f"📞 School & Coordinator CRM, Call Notes & WhatsApp Generators ({tab_name})")
     
-    col_str = df_src[col_name].fillna('').astype(str).str.strip()
-    valid_mask = col_str.str.contains(r'https?://|drive\.google|supabase\.co', case=False, na=False)
-    valid_rows = df_src[valid_mask]
+    if "crm_global_data" not in st.session_state:
+        st.session_state["crm_global_data"] = load_crm_data_from_supabase()
+
+    if "crm_call_logs_store" not in st.session_state:
+        st.session_state["crm_call_logs_store"] = load_call_logs_from_supabase()
+
+    crm_data = st.session_state["crm_global_data"]
+    if "contacts" not in crm_data:
+        crm_data["contacts"] = {}
+
+    target_crm_school = active_school
+
+    c_col1, c_col2 = st.columns([1, 2])
+    with c_col1:
+        st.write(f"🏫 **Target School:** `{target_crm_school}`")
+        
+        if target_crm_school not in crm_data["contacts"]:
+            crm_data["contacts"][target_crm_school] = {
+                "Principal": {"name": "", "phone": ""},
+                "Owner": {"name": "", "phone": ""},
+                "Coordinator": {"name": "", "phone": ""}
+            }
+
+        st.markdown("##### 👥 Select Entity & Contact Details")
+        selected_entity_type = st.selectbox("Target Entity Type:", options=["Principal", "Owner", "Coordinator"], key=f"entity_type_{tab_name}_{target_crm_school}")
+        
+        current_entity_data = crm_data["contacts"][target_crm_school].get(selected_entity_type, {"name": "", "phone": ""})
+        
+        input_contact_name = st.text_input(f"{selected_entity_type} Name:", value=current_entity_data.get("name", ""), key=f"cname_{tab_name}_{target_crm_school}_{selected_entity_type}")
+        input_phone = st.text_input(f"{selected_entity_type} Mobile (+91...):", value=current_entity_data.get("phone", ""), key=f"cphone_{tab_name}_{target_crm_school}_{selected_entity_type}")
+
+        if st.button(f"💾 Save {selected_entity_type} Contact to Supabase", key=f"save_contact_btn_{tab_name}_{target_crm_school}_{selected_entity_type}"):
+            crm_data["contacts"][target_crm_school][selected_entity_type] = {
+                "name": input_contact_name,
+                "phone": input_phone
+            }
+            save_crm_data_to_supabase(crm_data)
+            st.success(f"Successfully saved {selected_entity_type} details for {target_crm_school} to Supabase!")
+
+        active_phone = input_phone.strip()
+        if active_phone:
+            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
+            contact_greeting = input_contact_name if input_contact_name else selected_entity_type
+            quick_wa = urllib.parse.quote(f"Namaste {contact_greeting} ji, checking in from Onelearn Academic Team regarding school audit metrics for {target_crm_school} - {current_filter_description}.")
+            st.markdown(f'<a href="tel:{active_phone}" target="_blank" style="text-decoration:none;"><button style="background-color:#2CA02C;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;margin-bottom:6px;width:100%;">📞 Call {selected_entity_type}</button></a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={quick_wa}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">📱 Quick WhatsApp Message</button></a>', unsafe_allow_html=True)
+        else:
+            st.warning(f"Please enter and save a mobile number for the selected {selected_entity_type}.")
+
+    with c_col2:
+        st.markdown("##### 💬 WhatsApp & Calling Generators (Indian Context)")
+        
+        custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}_{target_crm_school}")
+        
+        with st.expander("✨ AI-Driven Calling Script & Smart Message Generator (Voice & Text)"):
+            manager_voice_audio = st.audio_input(
+                "🎙️ Record Voice Instructions (Speak your custom prompt):",
+                key=f"voice_input_{tab_name}_{target_crm_school}"
+            )
+            user_custom_instruction = st.text_area(
+                "Or Type Custom Instructions (Alternative to voice):",
+                placeholder="e.g., Focus heavily on improving library engagement and phonics submissions...",
+                key=f"ai_custom_prompt_{tab_name}_{target_crm_school}"
+            )
+            
+            if st.button("Generate AI Script & Message", key=f"gen_ai_both_{tab_name}_{target_crm_school}"):
+                if not ai_client:
+                    st.error("Gemini API client is not initialized.")
+                else:
+                    ai_prompt = f"""
+                    You are an expert Academic Consultant. 
+                    Based on these school audit metrics for {target_crm_school} ({current_filter_description}):
+                    Metrics & Breakdown: {school_audit_whatsapp_message}
+                    Target Entity: {selected_entity_type} named {input_contact_name or 'Sir/Madam'}
+                    Tone: {custom_tone}
+                    Text Instructions Provided: {user_custom_instruction if user_custom_instruction else 'None'}
+                    
+                    Generate two distinct outputs:
+                    1. **Calling Script**: A structured phone conversation script calling out specific teacher data points, praises, and areas of concern to discuss with this {selected_entity_type}.
+                    2. **AI WhatsApp Follow-up Message**: A concise, professional message summarizing these exact findings and action items to send on WhatsApp afterward. Sign off with 'Onelearn Academic Team'.
+                    """
+                    with st.spinner("Processing voice/text instructions with Gemini..."):
+                        try:
+                            ai_result = get_gemini_summary(ai_prompt, audio_file_obj=manager_voice_audio)
+                            st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"] = ai_result
+                        except Exception as e:
+                            st.error(f"Error generating AI content: {e}")
+            
+            if f"ai_gen_output_{tab_name}_{target_crm_school}" in st.session_state:
+                st.markdown(st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"])
+
+        st.markdown("##### 📝 Quick WhatsApp Message Draft (Full School Audit)")
+        draft_state_key = f"wa_draft_text_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        sync_track_key = f"last_raw_msg_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        
+        if draft_state_key not in st.session_state or st.session_state.get(sync_track_key) != school_audit_whatsapp_message:
+            st.session_state[draft_state_key] = school_audit_whatsapp_message
+            st.session_state[sync_track_key] = school_audit_whatsapp_message
+
+        editable_wa_area = st.text_area(
+            "Confirm or Edit Final WhatsApp Message Draft:",
+            value=st.session_state[draft_state_key],
+            height=220,
+            key=f"wa_textarea_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        )
+        st.session_state[draft_state_key] = editable_wa_area
+
+        if active_phone:
+            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
+            encoded_final_text = urllib.parse.quote(editable_wa_area)
+            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
+
+    # --- CALL DISCUSSION NOTES & FOLLOW-UP SYNC TO SUPABASE ---
+    st.markdown("---")
+    st.markdown(f"##### 📝 Post-Call Discussion Notes & Follow-up Scheduler ({target_crm_school} - {selected_entity_type})")
     
-    if valid_rows.empty:
-        return []
+    with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}"):
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}_{target_crm_school}")
+        with col_f2:
+            next_followup_date = st.date_input("Next Scheduled Follow-up Date:", value=pd.Timestamp.now().date() + pd.Timedelta(days=7), key=f"fdate_{tab_name}_{target_crm_school}")
+            
+        discussion_notes = st.text_area("Discussion Summary / Notes from Call:", placeholder="Punch key talking points, agreed commitments, and action items...", key=f"dnotes_{tab_name}_{target_crm_school}")
+        call_status_opt = st.selectbox("Call Status / Resolution:", options=["Open Action Item", "In Progress", "Successfully Resolved"], key=f"cstat_{tab_name}_{target_crm_school}")
         
-    items = []
-    for _, r in valid_rows.iterrows():
-        val = str(r[col_name]).strip()
-        d_str = str(r['Date']) if 'Date' in r and pd.notna(r['Date']) else "Recent"
-        g_str = f"Grade {r['Grade']}" if 'Grade' in r and str(r['Grade']).strip() else "Grade N/A"
-        s_str = str(r['Subject']).strip() if 'Subject' in r and str(r['Subject']).strip() else "General Subject"
-        b_str = str(r['Book']).strip() if 'Book' in r and str(r['Book']).strip() else "Lesson Plan"
-        items.append({'url': val, 'date': d_str, 'grade': g_str, 'subject': s_str, 'lesson': b_str})
+        submit_call_log = st.form_submit_button("💾 Save Call Note & Sync to Supabase Cloud")
         
-    seen = set()
-    deduped = []
-    for item in items:
-        if item['url'] not in seen:
-            seen.add(item['url'])
-            deduped.append(item)
-    return deduped
+        if submit_call_log:
+            if discussion_notes.strip():
+                new_log_entry = {
+                    "School": target_crm_school,
+                    "Entity Type": selected_entity_type,
+                    "Contact Name": input_contact_name or "N/A",
+                    "Module Tab": tab_name,
+                    "Filter Window": current_filter_description,
+                    "Call Date": str(call_date_punched),
+                    "Discussion Notes": discussion_notes.strip(),
+                    "Next Follow-up Date": str(next_followup_date),
+                    "Status": call_status_opt
+                }
+                st.session_state["crm_call_logs_store"].append(new_log_entry)
+                save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
+                st.success("✅ Call notes and follow-up schedule successfully saved and synced to Supabase Cloud!")
+            else:
+                st.warning("Please enter discussion notes before saving.")
+
+    if st.session_state["crm_call_logs_store"]:
+        st.markdown(f"##### 📊 Filterable Call Discussion Logs & Audit Trail for {target_crm_school}")
+        logs_df = pd.DataFrame(st.session_state["crm_call_logs_store"])
+        
+        if 'School' in logs_df.columns:
+            logs_df = logs_df[logs_df['School'] == target_crm_school]
+
+        if not logs_df.empty:
+            desired_cols = ['School', 'Entity Type', 'Contact Name', 'Module Tab', 'Filter Window', 'Call Date', 'Discussion Notes', 'Next Follow-up Date', 'Status']
+            available_log_cols = [c for c in desired_cols if c in logs_df.columns]
+            
+            st.dataframe(logs_df[available_log_cols], use_container_width=True)
+            
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                output_buffer = BytesIO()
+                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+                    logs_df[available_log_cols].to_excel(writer, index=False, sheet_name='Call_Discussion_Logs')
+                output_buffer.seek(0)
+                
+                st.download_button(
+                    label="📥 Download Filtered Call Logs (Excel)",
+                    data=output_buffer,
+                    file_name=f"School_CRM_Call_Logs_{target_crm_school.replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_excel_{tab_name}_{target_crm_school}"
+                )
+            with dl_col2:
+                if st.button("🗑️ Clear Call Logs for this School", key=f"clear_logs_btn_{tab_name}_{target_crm_school}"):
+                    st.session_state["crm_call_logs_store"] = [l for l in st.session_state["crm_call_logs_store"] if l.get("School") != target_crm_school]
+                    save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
+                    st.success(f"Successfully cleared call logs for {target_crm_school}!")
+                    st.rerun()
+        else:
+            st.info(f"No call discussion logs recorded yet for {target_crm_school}.")
 
 
+def render_universal_crm_box(tab_name, active_selected_schools, current_filter_description, metrics_summary_text):
+    st.markdown("---")
+    st.subheader(f"📞 School & Coordinator CRM, Call Notes & WhatsApp Generators ({tab_name})")
+    
+    if "crm_global_data" not in st.session_state:
+        st.session_state["crm_global_data"] = load_crm_data_from_supabase()
+
+    if "crm_call_logs_store" not in st.session_state:
+        st.session_state["crm_call_logs_store"] = load_call_logs_from_supabase()
+
+    crm_data = st.session_state["crm_global_data"]
+    if "contacts" not in crm_data:
+        crm_data["contacts"] = {}
+
+    c_col1, c_col2 = st.columns([1, 2])
+    with c_col1:
+        if isinstance(active_selected_schools, str):
+            schools_list = [active_selected_schools]
+        elif isinstance(active_selected_schools, (list, tuple, pd.Series, np.ndarray)):
+            schools_list = [str(s) for s in active_selected_schools if str(s).strip()]
+        else:
+            schools_list = ["Default School"]
+            
+        if not schools_list:
+            schools_list = ["Default School"]
+
+        target_crm_school = st.selectbox("Select School:", options=schools_list, key=f"crm_school_{tab_name}")
+        
+        if target_crm_school not in crm_data["contacts"]:
+            crm_data["contacts"][target_crm_school] = {
+                "Principal": {"name": "", "phone": ""},
+                "Owner": {"name": "", "phone": ""},
+                "Coordinator": {"name": "", "phone": ""}
+            }
+
+        st.markdown("##### 👥 Select Entity & Contact Details")
+        selected_entity_type = st.selectbox("Target Entity Type:", options=["Principal", "Owner", "Coordinator"], key=f"entity_type_{tab_name}_{target_crm_school}")
+        
+        current_entity_data = crm_data["contacts"][target_crm_school].get(selected_entity_type, {"name": "", "phone": ""})
+        
+        input_contact_name = st.text_input(f"{selected_entity_type} Name:", value=current_entity_data.get("name", ""), key=f"cname_{tab_name}_{target_crm_school}_{selected_entity_type}")
+        input_phone = st.text_input(f"{selected_entity_type} Mobile (+91...):", value=current_entity_data.get("phone", ""), key=f"cphone_{tab_name}_{target_crm_school}_{selected_entity_type}")
+
+        if st.button(f"💾 Save {selected_entity_type} Contact to Supabase", key=f"save_contact_btn_{tab_name}_{target_crm_school}_{selected_entity_type}"):
+            crm_data["contacts"][target_crm_school][selected_entity_type] = {
+                "name": input_contact_name,
+                "phone": input_phone
+            }
+            save_crm_data_to_supabase(crm_data)
+            st.success(f"Successfully saved {selected_entity_type} details for {target_crm_school} to Supabase!")
+
+        active_phone = input_phone.strip()
+        if active_phone:
+            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
+            contact_greeting = input_contact_name if input_contact_name else selected_entity_type
+            quick_wa = urllib.parse.quote(f"Namaste {contact_greeting} ji, checking in from Onelearn Academic Team regarding {tab_name} metrics for {target_crm_school} - {current_filter_description}.")
+            st.markdown(f'<a href="tel:{active_phone}" target="_blank" style="text-decoration:none;"><button style="background-color:#2CA02C;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;margin-bottom:6px;width:100%;">📞 Call {selected_entity_type}</button></a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={quick_wa}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">📱 Quick WhatsApp Message</button></a>', unsafe_allow_html=True)
+        else:
+            st.warning(f"Please enter and save a mobile number for the selected {selected_entity_type}.")
+
+    with c_col2:
+        st.markdown("##### 💬 WhatsApp & Calling Generators (Indian Context)")
+        custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}_{target_crm_school}")
+        
+        with st.expander("✨ AI-Driven Calling Script & Smart Message Generator (Voice & Text)"):
+            manager_voice_audio = st.audio_input("🎙️ Record Voice Instructions:", key=f"voice_input_{tab_name}_{target_crm_school}")
+            user_custom_instruction = st.text_area("Or Type Custom Instructions:", placeholder="e.g., Focus heavily on improving library engagement...", key=f"ai_custom_prompt_{tab_name}_{target_crm_school}")
+            
+            if st.button("Generate AI Script & Message", key=f"gen_ai_both_{tab_name}_{target_crm_school}"):
+                if not ai_client:
+                    st.error("Gemini API client is not initialized.")
+                else:
+                    ai_prompt = f"""
+                    You are an expert Academic Consultant. 
+                    Based on these filtered metrics for {tab_name} at {target_crm_school} ({current_filter_description}):
+                    Metrics & Breakdown: {metrics_summary_text}
+                    Target Entity: {selected_entity_type} named {input_contact_name or 'Sir/Madam'}
+                    Tone: {custom_tone}
+                    
+                    Generate two outputs: 1. Calling Script, 2. AI WhatsApp Follow-up Message. Sign off with 'Onelearn Academic Team'.
+                    """
+                    with st.spinner("Processing with Gemini..."):
+                        try:
+                            ai_result = get_gemini_summary(ai_prompt, audio_file_obj=manager_voice_audio)
+                            st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"] = ai_result
+                        except Exception as e:
+                            st.error(f"Error generating AI content: {e}")
+            
+            if f"ai_gen_output_{tab_name}_{target_crm_school}" in st.session_state:
+                st.markdown(st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"])
+
+        st.markdown("##### 📝 Quick WhatsApp Message Draft (Standard Template)")
+        draft_state_key = f"wa_draft_text_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        name_prefix = f" {input_contact_name}" if input_contact_name and input_contact_name.strip() else ""
+        
+        default_template_string = (
+            f"Dear {name_prefix} ji,\n\n"
+            f"Here is the performance update for {target_crm_school} - {current_filter_description}:\n\n"
+            f"📊 *Module:* {tab_name}\n"
+            f"{metrics_summary_text}\n\n"
+            f"Regards,\n"
+            f"Harshit Bhargava,\n"
+            f"OneLearn Academic Team"
+        )
+
+        sync_track_key = f"last_raw_template_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        if draft_state_key not in st.session_state or st.session_state.get(sync_track_key) != default_template_string:
+            st.session_state[draft_state_key] = default_template_string
+            st.session_state[sync_track_key] = default_template_string
+
+        editable_wa_area = st.text_area(
+            "Confirm or Edit Final WhatsApp Message Draft:",
+            value=st.session_state[draft_state_key],
+            height=140,
+            key=f"wa_textarea_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        )
+        st.session_state[draft_state_key] = editable_wa_area
+
+        if active_phone:
+            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
+            encoded_final_text = urllib.parse.quote(editable_wa_area)
+            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown(f"##### 📝 Post-Call Discussion Notes & Follow-up Scheduler ({target_crm_school} - {selected_entity_type})")
+    
+    with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}"):
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}_{target_crm_school}")
+        with col_f2:
+            next_followup_date = st.date_input("Next Scheduled Follow-up Date:", value=pd.Timestamp.now().date() + pd.Timedelta(days=7), key=f"fdate_{tab_name}_{target_crm_school}")
+            
+        discussion_notes = st.text_area("Discussion Summary / Notes from Call:", placeholder="Punch key talking points, agreed commitments, and action items...", key=f"dnotes_{tab_name}_{target_crm_school}")
+        call_status_opt = st.selectbox("Call Status / Resolution:", options=["Open Action Item", "In Progress", "Successfully Resolved"], key=f"cstat_{tab_name}_{target_crm_school}")
+        
+        submit_call_log = st.form_submit_button("💾 Save Call Note & Sync to Supabase Cloud")
+        
+        if submit_call_log:
+            if discussion_notes.strip():
+                new_log_entry = {
+                    "School": target_crm_school,
+                    "Entity Type": selected_entity_type,
+                    "Contact Name": input_contact_name or "N/A",
+                    "Module Tab": tab_name,
+                    "Filter Window": current_filter_description,
+                    "Call Date": str(call_date_punched),
+                    "Discussion Notes": discussion_notes.strip(),
+                    "Next Follow-up Date": str(next_followup_date),
+                    "Status": call_status_opt
+                }
+                st.session_state["crm_call_logs_store"].append(new_log_entry)
+                save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
+                st.success("✅ Call notes and follow-up schedule successfully saved and synced to Supabase Cloud!")
+            else:
+                st.warning("Please enter discussion notes before saving.")
+
+    if st.session_state["crm_call_logs_store"]:
+        st.markdown(f"##### 📊 Filterable Call Discussion Logs & Audit Trail for {target_crm_school}")
+        logs_df = pd.DataFrame(st.session_state["crm_call_logs_store"])
+        
+        if 'School' in logs_df.columns:
+            logs_df = logs_df[logs_df['School'] == target_crm_school]
+
+        if not logs_df.empty:
+            desired_cols = ['School', 'Entity Type', 'Contact Name', 'Module Tab', 'Filter Window', 'Call Date', 'Discussion Notes', 'Next Follow-up Date', 'Status']
+            available_log_cols = [c for c in desired_cols if c in logs_df.columns]
+            
+            st.dataframe(logs_df[available_log_cols], use_container_width=True)
+            
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                output_buffer = BytesIO()
+                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+                    logs_df[available_log_cols].to_excel(writer, index=False, sheet_name='Call_Discussion_Logs')
+                output_buffer.seek(0)
+                
+                st.download_button(
+                    label="📥 Download Filtered Call Logs (Excel)",
+                    data=output_buffer,
+                    file_name=f"School_CRM_Call_Logs_{target_crm_school.replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_excel_{tab_name}_{target_crm_school}"
+                )
+            with dl_col2:
+                if st.button("🗑️ Clear Call Logs for this School", key=f"clear_logs_btn_{tab_name}_{target_crm_school}"):
+                    st.session_state["crm_call_logs_store"] = [l for l in st.session_state["crm_call_logs_store"] if l.get("School") != target_crm_school]
+                    save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
+                    st.success(f"Successfully cleared call logs for {target_crm_school}!")
+                    st.rerun()
+        else:
+            st.info(f"No call discussion logs recorded yet for {target_crm_school}.")
+
+
+# --- PDF REPORT GENERATOR HELPERS ---
 def generate_pdf_report(title_text, subtitle_text, school_name, summary_metrics, dataframe=None, custom_sections=None):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
@@ -397,6 +696,35 @@ def generate_pdf_report(title_text, subtitle_text, school_name, summary_metrics,
     return buffer
 
 
+def extract_evidence_items_vectorized(df_src, col_name):
+    if col_name not in df_src.columns or df_src.empty:
+        return []
+    
+    col_str = df_src[col_name].fillna('').astype(str).str.strip()
+    valid_mask = col_str.str.startswith(('http://', 'https://'))
+    valid_rows = df_src[valid_mask]
+    
+    if valid_rows.empty:
+        return []
+        
+    items = []
+    for _, r in valid_rows.iterrows():
+        val = str(r[col_name]).strip()
+        d_str = str(r['Date']) if 'Date' in r and pd.notna(r['Date']) else "Recent"
+        g_str = f"Grade {r['Grade']}" if 'Grade' in r and str(r['Grade']).strip() else "Grade N/A"
+        s_str = str(r['Subject']).strip() if 'Subject' in r and str(r['Subject']).strip() else "General Subject"
+        b_str = str(r['Book']).strip() if 'Book' in r and str(r['Book']).strip() else "Lesson Plan"
+        items.append({'url': val, 'date': d_str, 'grade': g_str, 'subject': s_str, 'lesson': b_str})
+        
+    seen = set()
+    deduped = []
+    for item in items:
+        if item['url'] not in seen:
+            seen.add(item['url'])
+            deduped.append(item)
+    return deduped
+
+
 def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_lib_kpi, daily_ld_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
@@ -418,11 +746,12 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     card_header = ParagraphStyle('CardHead', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748B'), fontName='Helvetica-Bold', alignment=1)
     card_value = ParagraphStyle('CardVal', parent=styles['Normal'], fontSize=11, leading=14, textColor=primary_color, fontName='Helvetica-Bold', alignment=1)
 
-    # Clean date-scoped slice for this school
+    # Scope to school and ensure date filtering is respected across all teachers
     school_curr_df = filtered_df[filtered_df['Institution'] == school_name]
     if school_curr_df.empty and not school_filtered_df.empty:
         school_curr_df = school_filtered_df[school_filtered_df['Institution'] == school_name]
 
+    # PART 1: CONSOLIDATED TABLES
     story.append(Paragraph(f"<b>Comprehensive School Audit & Feature-Wise Report</b>", title_style))
     story.append(Spacer(1, 4))
     story.append(Paragraph(f"<b>Institution / School Focus:</b> {school_name}", school_style))
@@ -431,10 +760,10 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     story.append(Spacer(1, 8))
     story.append(HRFlowable(width="100%", thickness=1.5, color=primary_color, spaceAfter=12))
 
-    ld_df = school_curr_df[school_curr_df['Standard_Type'] == 'lessonDelivery']
+    ld_df = school_curr_df[school_curr_df['Type'] == 'lessonDelivery']
     ld_usage = ld_df.groupby('FullName')['Duration_Min'].sum().to_dict()
     
-    lib_df = school_curr_df[school_curr_df['Standard_Type'] == 'library']
+    lib_df = school_curr_df[school_curr_df['Type'] == 'library']
     lib_usage = lib_df.groupby('FullName')['Duration_Min'].sum().to_dict()
 
     total_teachers_count = len(teachers_list)
@@ -583,8 +912,8 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         teacher_date_data = school_curr_df[school_curr_df['FullName'] == target_teacher]
         teacher_all_data = school_filtered_df[(school_filtered_df['FullName'] == target_teacher) & (school_filtered_df['Institution'] == school_name)]
 
-        t_day_ld = teacher_date_data[teacher_date_data['Standard_Type'] == 'lessonDelivery']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
-        t_day_lib = teacher_date_data[teacher_date_data['Standard_Type'] == 'library']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
+        t_day_ld = teacher_date_data[teacher_date_data['Type'] == 'lessonDelivery']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
+        t_day_lib = teacher_date_data[teacher_date_data['Type'] == 'library']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
         
         ld_pct = (t_day_ld / calc_ld_kpi) * 100 if calc_ld_kpi > 0 else (100.0 if t_day_ld >= 0 else 0)
         lib_pct = (t_day_lib / calc_lib_kpi) * 100 if calc_lib_kpi > 0 else (100.0 if t_day_lib >= 0 else 0)
@@ -614,7 +943,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             if item['url'] not in seen_v:
                 seen_v.add(item['url'])
                 deduped_v.append(item)
-            v_vid = deduped_v
+        v_vid = deduped_v
 
         lp_combo_total = len(v_voice) + len(v_pic)
         total_artifacts = lp_combo_total + len(v_vid) + len(v_writing) + len(v_phonics) + len(v_portfolio)
@@ -696,6 +1025,18 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     return buffer
 
 
+def get_working_days(start_date, end_date, excluded_dates_list, exclude_sundays=True):
+    try:
+        start_np = np.datetime64(start_date)
+        end_np = np.datetime64(end_date) + np.timedelta64(1, 'D')
+        holidays_np = [np.datetime64(d) for d in excluded_dates_list] if excluded_dates_list else []
+        w_mask = '1111110' if exclude_sundays else '1111111'
+        return max(1, int(np.busday_count(start_np, end_np, weekmask=w_mask, holidays=holidays_np)))
+    except Exception:
+        return 1
+
+
+# --- EXCEL / CSV BATCH INGESTION TO POSTGRESQL ---
 def ingest_excel_to_postgresql(processed_dfs):
     if not processed_dfs:
         return
@@ -754,7 +1095,12 @@ def ingest_excel_to_postgresql(processed_dfs):
     fetch_master_db_from_supabase.clear()
 
 
-# --- 2. MULTI-EMPLOYEE INGESTION SIDEBAR ---
+# Page layout title
+st.title("🏫 Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard")
+st.markdown("Track **School Portfolio Management**, **School WoW Velocity**, **Teacher Execution Tiers**, **Quantitative Performance Indicators (Lesson Prep / Library)**, and **360° Qualitative Evidences & Artifact Compliance**.")
+
+
+# --- 2. MULTI-EMPLOYEE HIERARCHY & DATA UPLOAD MANAGER ---
 st.sidebar.header("📁 Multi-Employee Data Ingestion Portal")
 
 employee_name = st.sidebar.text_input("Enter Consultant Name:", value="Harshit Bhargava")
@@ -779,48 +1125,54 @@ if uploaded_files:
         for file in files_to_process:
             try:
                 temp_dict = pd.read_excel(file, sheet_name=None)
-                # Ingest all valid sheets with logs, not just the first one
-                for sheet_name, temp_df in temp_dict.items():
-                    if temp_df is not None and not temp_df.empty:
-                        if 'Institution' not in temp_df.columns:
-                            temp_df['Institution'] = "Default School"
+                target_sheet = next((s for s in temp_dict.keys() if "usermetric" in s.lower()), list(temp_dict.keys())[0])
+                temp_df = temp_dict[target_sheet]
+                
+                if 'Institution' not in temp_df.columns:
+                    temp_df['Institution'] = "Default School"
 
-                        temp_df = normalize_identity_columns(temp_df)
-                        temp_df['Uploaded_By'] = employee_name
-                        temp_df['State_Zone'] = employee_state
+                temp_df = normalize_identity_columns(temp_df)
+                
+                temp_df['Uploaded_By'] = employee_name
+                temp_df['State_Zone'] = employee_state
 
-                        if temp_df['Institution'].eq('').all():
-                            temp_df['Institution'] = "Default School"
-                        else:
-                            temp_df['Institution'] = temp_df['Institution'].replace('', 'Unknown School')
+                if temp_df['Institution'].eq('').all():
+                    temp_df['Institution'] = "Default School"
+                else:
+                    temp_df['Institution'] = temp_df['Institution'].replace('', 'Unknown School')
 
-                        for col in ['Grade', 'Subject', 'Book']:
-                            if col not in temp_df.columns:
-                                temp_df[col] = ''
-                            else:
-                                temp_df[col] = temp_df[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
+                for col in ['Grade', 'Subject', 'Book']:
+                    if col not in temp_df.columns:
+                        temp_df[col] = ''
+                    else:
+                        temp_df[col] = temp_df[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
 
-                        if 'Duration (HH:MM:SS)' in temp_df.columns:
-                            temp_df['Duration_Min'] = temp_df['Duration (HH:MM:SS)'].apply(_parse_time_mins)
-                        elif 'Duration (Minutes)' in temp_df.columns:
-                            temp_df['Duration_Min'] = temp_df['Duration (Minutes)'].apply(_parse_time_mins)
-                        elif 'Duration_Min' in temp_df.columns:
-                            temp_df['Duration_Min'] = temp_df['Duration_Min'].apply(_parse_time_mins)
-                        else:
-                            temp_df['Duration_Min'] = 0.0
+                def parse_time_mins(t_str):
+                    try:
+                        parts = str(t_str).split(':')
+                        return int(parts[0])*60 + int(parts[1]) + float(parts[2])/60.0
+                    except:
+                        return 0.0
 
-                        if 'Type' in temp_df.columns:
-                            temp_df['Type'] = temp_df['Type'].fillna('Other').astype(str)
+                if 'Duration (HH:MM:SS)' in temp_df.columns:
+                    temp_df['Duration_Min'] = temp_df['Duration (HH:MM:SS)'].apply(parse_time_mins)
+                elif 'Duration (Minutes)' in temp_df.columns:
+                    temp_df['Duration_Min'] = pd.to_numeric(temp_df['Duration (Minutes)'], errors='coerce').fillna(0.0)
+                else:
+                    temp_df['Duration_Min'] = 0.0
 
-                        for dt_col in ['StartTime', 'EndTime']:
-                            if dt_col in temp_df.columns:
-                                temp_df[dt_col] = pd.to_datetime(temp_df[dt_col], errors='coerce')
+                if 'Type' in temp_df.columns:
+                    temp_df['Type'] = temp_df['Type'].fillna('Other').astype(str)
 
-                        for qual_col in ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Assessment_Score_Pct']:
-                            if qual_col not in temp_df.columns:
-                                temp_df[qual_col] = None
+                for dt_col in ['StartTime', 'EndTime']:
+                    if dt_col in temp_df.columns:
+                        temp_df[dt_col] = pd.to_datetime(temp_df[dt_col], errors='coerce')
 
-                        new_processed_dfs.append(temp_df)
+                for qual_col in ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Assessment_Score_Pct']:
+                    if qual_col not in temp_df.columns:
+                        temp_df[qual_col] = None
+
+                new_processed_dfs.append(temp_df)
             except Exception as e:
                 st.sidebar.error(f"Error reading {file.name}: {e}")
 
@@ -831,10 +1183,9 @@ if uploaded_files:
             st.sidebar.success(f"Synced {len(files_to_process)} file(s) directly into PostgreSQL Database!")
             st.rerun()
 
-# Fetch DB Records
 df = fetch_master_db_from_supabase()
 
-# --- 3. DATABASE MANAGEMENT & ONE-TIME HISTORICAL IMPORT ---
+# --- 3. GRANULAR CLOUD DATABASE MANAGEMENT & CONSULTANT FILTERED DELETION ---
 st.sidebar.markdown("---")
 st.sidebar.header("🗄️ Granular Database Management")
 
@@ -842,6 +1193,7 @@ if st.sidebar.button("🔄 Sync Latest Records"):
     fetch_master_db_from_supabase.clear()
     st.rerun()
 
+# --- ONE-TIME DATA IMPORT SECTION FOR HISTORICAL PARQUET & JSON SUBMISSIONS ---
 with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
     st.caption("Imports all historical records from legacy `master_database.parquet` and the `submissions/` JSON folder into PostgreSQL.")
     if st.button("🚀 Run One-Time Import", key="btn_run_historical_import"):
@@ -944,7 +1296,6 @@ if not df.empty:
 if df.empty:
     st.info("👋 Upload your daily or weekly `UserMetrics.xlsx` files in the sidebar, or run the One-Time Import in the sidebar to populate your PostgreSQL database.")
 else:
-    # --- 4. DATE AND GLOBAL SCOPE FILTERS ---
     if 'StartTime' in df.columns and not df['StartTime'].isna().all():
         df['Date'] = df['StartTime'].dt.date
         df['Month_Name'] = df['StartTime'].dt.strftime('%B %Y')
@@ -981,6 +1332,7 @@ else:
     else:
         master_teacher_roster = master_teacher_roster[['Institution', 'FullName', 'Uploaded_By', 'State_Zone']].drop_duplicates()
 
+    # --- HIERARCHICAL GLOBAL FILTERS (DEFAULT TO MP) ---
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Hierarchical Global Filters")
     
@@ -1006,6 +1358,7 @@ else:
     school_master_roster = master_teacher_roster[master_teacher_roster['Institution'].isin(selected_schools)]
     school_filtered_df = df_emp[df_emp['Institution'].isin(selected_schools)]
 
+    # --- CALENDAR & HOLIDAY MANAGER ---
     st.sidebar.markdown("---")
     st.sidebar.header("📅 Calendar & Holiday Manager")
     
@@ -1029,6 +1382,7 @@ else:
             format_func=lambda x: x.strftime('%Y-%m-%d')
         )
 
+    # --- GRANULARITY & CUSTOM DATE RANGE SELECTOR ---
     st.sidebar.subheader("🔍 Review View Level")
     available_month_weeks = sorted(month_filtered_df['Month_Week_Label'].dropna().unique())
     available_dates = sorted(month_filtered_df['Date'].dropna().unique(), reverse=True)
@@ -1071,13 +1425,14 @@ else:
         selected_num_days = get_working_days(c_start, c_end, user_excluded_dates, exclude_sundays=exclude_sundays_flag)
         filter_description_text = f"Custom Range: {c_start} to {c_end} - {selected_num_days} Working Days"
 
+    # 4. Global Teacher Filter
     available_teachers = sorted([str(t) for t in school_master_roster['FullName'].unique() if str(t).strip()])
     selected_teachers = st.sidebar.multiselect("4. Select Teacher(s)", options=available_teachers, default=available_teachers)
     
     filtered_roster = school_master_roster[school_master_roster['FullName'].isin(selected_teachers)]
     filtered_df = filtered_df[filtered_df['FullName'].isin(selected_teachers)]
 
-    # Direct Master DB Excel Export
+    # --- SIDEBAR DIRECT EXCEL EXPORT (Only on click) ---
     st.sidebar.markdown("---")
     st.sidebar.subheader("📥 Direct Admin Master Export")
     if st.sidebar.button("📦 Prepare Master DB Export"):
@@ -1094,7 +1449,7 @@ else:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-    # --- 5. TAB-BY-TAB RENDERING ---
+    # 7 Dedicated Active Tabs
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📘 1. Lesson Plan Preparation Tracker", 
         "📚 2. Library Usage Tracker", 
@@ -1109,6 +1464,7 @@ else:
     with tab1:
         st.header("📘 Lesson Plan Preparation Tracker")
         
+        # Scoped In-Tab KPI Control
         with st.expander("🎯 Lesson Prep Target Benchmark Settings", expanded=False):
             t1_kcol1, t1_kcol2 = st.columns(2)
             with t1_kcol1:
@@ -1139,7 +1495,7 @@ else:
         else:
             st.caption(f"Reviewing cumulative minutes prepared across {selected_num_days} working day(s).")
 
-        ld_df = tab1_active_df[tab1_active_df['Standard_Type'] == 'lessonDelivery']
+        ld_df = tab1_active_df[tab1_active_df['Type'] == 'lessonDelivery']
         ld_usage = ld_df.groupby(['Institution', 'FullName'])['Duration_Min'].sum().reset_index()
         ld_daily = tab1_active_roster.merge(ld_usage, on=['Institution', 'FullName'], how='left').fillna(0.0)
         
@@ -1197,9 +1553,9 @@ else:
                         filtered_df=filtered_df,
                         filter_desc=filter_description_text,
                         calc_ld_kpi=calc_ld_kpi_t1,
-                        calc_lib_kpi=0.0,
+                        calc_lib_kpi=30.0 * selected_num_days,
                         daily_ld_target=daily_ld_target_t1,
-                        daily_lib_target=0.0,
+                        daily_lib_target=30.0,
                         selected_num_days=selected_num_days,
                         target_vid_count=3,
                         target_writing_count=3,
@@ -1248,6 +1604,7 @@ else:
     with tab2:
         st.header("📚 Library Usage Tracker")
         
+        # Scoped In-Tab KPI Control
         with st.expander("🎯 Library Target Benchmark Settings", expanded=False):
             t2_kcol1, t2_kcol2 = st.columns(2)
             with t2_kcol1:
@@ -1278,7 +1635,7 @@ else:
         else:
             st.caption(f"Reviewing cumulative library usage minutes across {selected_num_days} working day(s).")
 
-        lib_df = tab2_active_df[tab2_active_df['Standard_Type'] == 'library']
+        lib_df = tab2_active_df[tab2_active_df['Type'] == 'library']
         lib_usage = lib_df.groupby(['Institution', 'FullName'])['Duration_Min'].sum().reset_index()
         lib_daily = tab2_active_roster.merge(lib_usage, on=['Institution', 'FullName'], how='left').fillna(0.0)
         
@@ -1335,9 +1692,9 @@ else:
                         school_filtered_df=school_filtered_df,
                         filtered_df=filtered_df,
                         filter_desc=filter_description_text,
-                        calc_ld_kpi=0.0,
+                        calc_ld_kpi=10.0 * selected_num_days,
                         calc_lib_kpi=calc_lib_kpi_t2,
-                        daily_ld_target=0.0,
+                        daily_ld_target=10.0,
                         daily_lib_target=daily_lib_target_t2,
                         selected_num_days=selected_num_days,
                         target_vid_count=3,
@@ -1525,6 +1882,7 @@ else:
         st.header("👤 Teacher 360° Performance Profile")
         st.caption("Review quantitative lesson metrics, detailed textbook time logs, and structured qualitative performance evidence with clickable artifact links.")
 
+        # Scoped In-Tab KPI Controls
         with st.expander("🎯 Teacher 360 Benchmark Controls", expanded=False):
             t4_kcol1, t4_kcol2, t4_kcol3 = st.columns(3)
             with t4_kcol1:
@@ -1563,8 +1921,8 @@ else:
             teacher_date_data = filtered_df[filtered_df['FullName'] == target_teacher]
             teacher_school = school_master_roster[school_master_roster['FullName'] == target_teacher]['Institution'].values[0] if not school_master_roster[school_master_roster['FullName'] == target_teacher].empty else "N/A"
 
-            t_day_ld = teacher_date_data[teacher_date_data['Standard_Type'] == 'lessonDelivery']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
-            t_day_lib = teacher_date_data[teacher_date_data['Standard_Type'] == 'library']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
+            t_day_ld = teacher_date_data[teacher_date_data['Type'] == 'lessonDelivery']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
+            t_day_lib = teacher_date_data[teacher_date_data['Type'] == 'library']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
             
             ld_pct = (t_day_ld / calc_ld_kpi_t4) * 100 if calc_ld_kpi_t4 > 0 else (100.0 if t_day_ld >= 0 else 0)
             lib_pct = (t_day_lib / calc_lib_kpi_t4) * 100 if calc_lib_kpi_t4 > 0 else (100.0 if t_day_lib >= 0 else 0)
@@ -1840,7 +2198,7 @@ else:
             else:
                 filtered_audit_log = teacher_all_data[teacher_all_data['Type'] == selected_type_filter]
 
-            t_log_cols = ['Date', 'Type', 'Grade', 'Subject', 'Book', 'StartTime', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Voice_Note_Link', 'Video_Evidence_1', 'Writing_Sample_Link', 'Duration (HH:MM:SS)', 'Duration_Min']
+            t_log_cols = ['Date', 'Type', 'Grade', 'Subject', 'Book', 'StartTime', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Voice_Note_Link', 'Video_Evidence_1', 'Writing_Sample_Link', 'Duration_Min']
             t_avail_cols = [c for c in t_log_cols if c in filtered_audit_log.columns]
             
             if filtered_audit_log.empty:
@@ -1852,16 +2210,20 @@ else:
 
                 col_p1, col_p2 = st.columns(2)
                 with col_p1:
-                    buf_p1_xlsx = BytesIO()
-                    with pd.ExcelWriter(buf_p1_xlsx, engine='openpyxl') as writer:
-                        t_display_log.to_excel(writer, index=False, sheet_name='Teacher_Audit')
-                    buf_p1_xlsx.seek(0)
-                    st.download_button(
-                        label=f"📥 Download Full Excel Audit for {target_teacher}",
-                        data=buf_p1_xlsx,
-                        file_name=f"{target_teacher.replace(' ', '_')}_{selected_type_filter}_Audit.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                    if st.button("⚙️ Prepare Teacher Audit Excel", key=f"prep_audit_xlsx_{target_teacher}"):
+                        buf_p1_xlsx = BytesIO()
+                        with pd.ExcelWriter(buf_p1_xlsx, engine='openpyxl') as writer:
+                            t_display_log.to_excel(writer, index=False, sheet_name='Teacher_Audit')
+                        st.session_state[f"audit_xlsx_{target_teacher}"] = buf_p1_xlsx.getvalue()
+
+                    if f"audit_xlsx_{target_teacher}" in st.session_state:
+                        st.download_button(
+                            label=f"📥 Download Full Excel Audit for {target_teacher}",
+                            data=st.session_state[f"audit_xlsx_{target_teacher}"],
+                            file_name=f"{target_teacher.replace(' ', '_')}_{selected_type_filter}_Audit.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="btn_xlsx_tab4"
+                        )
 
             # --- EMBEDDED SCHOOL AUDIT & WHATSAPP DISPATCH HUB (SCHOOL BY SCHOOL) ---
             st.markdown("---")
@@ -1870,20 +2232,23 @@ else:
 
             sch_roster = school_master_roster[school_master_roster['Institution'] == teacher_school]
             sch_data = filtered_df[filtered_df['Institution'] == teacher_school]
+            if sch_data.empty and not school_filtered_df.empty:
+                sch_data = school_filtered_df[school_filtered_df['Institution'] == teacher_school]
+
             sch_teachers_list = sorted(sch_roster['FullName'].unique().tolist())
             tot_teachers = len(sch_teachers_list)
 
-            ld_m = sch_data[sch_data['Type'] == 'lessonDelivery'].groupby('FullName')['Duration_Min'].sum()
-            lib_m = sch_data[sch_data['Type'] == 'library'].groupby('FullName')['Duration_Min'].sum()
+            ld_m = sch_data[sch_data['Type'] == 'lessonDelivery'].groupby('FullName')['Duration_Min'].sum().to_dict()
+            lib_m = sch_data[sch_data['Type'] == 'library'].groupby('FullName')['Duration_Min'].sum().to_dict()
 
             met_ld = 0
             met_lib = 0
             for t in sch_teachers_list:
                 t_ld_mins = ld_m.get(t, 0.0)
                 t_lib_mins = lib_m.get(t, 0.0)
-                if (calc_ld_kpi > 0 and t_ld_mins >= calc_ld_kpi) or (calc_ld_kpi == 0 and t_ld_mins > 0):
+                if (calc_ld_kpi_t4 > 0 and t_ld_mins >= calc_ld_kpi_t4) or (calc_ld_kpi_t4 == 0 and t_ld_mins > 0):
                     met_ld += 1
-                if (calc_lib_kpi > 0 and t_lib_mins >= calc_lib_kpi) or (calc_lib_kpi == 0 and t_lib_mins > 0):
+                if (calc_lib_kpi_t4 > 0 and t_lib_mins >= calc_lib_kpi_t4) or (calc_lib_kpi_t4 == 0 and t_lib_mins > 0):
                     met_lib += 1
 
             ld_comp_pct = (met_ld / tot_teachers * 100) if tot_teachers > 0 else 0
@@ -1892,51 +2257,58 @@ else:
             inactive_teachers = [t for t in sch_teachers_list if (ld_m.get(t, 0.0) == 0.0 and lib_m.get(t, 0.0) == 0.0)]
             inactive_str = ", ".join(inactive_teachers[:3]) + (f" (+{len(inactive_teachers)-3} more)" if len(inactive_teachers) > 3 else "") if inactive_teachers else "None (All Active)"
 
-            vids_cnt = len([l for col in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3'] if col in sch_data.columns for l in sch_data[col].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)])
-            phonics_cnt = len([l for l in sch_data['Phonics_Evidence_Link'].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Phonics_Evidence_Link' in sch_data.columns else 0
-            writing_cnt = len([l for l in sch_data['Writing_Sample_Link'].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Writing_Sample_Link' in sch_data.columns else 0
-            lp_pic_cnt = len([l for l in sch_data['Lesson_Plan_Picture'].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Lesson_Plan_Picture' in sch_data.columns else 0
-            voice_cnt = len([l for l in sch_data['Voice_Note_Link'].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Voice_Note_Link' in sch_data.columns else 0
-            portfolio_cnt = len([l for l in sch_data['Portfolio_Evidence_Link'].dropna() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Portfolio_Evidence_Link' in sch_data.columns else 0
+            vids_cnt = sum([len(extract_evidence_items_vectorized(sch_data, col)) for col in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']])
+            phonics_cnt = len(extract_evidence_items_vectorized(sch_data, 'Phonics_Evidence_Link'))
+            writing_cnt = len(extract_evidence_items_vectorized(sch_data, 'Writing_Sample_Link'))
+            lp_pic_cnt = len(extract_evidence_items_vectorized(sch_data, 'Lesson_Plan_Picture'))
+            voice_cnt = len(extract_evidence_items_vectorized(sch_data, 'Voice_Note_Link'))
+            portfolio_cnt = len(extract_evidence_items_vectorized(sch_data, 'Portfolio_Evidence_Link'))
 
-            school_pdf_buf = generate_comprehensive_school_pdf_report(
-                school_name=teacher_school,
-                teachers_list=sch_teachers_list,
-                school_filtered_df=school_filtered_df,
-                filtered_df=filtered_df,
-                filter_desc=filter_description_text,
-                calc_ld_kpi=calc_ld_kpi,
-                calc_lib_kpi=calc_lib_kpi,
-                daily_ld_target=daily_ld_target,
-                daily_lib_target=daily_lib_target,
-                selected_num_days=selected_num_days,
-                target_vid_count=target_vid_count,
-                target_writing_count=target_writing_count,
-                target_lp_combo_count=target_lp_combo_count,
-                target_phonics_count=target_phonics_count,
-                target_portfolio_count=target_portfolio_count,
-                enable_quant_kpi=enable_quant_kpi,
-                enable_qual_kpi=enable_qual_kpi
-            )
-            hosted_school_pdf_url = upload_pdf_to_supabase(school_pdf_buf, teacher_school)
+            hosted_school_pdf_url = st.session_state.get(f"hosted_pdf_url_{teacher_school}")
+
+            if st.button(f"☁️ Compile & Upload PDF Report to Supabase Cloud for {teacher_school}", key=f"upload_cloud_pdf_{teacher_school}"):
+                with st.spinner("Generating and uploading PDF report to Supabase..."):
+                    school_pdf_buf = generate_comprehensive_school_pdf_report(
+                        school_name=teacher_school,
+                        teachers_list=sch_teachers_list,
+                        school_filtered_df=school_filtered_df,
+                        filtered_df=filtered_df,
+                        filter_desc=filter_description_text,
+                        calc_ld_kpi=calc_ld_kpi_t4,
+                        calc_lib_kpi=calc_lib_kpi_t4,
+                        daily_ld_target=daily_ld_target_t4,
+                        daily_lib_target=daily_lib_target_t4,
+                        selected_num_days=selected_num_days,
+                        target_vid_count=target_vid_count_t4,
+                        target_writing_count=target_writing_count_t4,
+                        target_lp_combo_count=target_lp_combo_count_t4,
+                        target_phonics_count=target_phonics_count_t4,
+                        target_portfolio_count=target_portfolio_count_t4,
+                        enable_quant_kpi=enable_quant_kpi_t4,
+                        enable_qual_kpi=enable_qual_kpi_t4
+                    )
+                    hosted_school_pdf_url = upload_pdf_to_supabase(school_pdf_buf, teacher_school)
+                    st.session_state[f"hosted_pdf_url_{teacher_school}"] = hosted_school_pdf_url
+                    st.success("Uploaded successfully to Supabase!")
+
             pdf_link_markdown = f"\n\n📄 *Download Full School Audit Report (PDF):*\n{hosted_school_pdf_url}" if hosted_school_pdf_url else ""
 
-            ld_bench_str = f" [Benchmark: {daily_ld_target:.0f}m/day × {selected_num_days}d = {calc_ld_kpi:.0f} mins total]" if (enable_quant_kpi and calc_ld_kpi > 0) else ""
-            lib_bench_str = f" [Benchmark: {daily_lib_target:.0f}m/day × {selected_num_days}d = {calc_lib_kpi:.0f} mins total]" if (enable_quant_kpi and calc_lib_kpi > 0) else ""
+            ld_bench_str = f" [Benchmark: {daily_ld_target_t4:.0f}m/day × {selected_num_days}d = {calc_ld_kpi_t4:.0f} mins total]" if (enable_quant_kpi_t4 and calc_ld_kpi_t4 > 0) else ""
+            lib_bench_str = f" [Benchmark: {daily_lib_target_t4:.0f}m/day × {selected_num_days}d = {calc_lib_kpi_t4:.0f} mins total]" if (enable_quant_kpi_t4 and calc_lib_kpi_t4 > 0) else ""
 
             school_msg_parts = [
-                f"Respected Sir/Madam,\n\n"
+                f"Respected Sir/Madam,\n\n",
                 f"Greetings from OneLearn Academic Team! Here is the latest performance & classroom implementation summary for *{teacher_school}* ({filter_description_text}):\n"
             ]
 
-            if enable_quant_kpi:
+            if enable_quant_kpi_t4:
                 school_msg_parts.append(
                     f"📊 *Quantitative Benchmarks:*\n"
                     f"• Lesson Plan Prep Compliance: {ld_comp_pct:.0f}% ({met_ld}/{tot_teachers} Teachers){ld_bench_str}\n"
                     f"• Library Digital Usage Compliance: {lib_comp_pct:.0f}% ({met_lib}/{tot_teachers} Teachers){lib_bench_str}"
                 )
 
-            if enable_qual_kpi:
+            if enable_qual_kpi_t4:
                 school_msg_parts.append(
                     f"\n📬 *Classroom Evidence Submissions:*\n"
                     f"• Activity Videos: {vids_cnt} Uploaded\n"
@@ -1972,6 +2344,20 @@ else:
         if school_filtered_df.empty:
             st.warning("No data available for the selected school filter.")
         else:
+            # Scoped In-Tab KPI Controls
+            with st.expander("🎯 Portfolio Quadrant Benchmark Settings", expanded=False):
+                t5_kcol1, t5_kcol2 = st.columns(2)
+                with t5_kcol1:
+                    enable_quant_kpi_t5 = st.checkbox("Enable Quantitative Benchmark", value=True, key="t5_enable_quant_kpi")
+                    daily_ld_target_t5 = st.number_input("Lesson Prep Target (Mins/Day)", min_value=0.0, max_value=60.0, value=10.0, step=5.0, key="t5_ld_target", disabled=not enable_quant_kpi_t5) if enable_quant_kpi_t5 else 0.0
+                    daily_lib_target_t5 = st.number_input("Library Usage Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t5_lib_target", disabled=not enable_quant_kpi_t5) if enable_quant_kpi_t5 else 0.0
+                with t5_kcol2:
+                    enable_qual_kpi_t5 = st.checkbox("Enable Qualitative Artifact Benchmark", value=True, key="t5_enable_qual_kpi")
+                    target_vid_count_t5 = st.number_input("Min. Activity Videos Required", min_value=1, max_value=20, value=3, step=1, key="t5_vid_cnt", disabled=not enable_qual_kpi_t5) if enable_qual_kpi_t5 else 0
+                    target_writing_count_t5 = st.number_input("Min. Writing Practice Required", min_value=1, max_value=20, value=3, step=1, key="t5_writing_cnt", disabled=not enable_qual_kpi_t5) if enable_qual_kpi_t5 else 0
+
+            t5_class_filter = st.selectbox("Filter Portfolio by Classification:", ["All Classifications", "🌟 Pace Setters", "📘 Lesson Focused", "📚 Library Focused", "🚨 Priority Focus"], key="t5_class_filter")
+
             school_stats = filtered_df.groupby(['Institution', 'Type'])['Duration_Min'].sum().unstack(fill_value=0.0).reset_index()
             
             if 'lessonDelivery' not in school_stats.columns: school_stats['lessonDelivery'] = 0.0
@@ -1992,15 +2378,12 @@ else:
             qual_agg = []
             for s_name in school_stats['Institution'].unique():
                 s_data = filtered_df[filtered_df['Institution'] == s_name]
-                s_vids = 0
-                for vc in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']:
-                    if vc in s_data.columns:
-                        s_vids += len([l for l in s_data[vc].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)])
-                s_w = len([l for l in s_data['Writing_Sample_Link'].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Writing_Sample_Link' in s_data.columns else 0
-                s_lp = len([l for l in s_data['Lesson_Plan_Picture'].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Lesson_Plan_Picture' in s_data.columns else 0
-                s_vn = len([l for l in s_data['Voice_Note_Link'].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Voice_Note_Link' in s_data.columns else 0
-                s_ph = len([l for l in s_data['Phonics_Evidence_Link'].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Phonics_Evidence_Link' in s_data.columns else 0
-                s_pf = len([l for l in s_data['Portfolio_Evidence_Link'].dropna().unique() if re.match(r'^https?://', str(l).strip(), re.IGNORECASE)]) if 'Portfolio_Evidence_Link' in s_data.columns else 0
+                s_vids = sum([len(extract_evidence_items_vectorized(s_data, vc)) for vc in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']])
+                s_w = len(extract_evidence_items_vectorized(s_data, 'Writing_Sample_Link'))
+                s_lp = len(extract_evidence_items_vectorized(s_data, 'Lesson_Plan_Picture'))
+                s_vn = len(extract_evidence_items_vectorized(s_data, 'Voice_Note_Link'))
+                s_ph = len(extract_evidence_items_vectorized(s_data, 'Phonics_Evidence_Link'))
+                s_pf = len(extract_evidence_items_vectorized(s_data, 'Portfolio_Evidence_Link'))
 
                 qual_agg.append({
                     'Institution': s_name,
@@ -2015,13 +2398,13 @@ else:
             school_stats = school_stats.merge(qual_df_school, on='Institution', how='left').fillna(0)
 
             def classify_school(row):
-                if not enable_quant_kpi:
+                if not enable_quant_kpi_t5:
                     return 'Active Portfolio'
-                ld_ok = row['Avg_Lesson_Prep_Mins'] >= daily_ld_target
-                lib_ok = row['Avg_Library_Usage_Mins'] >= daily_lib_target
+                ld_ok = row['Avg_Lesson_Prep_Mins'] >= daily_ld_target_t5
+                lib_ok = row['Avg_Library_Usage_Mins'] >= daily_lib_target_t5
                 qual_ok = True
-                if enable_qual_kpi:
-                    qual_ok = (row['Activity_Videos'] >= target_vid_count) or (row['Writing_Samples'] >= target_writing_count)
+                if enable_qual_kpi_t5:
+                    qual_ok = (row['Activity_Videos'] >= target_vid_count_t5) or (row['Writing_Samples'] >= target_writing_count_t5)
 
                 if ld_ok and lib_ok and qual_ok:
                     return '🌟 Pace Setters'
@@ -2053,42 +2436,66 @@ else:
             with col_bot2:
                 st.error(f"🚨 **Priority Focus ({len(priority_focus)} Schools)**\n\n" + (", ".join(priority_focus) if priority_focus else "None"))
 
+            display_school_stats = school_stats if t5_class_filter == "All Classifications" else school_stats[school_stats['Classification'] == t5_class_filter]
+
             st.subheader("📋 Complete School Performance Leaderboard")
-            display_qtable = school_stats[['Institution', 'Roster_Teachers', 'Avg_Lesson_Prep_Mins', 'Avg_Library_Usage_Mins', 'LP_Audio_Submissions', 'Activity_Videos', 'Writing_Samples', 'Phonics_Evidences', 'Portfolio_Artifacts', 'Classification']].rename(columns={
+            display_qtable = display_school_stats[['Institution', 'Roster_Teachers', 'Avg_Lesson_Prep_Mins', 'Avg_Library_Usage_Mins', 'LP_Audio_Submissions', 'Activity_Videos', 'Writing_Samples', 'Phonics_Evidences', 'Portfolio_Artifacts', 'Classification']].rename(columns={
                 'Institution': 'School Name', 'Roster_Teachers': 'Active Teachers', 'Avg_Lesson_Prep_Mins': 'Prep (m/day)', 'Avg_Library_Usage_Mins': 'Library (m/day)', 'LP_Audio_Submissions': 'LP/Audio Notes', 'Activity_Videos': 'Activity Videos', 'Writing_Samples': 'Writing Samples', 'Phonics_Evidences': 'Phonics Uploads', 'Portfolio_Artifacts': 'Portfolio Uploads'
             })
             st.dataframe(display_qtable, use_container_width=True)
 
             col_t5_d1, col_t5_d2 = st.columns(2)
             with col_t5_d1:
-                pdf_tab5 = generate_pdf_report(
-                    title_text="🏛️ Academic Manager Portfolio Review",
-                    subtitle_text=f"Portfolio Performance Leaderboard ({selected_num_days} Working Days)",
-                    school_name="Multiple Portfolio Schools",
-                    summary_metrics={"Total Schools": len(school_stats), "Pace Setters": len(pace_setters), "Priority Focus": len(priority_focus)},
-                    dataframe=display_qtable
-                )
-                st.download_button("📄 Download Portfolio Overview Report (PDF)", data=pdf_tab5, file_name=f"Manager_Portfolio_Overview_{selected_month.replace(' ', '_')}.pdf", mime="application/pdf")
+                if st.button("⚙️ Compile Portfolio Overview PDF", key="prep_pdf_tab5_btn"):
+                    with st.spinner("Compiling Portfolio PDF..."):
+                        pdf_t5 = generate_pdf_report(
+                            title_text="🏛️ Academic Manager Portfolio Review",
+                            subtitle_text=f"Portfolio Performance Leaderboard ({selected_num_days} Working Days)",
+                            school_name="Multiple Portfolio Schools",
+                            summary_metrics={"Total Schools": len(display_school_stats), "Pace Setters": len(pace_setters), "Priority Focus": len(priority_focus)},
+                            dataframe=display_qtable
+                        ).getvalue()
+                        st.session_state["tab5_pdf_ready"] = pdf_t5
+
+                if "tab5_pdf_ready" in st.session_state:
+                    st.download_button("📄 Download Portfolio Overview Report (PDF)", data=st.session_state["tab5_pdf_ready"], file_name=f"Manager_Portfolio_Overview_{selected_month.replace(' ', '_')}.pdf", mime="application/pdf", key="btn_pdf_tab5")
+
             with col_t5_d2:
-                buf_t5_xlsx = BytesIO()
-                with pd.ExcelWriter(buf_t5_xlsx, engine='openpyxl') as writer:
-                    display_qtable.to_excel(writer, index=False, sheet_name='Portfolio_Leaderboard')
-                buf_t5_xlsx.seek(0)
-                st.download_button("📥 Download Portfolio Leaderboard (Excel)", data=buf_t5_xlsx, file_name=f"Portfolio_Leaderboard_{selected_month.replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                if st.button("⚙️ Prepare Portfolio Leaderboard Excel", key="prep_xlsx_tab5_btn"):
+                    buf_t5_xlsx = BytesIO()
+                    with pd.ExcelWriter(buf_t5_xlsx, engine='openpyxl') as writer:
+                        display_qtable.to_excel(writer, index=False, sheet_name='Portfolio_Leaderboard')
+                    st.session_state["tab5_xlsx_ready"] = buf_t5_xlsx.getvalue()
+
+                if "tab5_xlsx_ready" in st.session_state:
+                    st.download_button("📥 Download Portfolio Leaderboard (Excel)", data=st.session_state["tab5_xlsx_ready"], file_name=f"Portfolio_Leaderboard_{selected_month.replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_xlsx_tab5")
 
     # TAB 6: SCHOOL-LEVEL TEACHER PROGRESSION & EXECUTION TIERS
     with tab6:
         st.header("🏫 School-Level Teacher Progression & Execution Tiers")
+        
+        # Scoped In-Tab KPI Controls
+        with st.expander("🎯 Progression Target Benchmark Settings", expanded=False):
+            t6_kcol1, t6_kcol2 = st.columns(2)
+            with t6_kcol1:
+                daily_ld_target_t6 = st.number_input("Lesson Prep Target (Mins/Day)", min_value=0.0, max_value=60.0, value=10.0, step=5.0, key="t6_ld_target")
+            with t6_kcol2:
+                daily_lib_target_t6 = st.number_input("Library Usage Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t6_lib_target")
+
+        calc_ld_kpi_t6 = daily_ld_target_t6 * selected_num_days
+        calc_lib_kpi_t6 = daily_lib_target_t6 * selected_num_days
+
         all_schools_list_t6 = sorted(school_master_roster['Institution'].unique())
         
         if not all_schools_list_t6:
             st.info("No schools found in roster.")
         else:
-            target_school_t6 = st.selectbox("Select School to Inspect:", options=all_schools_list_t6, key="t6_school_sel")
+            t6_col_f1, t6_col_f2 = st.columns(2)
+            with t6_col_f1:
+                target_school_t6 = st.selectbox("Select School to Inspect:", options=all_schools_list_t6, key="t6_school_sel")
+                
             school_t6_roster = school_master_roster[school_master_roster['Institution'] == target_school_t6]
             school_t6_data = school_filtered_df[school_filtered_df['Institution'] == target_school_t6]
-
-            st.markdown(f"### 🏫 School Audit: **{target_school_t6}** | Active Roster: **{len(school_t6_roster)} Teachers**")
 
             t6_ld = school_t6_data[school_t6_data['Type'] == 'lessonDelivery'].groupby('FullName')['Duration_Min'].sum().reset_index()
             t6_lib = school_t6_data[school_t6_data['Type'] == 'library'].groupby('FullName')['Duration_Min'].sum().reset_index()
@@ -2097,8 +2504,8 @@ else:
             t6_teachers = t6_teachers.merge(t6_lib.rename(columns={'Duration_Min': 'Library_Mins'}), on='FullName', how='left').fillna(0.0)
 
             def tier_teacher(row):
-                ld_pct = (row['Lesson_Mins'] / calc_ld_kpi) if calc_ld_kpi > 0 else 1.0
-                lib_pct = (row['Library_Mins'] / calc_lib_kpi) if calc_lib_kpi > 0 else 1.0
+                ld_pct = (row['Lesson_Mins'] / calc_ld_kpi_t6) if calc_ld_kpi_t6 > 0 else 1.0
+                lib_pct = (row['Library_Mins'] / calc_lib_kpi_t6) if calc_lib_kpi_t6 > 0 else 1.0
                 if ld_pct >= 1.0 and lib_pct >= 1.0:
                     return '🌟 Consistent Achiever (>= 100%)'
                 elif ld_pct < 0.40 and lib_pct < 0.40:
@@ -2107,6 +2514,16 @@ else:
                     return '⚠️ Fluctuating / Partial (40%-99%)'
 
             t6_teachers['Execution_Tier'] = t6_teachers.apply(tier_teacher, axis=1)
+
+            with t6_col_f2:
+                t6_tier_filter = st.selectbox("Filter by Execution Tier:", ["All Tiers", "🌟 Consistent Achiever (>= 100%)", "⚠️ Fluctuating / Partial (40%-99%)", "❌ Persistent Inactive (< 40%)"], key="t6_tier_filter")
+
+            if t6_tier_filter != "All Tiers":
+                t6_teachers_filtered = t6_teachers[t6_teachers['Execution_Tier'] == t6_tier_filter]
+            else:
+                t6_teachers_filtered = t6_teachers
+
+            st.markdown(f"### 🏫 School Audit: **{target_school_t6}** | Active Roster: **{len(school_t6_roster)} Teachers**")
 
             e1, e2, e3 = st.columns(3)
             num_ach = len(t6_teachers[t6_teachers['Execution_Tier'].str.startswith('🌟')])
@@ -2118,33 +2535,41 @@ else:
             e3.metric("❌ Persistent Inactive", num_inact)
 
             fig_t6_bar = px.bar(
-                t6_teachers, x="FullName", y=["Lesson_Mins", "Library_Mins"],
+                t6_teachers_filtered, x="FullName", y=["Lesson_Mins", "Library_Mins"],
                 title=f"Teacher Usage Breakdown for {target_school_t6} (Mins)",
                 labels={"FullName": "Teacher Name", "value": "Logged Minutes", "variable": "Feature"},
                 barmode="group", text_auto=".1f"
             )
             st.plotly_chart(fig_t6_bar, use_container_width=True)
 
-            display_t6_table = t6_teachers.rename(columns={'FullName': 'Teacher Name', 'Lesson_Mins': 'Lesson Prep (m)', 'Library_Mins': 'Library Usage (m)', 'Execution_Tier': 'Execution Tier'})
+            display_t6_table = t6_teachers_filtered.rename(columns={'FullName': 'Teacher Name', 'Lesson_Mins': 'Lesson Prep (m)', 'Library_Mins': 'Library Usage (m)', 'Execution_Tier': 'Execution Tier'})
             st.dataframe(display_t6_table, use_container_width=True)
 
     # TAB 7: LIVE EVIDENCE SUBMISSIONS FEED & QUALITATIVE TRACKER
     with tab7:
         st.header("📬 Live Evidence Submissions Feed & Qualitative Performance Indicator Tracker")
-        if enable_qual_kpi:
-            st.caption(f"Track submissions against Qualitative Performance Indicators.")
+        
+        # Scoped In-Tab KPI Controls
+        with st.expander("🎯 Qualitative Artifact Threshold Controls", expanded=False):
+            t7_kcol1, t7_kcol2 = st.columns(2)
+            with t7_kcol1:
+                target_vid_count_t7 = st.number_input("Min. Activity Videos", min_value=1, max_value=20, value=3, step=1, key="t7_vid_cnt")
+                target_writing_count_t7 = st.number_input("Min. Writing Samples", min_value=1, max_value=20, value=3, step=1, key="t7_writing_cnt")
+            with t7_kcol2:
+                target_phonics_count_t7 = st.number_input("Min. Phonics Submissions", min_value=1, max_value=20, value=2, step=1, key="t7_ph_cnt")
+                target_portfolio_count_t7 = st.number_input("Min. Portfolio Artifacts", min_value=1, max_value=20, value=1, step=1, key="t7_pf_cnt")
 
         evidence_cols = ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link']
         avail_ev_cols = [c for c in evidence_cols if c in filtered_df.columns]
 
-        def has_valid_evidence(row):
-            for col in avail_ev_cols:
-                val = str(row[col]).strip()
-                if re.match(r'^https?://', val, re.IGNORECASE):
-                    return True
-            return False
-
-        all_submissions_df = filtered_df[filtered_df.apply(has_valid_evidence, axis=1)].copy() if not filtered_df.empty and avail_ev_cols else pd.DataFrame()
+        if not filtered_df.empty and avail_ev_cols:
+            url_mask = pd.concat([
+                filtered_df[c].fillna('').astype(str).str.strip().str.startswith(('http://', 'https://'))
+                for c in avail_ev_cols
+            ], axis=1).any(axis=1)
+            all_submissions_df = filtered_df[url_mask].copy()
+        else:
+            all_submissions_df = pd.DataFrame()
 
         if all_submissions_df.empty:
             st.info("No teacher evidence submissions match the currently selected global filter criteria.")
