@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import os
 import re
 import json
+import uuid
 import urllib.parse
 from io import BytesIO
 from sqlalchemy import text
@@ -1208,65 +1209,50 @@ def ingest_excel_to_postgresql(processed_dfs):
         cleaned_df['Duration_Min'] = cleaned_df['Duration_Min'].fillna(0.0).clip(lower=0.0)
 
     cleaned_df = cleaned_df.replace({np.nan: None})
-    records = cleaned_df.to_dict(orient="records")
 
-    insert_sql = text("""
-        INSERT INTO teacher_records (
-            "State_Zone", "Uploaded_By", "Institution", "Center",
-            "FirstName", "LastName", "FullName", "Role", "Type",
-            "Grade", "Subject", "Book", "StartTime", "EndTime",
-            "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
-            "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
-            "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
-            "Assessment_Score_Pct"
-        )
-        SELECT
-            :State_Zone, :Uploaded_By, :Institution, :Center,
-            :FirstName, :LastName, :FullName, :Role, :Type,
-            :Grade, :Subject, :Book, :StartTime, :EndTime,
-            :Duration_Min, :Voice_Note_Link, :Lesson_Plan_Picture,
-            :Video_Evidence_1, :Video_Evidence_2, :Video_Evidence_3,
-            :Writing_Sample_Link, :Phonics_Evidence_Link, :Portfolio_Evidence_Link,
-            :Assessment_Score_Pct
-        WHERE NOT EXISTS (
-            SELECT 1 FROM teacher_records t
-            WHERE t."State_Zone" IS NOT DISTINCT FROM :State_Zone
-              AND t."Uploaded_By" IS NOT DISTINCT FROM :Uploaded_By
-              AND t."Institution" IS NOT DISTINCT FROM :Institution
-              AND t."Center" IS NOT DISTINCT FROM :Center
-              AND t."FirstName" IS NOT DISTINCT FROM :FirstName
-              AND t."LastName" IS NOT DISTINCT FROM :LastName
-              AND t."FullName" IS NOT DISTINCT FROM :FullName
-              AND t."Role" IS NOT DISTINCT FROM :Role
-              AND t."Type" IS NOT DISTINCT FROM :Type
-              AND t."Grade" IS NOT DISTINCT FROM :Grade
-              AND t."Subject" IS NOT DISTINCT FROM :Subject
-              AND t."Book" IS NOT DISTINCT FROM :Book
-              AND t."StartTime" IS NOT DISTINCT FROM :StartTime
-              AND t."EndTime" IS NOT DISTINCT FROM :EndTime
-              AND t."Duration_Min" IS NOT DISTINCT FROM :Duration_Min
-              AND t."Voice_Note_Link" IS NOT DISTINCT FROM :Voice_Note_Link
-              AND t."Lesson_Plan_Picture" IS NOT DISTINCT FROM :Lesson_Plan_Picture
-              AND t."Video_Evidence_1" IS NOT DISTINCT FROM :Video_Evidence_1
-              AND t."Video_Evidence_2" IS NOT DISTINCT FROM :Video_Evidence_2
-              AND t."Video_Evidence_3" IS NOT DISTINCT FROM :Video_Evidence_3
-              AND t."Writing_Sample_Link" IS NOT DISTINCT FROM :Writing_Sample_Link
-              AND t."Phonics_Evidence_Link" IS NOT DISTINCT FROM :Phonics_Evidence_Link
-              AND t."Portfolio_Evidence_Link" IS NOT DISTINCT FROM :Portfolio_Evidence_Link
-              AND t."Assessment_Score_Pct" IS NOT DISTINCT FROM :Assessment_Score_Pct
-        )
-    """)
+    if cleaned_df.empty:
+        return 0, 0
 
-    with conn.session as s:
-        inserted_count = 0
-        skipped_duplicates = 0
-        for record in records:
-            result = s.execute(insert_sql, record)
-            if result.rowcount and result.rowcount > 0:
-                inserted_count += 1
-            else:
-                skipped_duplicates += 1
-        s.commit()
+    total_incoming = len(cleaned_df)
+    staging_table = f"_staging_ingest_{uuid.uuid4().hex[:10]}"
+    col_list = ", ".join(f'"{c}"' for c in db_cols)
+    select_s_cols = ", ".join(f's."{c}"' for c in db_cols)
+    not_exists_cols = "\n              ".join(
+        f'AND t."{c}" IS NOT DISTINCT FROM s."{c}"' if i > 0 else f't."{c}" IS NOT DISTINCT FROM s."{c}"'
+        for i, c in enumerate(db_cols)
+    )
+
+    engine = conn.engine
+    try:
+        with engine.begin() as bulk_conn:
+            # 1. Bulk-load the ENTIRE batch to a temp staging table in one operation
+            #    (a handful of multi-row INSERTs) instead of one round trip per row.
+            cleaned_df.to_sql(staging_table, con=bulk_conn, index=False, if_exists='replace', method='multi', chunksize=1000)
+
+            before_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
+
+            # 2. ONE set-based insert: Postgres compares the whole incoming batch
+            #    against teacher_records a single time (an anti-join), instead of
+            #    re-scanning the whole table once per uploaded row like before.
+            insert_sql = text(f"""
+                INSERT INTO teacher_records ({col_list})
+                SELECT {select_s_cols}
+                FROM "{staging_table}" s
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM teacher_records t
+                    WHERE {not_exists_cols}
+                )
+            """)
+            bulk_conn.execute(insert_sql)
+
+            after_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
+            bulk_conn.execute(text(f'DROP TABLE IF EXISTS "{staging_table}"'))
+
+        inserted_count = int(after_count - before_count)
+        skipped_duplicates = int(total_incoming - inserted_count)
+    except Exception as e:
+        st.error(f"Bulk ingestion failed: {e}")
+        return 0, 0
 
     fetch_master_db_from_supabase.clear()
     return inserted_count, skipped_duplicates
