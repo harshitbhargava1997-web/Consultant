@@ -13,25 +13,52 @@ try:
     SUPABASE_URL = st.secrets["supabase"]["url"].rstrip('/')
     SUPABASE_KEY = st.secrets["supabase"]["key"]
     BUCKET_NAME = st.secrets["supabase"]["bucket_name"]
-    PARQUET_FILE_NAME = "master_database.parquet"
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 except Exception as e:
     st.error(f"⚠️ Cloud connection configuration is missing: {e}")
 
+# Must match the Admin Dashboard's teacher_records schema exactly.
+TEACHER_RECORDS_TABLE = "teacher_records"
+ROSTER_COLUMNS = ["State_Zone", "Uploaded_By", "Institution", "FullName"]
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_master_db_from_supabase():
-    """Fetches the master parquet file to populate dynamic rosters."""
+    """Fetches the live roster (State/Zone, Consultant, School, Teacher) directly
+    from the same PostgreSQL 'teacher_records' table the Admin Dashboard reads from,
+    so newly added schools/teachers (e.g. via the admin app's Excel bulk uploader)
+    show up here immediately instead of relying on a stale parquet snapshot."""
     try:
-        response = supabase.storage.from_(BUCKET_NAME).download(PARQUET_FILE_NAME)
-        if response:
-            df = pd.read_parquet(BytesIO(response))
-            for col in df.select_dtypes(include=['object', 'string']).columns:
-                df[col] = df[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
-            return df
-    except Exception:
-        pass
-    return pd.DataFrame()
+        all_rows = []
+        page_size = 1000
+        start = 0
+        while True:
+            resp = (
+                supabase.table(TEACHER_RECORDS_TABLE)
+                .select(",".join(ROSTER_COLUMNS))
+                .range(start, start + page_size - 1)
+                .execute()
+            )
+            batch = resp.data or []
+            all_rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            start += page_size
+
+        if not all_rows:
+            return pd.DataFrame(columns=ROSTER_COLUMNS)
+
+        df = pd.DataFrame(all_rows)
+        for col in ROSTER_COLUMNS:
+            if col not in df.columns:
+                df[col] = ""
+            df[col] = df[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
+        return df.drop_duplicates()
+    except Exception as e:
+        st.error(f"⚠️ Could not load roster from database: {e}")
+        return pd.DataFrame(columns=ROSTER_COLUMNS)
+
 
 def upload_single_file_worker(args):
     uploaded_file, folder_name = args
@@ -39,7 +66,7 @@ def upload_single_file_worker(args):
         clean_filename = re.sub(r'[^a-zA-Z0-9_.-]', '_', uploaded_file.name)
         file_path = f"{folder_name}/{np.random.randint(10000, 99999)}_{clean_filename}"
         file_bytes = uploaded_file.getvalue()
-        
+
         supabase.storage.from_(BUCKET_NAME).upload(
             path=file_path,
             file=file_bytes,
@@ -49,23 +76,29 @@ def upload_single_file_worker(args):
     except Exception:
         return None
 
+
 def upload_files_to_supabase(uploaded_files, folder_name="teacher_uploads"):
     """Uploads multiple files concurrently to Supabase Storage."""
     if not uploaded_files:
         return None
     if not isinstance(uploaded_files, list):
         uploaded_files = [uploaded_files]
-    
+
     tasks = [(f, folder_name) for f in uploaded_files]
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         results = list(executor.map(upload_single_file_worker, tasks))
-    
+
     urls = [url for url in results if url is not None]
     return ", ".join(urls) if urls else None
 
+
 def insert_submission_to_db(entry_dict):
-    """Inserts a submission row directly into the Supabase PostgreSQL database table."""
-    supabase.table("teacher_submissions").insert(entry_dict).execute()
+    """Inserts a submission row directly into the SAME PostgreSQL table
+    (teacher_records) that the Admin Dashboard reads from, so it appears
+    immediately in Tab 4, the Live Evidence Feed, and all PDF reports —
+    without needing any manual re-import step."""
+    supabase.table(TEACHER_RECORDS_TABLE).insert(entry_dict).execute()
+
 
 # --- LOAD MASTER ROSTER ---
 master_df = fetch_master_db_from_supabase()
@@ -158,7 +191,7 @@ with st.form("evidence_submission_form", clear_on_submit=True):
     st.subheader("3. Core Qualitative Evidence Uploads")
     uploaded_voice = st.file_uploader("🎤 Upload Lesson Plan Voice Note(s) (Audio / PDF)", type=["mp3", "wav", "m4a", "ogg", "pdf"], accept_multiple_files=True)
     uploaded_pic = st.file_uploader("🖼️ Upload Lesson Plan Picture(s) / Document(s)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True)
-    
+
     col_v1, col_v2 = st.columns(2)
     with col_v1:
         uploaded_vid1 = st.file_uploader("🎥 Classroom Activity Video(s) 1", type=["mp4", "mov", "avi", "pdf"], accept_multiple_files=True)
@@ -203,6 +236,10 @@ with st.form("evidence_submission_form", clear_on_submit=True):
                 f_name = name_parts[0]
                 l_name = name_parts[1] if len(name_parts) > 1 else ""
 
+                # NOTE: keys here must exactly match the columns the Admin Dashboard's
+                # teacher_records table actually has. Do NOT add 'Duration (Minutes)' or
+                # 'Duration (HH:MM:SS)' — those are Excel-import-only helper columns,
+                # not real database columns, and including them will make this insert fail.
                 entry_dict = {
                     'State_Zone': sub_state,
                     'Uploaded_By': sub_consultant,
@@ -218,8 +255,6 @@ with st.form("evidence_submission_form", clear_on_submit=True):
                     'Book': sub_lesson_num.strip(),
                     'StartTime': pd.to_datetime(sub_date).strftime('%Y-%m-%d 09:00:00'),
                     'EndTime': pd.to_datetime(sub_date).strftime('%Y-%m-%d 09:45:00'),
-                    'Duration (Minutes)': 0.0,
-                    'Duration (HH:MM:SS)': "00:00:00",
                     'Duration_Min': 0.0,
                     'Voice_Note_Link': voice_url,
                     'Lesson_Plan_Picture': pic_url,
@@ -234,7 +269,7 @@ with st.form("evidence_submission_form", clear_on_submit=True):
 
                 with st.spinner("Saving submission to database..."):
                     insert_submission_to_db(entry_dict)
-                    
-                st.success(f"✅ Success! Submission for {sub_teacher_name} ({sub_school}) has been saved to the PostgreSQL database.")
+
+                st.success(f"✅ Success! Submission for {sub_teacher_name} ({sub_school}) has been saved and will appear in the Admin Dashboard.")
             except Exception as e:
                 st.error(f"❌ Upload and submission error: {e}")
