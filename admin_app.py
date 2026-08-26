@@ -22,12 +22,13 @@ from reportlab.lib import colors
 
 # Page layout configuration
 st.set_page_config(
-    page_title="Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard",
+    page_title="Academic Manager Portfolio & Teacher Performance Indicator Dashboard",
     layout="wide"
 )
 
 # --- NATIVE POSTGRESQL & SUPABASE CLOUD SETUP ---
 conn = st.connection("postgresql", type="sql")
+supabase = None
 
 try:
     SUPABASE_URL = st.secrets["supabase"]["url"].rstrip('/')
@@ -81,7 +82,6 @@ def normalize_identity_columns(df):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_master_db_from_supabase():
-    """Fetches all teacher records directly using native PostgreSQL execution."""
     query = """
         SELECT 
             "State_Zone", "Uploaded_By", "Institution", "Center",
@@ -112,6 +112,7 @@ def fetch_master_db_from_supabase():
 # --- CACHED SUPABASE PERSISTENCE FOR CRM CONTACTS & CALL LOGS ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_crm_data_from_supabase():
+    if not supabase: return {"contacts": {}}
     try:
         response = supabase.storage.from_(BUCKET_NAME).download(CRM_FILE_NAME)
         if response:
@@ -122,6 +123,7 @@ def load_crm_data_from_supabase():
 
 
 def save_crm_data_to_supabase(crm_data):
+    if not supabase: return
     try:
         crm_buffer = BytesIO(json.dumps(crm_data, indent=2).encode('utf-8'))
         supabase.storage.from_(BUCKET_NAME).upload(
@@ -136,6 +138,7 @@ def save_crm_data_to_supabase(crm_data):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_call_logs_from_supabase():
+    if not supabase: return []
     try:
         response = supabase.storage.from_(BUCKET_NAME).download(CALL_LOGS_FILE_NAME)
         if response:
@@ -146,6 +149,7 @@ def load_call_logs_from_supabase():
 
 
 def save_call_logs_to_supabase(logs_list):
+    if not supabase: return
     try:
         logs_buffer = BytesIO(json.dumps(logs_list, indent=2).encode('utf-8'))
         supabase.storage.from_(BUCKET_NAME).upload(
@@ -159,6 +163,7 @@ def save_call_logs_to_supabase(logs_list):
 
 
 def upload_pdf_to_supabase(pdf_buffer, school_name):
+    if not supabase: return None
     try:
         clean_name = re.sub(r'[^a-zA-Z0-9_-]', '_', school_name)
         remote_path = f"reports/{clean_name}_Comprehensive_Audit.pdf"
@@ -182,7 +187,8 @@ def build_teacher_roster_cached(df):
     roster = normalize_identity_columns(df)
 
     role_key = roster["Role"].map(_norm_key)
-    teacher_mask = role_key.isin({"teacher", "teachers"})
+    # Fix: Looser regex to prevent strictly typed PRT/TGT/Educators from being dropped
+    teacher_mask = role_key.str.contains(r'\bteacher\b|prt|tgt|pgt|faculty|educator|coordinator', regex=True, na=False)
     candidate = roster.loc[teacher_mask].copy() if teacher_mask.any() else roster.copy()
 
     candidate = candidate[
@@ -201,14 +207,13 @@ def build_teacher_roster_cached(df):
     return candidate.reset_index(drop=True)
 
 
-# --- AI HELPER FUNCTIONS (GEMINI MULTIMODAL INTEGRATION) ---
+# --- AI HELPER FUNCTIONS ---
 def get_gemini_summary(context_prompt, audio_file_obj=None):
     if not ai_client:
         return "⚠️ Gemini API key not found in Streamlit secrets."
     try:
         contents_payload = [context_prompt]
         if audio_file_obj is not None:
-            # Fix: Reset audio buffer pointer to beginning and determine mime type
             audio_file_obj.seek(0)
             audio_bytes = audio_file_obj.read()
             mime_type = getattr(audio_file_obj, "type", "audio/wav") or "audio/wav"
@@ -261,7 +266,6 @@ def generate_pdf_report(title_text, subtitle_text, school_name, summary_metrics,
     if summary_metrics:
         headers_row = [Paragraph(k, card_header) for k in summary_metrics.keys()]
         values_row = [Paragraph(str(v), card_value) for v in summary_metrics.values()]
-        # Fix: Guard against ZeroDivisionError
         col_w = 540 / max(1, len(summary_metrics))
         kpi_table = Table([headers_row, values_row], colWidths=[col_w] * len(summary_metrics))
         kpi_table.setStyle(TableStyle([
@@ -350,7 +354,6 @@ def extract_evidence_items_vectorized(df_src, col_name):
 
 
 def evidence_items_across_columns(df_src, columns):
-    """Collect evidence across multiple columns and globally deduplicate by URL."""
     items = []
     seen = set()
     for col in columns:
@@ -363,14 +366,12 @@ def evidence_items_across_columns(df_src, columns):
 
 
 def safe_percentage(numerator, denominator):
-    """Percentage with an explicit zero-denominator result."""
     if denominator is None or denominator <= 0:
         return 0.0
     return float(numerator) / float(denominator) * 100.0
 
 
 def calculate_kpi_target(daily_target, working_days, enabled=True):
-    """Single source of truth for cumulative KPI benchmark."""
     if not enabled:
         return 0.0
     return max(0.0, float(daily_target)) * max(0, int(working_days))
@@ -390,9 +391,6 @@ def calculate_kpi_status(minutes, target, enabled=True, break_period=False):
 
 
 def get_working_days(start_date, end_date, excluded_dates_list=None, exclude_sundays=True):
-    """Return the exact number of valid working days in an inclusive date range.
-    Fix: Sanitizes and sorts the holidays array for np.busday_count.
-    """
     try:
         if start_date is None or end_date is None or pd.isna(start_date) or pd.isna(end_date):
             return 0
@@ -445,13 +443,9 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     if isinstance(school_name, (list, tuple, set, np.ndarray, pd.Series)):
         school_names = [str(x) for x in school_name if str(x).strip()]
         school_curr_df = filtered_df[filtered_df['Institution'].isin(school_names)]
-        if school_curr_df.empty and not school_filtered_df.empty:
-            school_curr_df = school_filtered_df[school_filtered_df['Institution'].isin(school_names)]
     else:
         school_names = [str(school_name)]
         school_curr_df = filtered_df[filtered_df['Institution'] == school_name]
-        if school_curr_df.empty and not school_filtered_df.empty:
-            school_curr_df = school_filtered_df[school_filtered_df['Institution'] == school_name]
 
     story.append(Paragraph(f"<b>Comprehensive School Audit & Feature-Wise Report</b>", title_style))
     story.append(Spacer(1, 4))
@@ -510,7 +504,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         story.append(Paragraph(f"• <b>Library Usage Performance Standard:</b> {daily_lib_target:.0f} mins/day × {selected_num_days} working days ({calc_lib_kpi:.0f} mins total benchmark standard)", normal_style))
         story.append(Spacer(1, 10))
 
-    # 1. Lesson Plan Prep Table
     story.append(Paragraph("<b>1. Lesson Plan Preparation Consolidated Report</b>", sec_head_style))
     ld_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Performance Indicator Status"]]
     for t_name in teachers_list:
@@ -541,7 +534,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     story.append(ld_table_obj)
     story.append(Spacer(1, 14))
 
-    # 2. Library Usage Table
     story.append(Paragraph("<b>2. Library Usage Consolidated Report</b>", sec_head_style))
     lib_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Performance Indicator Status"]]
     for t_name in teachers_list:
@@ -572,7 +564,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     story.append(lib_table_obj)
     story.append(Spacer(1, 14))
 
-    # 3. Qualitative Submissions
     if enable_qual_kpi:
         story.append(Paragraph("<b>3. Qualitative Submissions & Evidence Compliance</b>", sec_head_style))
         qual_summary_table_data = [["Teacher Name", "LP / Audio Notes", "Activity Videos", "Writing Samples", "Phonics Evidences", "Portfolio Artifacts", "Status"]]
@@ -606,12 +597,10 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         story.append(qual_table_obj)
         story.append(Spacer(1, 12))
 
-    # PART 2: Individual 360 Profiles
     for target_teacher in teachers_list:
         story.append(PageBreak())
 
         teacher_date_data = school_curr_df[school_curr_df['FullName'] == target_teacher]
-        teacher_all_data = school_filtered_df[(school_filtered_df['FullName'] == target_teacher) & (school_filtered_df['Institution'] == school_name)]
 
         t_day_ld = teacher_date_data[teacher_date_data['Type'] == 'lessonDelivery']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
         t_day_lib = teacher_date_data[teacher_date_data['Type'] == 'library']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
@@ -622,12 +611,8 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         ld_advice = f"Steady Execution ({t_day_ld:.1f}m logged)" if (calc_ld_kpi > 0 and t_day_ld >= calc_ld_kpi) else (f"In-Progress ({t_day_ld:.1f}m logged)" if t_day_ld > 0 else "Pending Activity")
         lib_advice = f"Steady Execution ({t_day_lib:.1f}m logged)" if (calc_lib_kpi > 0 and t_day_lib >= calc_lib_kpi) else (f"In-Progress ({t_day_lib:.1f}m logged)" if t_day_lib > 0 else "Pending Activity")
 
-        t_books_raw = teacher_date_data[teacher_date_data['Book'].str.len() > 0]
-        if t_books_raw.empty:
-            t_books_raw = teacher_all_data[teacher_all_data['Book'].str.len() > 0]
-        teacher_books = t_books_raw[~t_books_raw['Book'].str.match(r'^Lesson Plan', case=False, na=False)]
-
-        evidence_source = teacher_date_data if not teacher_date_data.empty else teacher_all_data
+        teacher_books = teacher_date_data[(teacher_date_data['Book'].str.len() > 0) & (~teacher_date_data['Book'].str.match(r'^Lesson Plan', case=False, na=False))]
+        evidence_source = teacher_date_data
 
         v_voice = extract_evidence_items_vectorized(evidence_source, 'Voice_Note_Link')
         v_pic = extract_evidence_items_vectorized(evidence_source, 'Lesson_Plan_Picture')
@@ -717,7 +702,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
 
 
 def get_period_bounds_for_view(selected_month, view_mode, month_filtered_df, custom_start=None, custom_end=None):
-    """Return true calendar boundaries for the selected review period."""
     if view_mode == "Full Month Summary":
         try:
             start = pd.to_datetime(selected_month, format="%B %Y").normalize()
@@ -732,14 +716,15 @@ def get_period_bounds_for_view(selected_month, view_mode, month_filtered_df, cus
 
 
 def get_teacher_eligible_working_days(teacher_df, period_start, period_end, excluded_dates=None, exclude_sundays=True):
+    # Fix: Prevent 0 eligible days if teacher was completely absent/inactive
     if teacher_df is None or teacher_df.empty or period_start is None or period_end is None:
-        return 0
+        return get_working_days(period_start, period_end, excluded_dates, exclude_sundays)
     dates = pd.to_datetime(teacher_df['Date'], errors='coerce').dropna()
     if dates.empty:
-        return 0
+        return get_working_days(period_start, period_end, excluded_dates, exclude_sundays)
     dates = dates[(dates.dt.date >= pd.Timestamp(period_start).date()) & (dates.dt.date <= pd.Timestamp(period_end).date())]
     if dates.empty:
-        return 0
+        return get_working_days(period_start, period_end, excluded_dates, exclude_sundays)
     return get_working_days(dates.min().date(), dates.max().date(), excluded_dates, exclude_sundays)
 
 
@@ -755,9 +740,6 @@ def teacher_days_map(roster_df, activity_df, period_start, period_end, excluded_
 
 
 def parse_duration_minutes(value, is_time_format=False):
-    """Robustly convert duration inputs to numeric minutes.
-    Fix: Differentiates between Excel fractional-day time floats and direct numeric minutes.
-    """
     if value is None or (isinstance(value, float) and np.isnan(value)) or pd.isna(value):
         return np.nan
     if isinstance(value, pd.Timedelta):
@@ -867,7 +849,6 @@ def ingest_excel_to_postgresql(processed_dfs):
         );
     """)
 
-    # Fix: Fast Batch Execution with single transaction commit
     with conn.session as s:
         initial_count = int(s.execute(text("SELECT COUNT(*) FROM teacher_records;")).scalar() or 0)
         s.execute(insert_sql, records)
@@ -881,7 +862,6 @@ def ingest_excel_to_postgresql(processed_dfs):
     return inserted_count, skipped_duplicates
 
 
-# --- CRM BOX RENDERERS ---
 def render_school_audit_crm_box(tab_name, active_school, current_filter_description, school_audit_whatsapp_message):
     st.markdown("---")
     st.subheader(f"📞 School & Coordinator CRM, Call Notes & WhatsApp Generators ({tab_name})")
@@ -996,12 +976,14 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
             clean_phone = re.sub(r'[^0-9+]', '', active_phone)
             encoded_final_text = urllib.parse.quote(editable_wa_area)
             st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
+            st.caption("If the button fails due to extreme message length, copy the text below manually:")
+            st.code(editable_wa_area, language="text")
 
-    # Post-Call Notes Form
     st.markdown("---")
     st.markdown(f"##### 📝 Post-Call Discussion Notes & Follow-up Scheduler ({target_crm_school} - {selected_entity_type})")
     
-    with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}"):
+    # Fix: clear_on_submit to reset form state and direct rerun
+    with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}", clear_on_submit=True):
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}_{target_crm_school}")
@@ -1029,6 +1011,7 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
                 st.session_state["crm_call_logs_store"].append(new_log_entry)
                 save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
                 st.success("✅ Call notes and follow-up schedule successfully saved and synced to Supabase Cloud!")
+                st.rerun()
             else:
                 st.warning("Please enter discussion notes before saving.")
 
@@ -1190,12 +1173,13 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
             clean_phone = re.sub(r'[^0-9+]', '', active_phone)
             encoded_final_text = urllib.parse.quote(editable_wa_area)
             st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
+            st.caption("If the button fails due to extreme message length, copy the text below manually:")
+            st.code(editable_wa_area, language="text")
 
-    # Post-Call Notes Form
     st.markdown("---")
     st.markdown(f"##### 📝 Post-Call Discussion Notes & Follow-up Scheduler ({target_crm_school} - {selected_entity_type})")
     
-    with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}"):
+    with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}", clear_on_submit=True):
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}_{target_crm_school}")
@@ -1223,6 +1207,7 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
                 st.session_state["crm_call_logs_store"].append(new_log_entry)
                 save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
                 st.success("✅ Call notes and follow-up schedule successfully saved and synced to Supabase Cloud!")
+                st.rerun()
             else:
                 st.warning("Please enter discussion notes before saving.")
 
@@ -1264,7 +1249,6 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
 # Page layout title
 st.title("🏫 Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard")
 st.markdown("Track **School Portfolio Management**, **School WoW Velocity**, **Teacher Execution Tiers**, **Quantitative Performance Indicators (Lesson Prep / Library)**, and **360° Qualitative Evidences & Artifact Compliance**.")
-
 
 # --- 2. MULTI-EMPLOYEE HIERARCHY & DATA UPLOAD MANAGER ---
 st.sidebar.header("📁 Multi-Employee Data Ingestion Portal")
@@ -1362,28 +1346,30 @@ with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
     if st.button("🚀 Run One-Time Import", key="btn_run_historical_import"):
         with st.spinner("Downloading and migrating historical data to PostgreSQL..."):
             base_df = pd.DataFrame()
-            try:
-                res = supabase.storage.from_(BUCKET_NAME).download("master_database.parquet")
-                if res:
-                    base_df = pd.read_parquet(BytesIO(res))
-                    st.sidebar.info(f"Loaded {len(base_df)} rows from master_database.parquet")
-            except Exception as e:
-                st.sidebar.warning(f"Parquet check notice: {e}")
+            if supabase:
+                try:
+                    res = supabase.storage.from_(BUCKET_NAME).download("master_database.parquet")
+                    if res:
+                        base_df = pd.read_parquet(BytesIO(res))
+                        st.sidebar.info(f"Loaded {len(base_df)} rows from master_database.parquet")
+                except Exception as e:
+                    st.sidebar.warning(f"Parquet check notice: {e}")
 
             sub_records = []
-            try:
-                file_list = supabase.storage.from_(BUCKET_NAME).list("submissions", {"limit": 10000})
-                if file_list:
-                    for item in file_list:
-                        fname = item.get('name', '')
-                        if fname.endswith('.json'):
-                            raw = supabase.storage.from_(BUCKET_NAME).download(f"submissions/{fname}")
-                            if raw:
-                                sub_records.append(json.loads(raw.decode('utf-8')))
-                    if sub_records:
-                        st.sidebar.info(f"Loaded {len(sub_records)} submissions from submissions/ folder")
-            except Exception as e:
-                st.sidebar.warning(f"Submissions check notice: {e}")
+            if supabase:
+                try:
+                    file_list = supabase.storage.from_(BUCKET_NAME).list("submissions", {"limit": 10000})
+                    if file_list:
+                        for item in file_list:
+                            fname = item.get('name', '')
+                            if fname.endswith('.json'):
+                                raw = supabase.storage.from_(BUCKET_NAME).download(f"submissions/{fname}")
+                                if raw:
+                                    sub_records.append(json.loads(raw.decode('utf-8')))
+                        if sub_records:
+                            st.sidebar.info(f"Loaded {len(sub_records)} submissions from submissions/ folder")
+                except Exception as e:
+                    st.sidebar.warning(f"Submissions check notice: {e}")
 
             subs_df = pd.DataFrame(sub_records) if sub_records else pd.DataFrame()
             combined_legacy = pd.concat([base_df, subs_df], ignore_index=True) if not base_df.empty else subs_df
@@ -1473,10 +1459,17 @@ if not df.empty:
 if df.empty:
     st.info("👋 Upload your daily or weekly `UserMetrics.xlsx` files in the sidebar, or run the One-Time Import in the sidebar to populate your PostgreSQL database.")
 else:
+    df['Date'] = pd.NaT
+    df['Month_Name'] = "N/A"
+    df['Month_Sort'] = "N/A"
+    df['Week'] = "N/A"
+    df['Month_Week_Label'] = "N/A"
+    
     if 'StartTime' in df.columns and not df['StartTime'].isna().all():
-        df['Date'] = df['StartTime'].dt.date
-        df['Month_Name'] = df['StartTime'].dt.strftime('%B %Y')
-        df['Month_Sort'] = df['StartTime'].dt.strftime('%Y-%m')
+        valid_mask = df['StartTime'].notna()
+        df.loc[valid_mask, 'Date'] = df.loc[valid_mask, 'StartTime'].dt.date
+        df.loc[valid_mask, 'Month_Name'] = df.loc[valid_mask, 'StartTime'].dt.strftime('%B %Y')
+        df.loc[valid_mask, 'Month_Sort'] = df.loc[valid_mask, 'StartTime'].dt.strftime('%Y-%m')
         
         def get_week_of_month(dt):
             try:
@@ -1487,21 +1480,18 @@ else:
             except Exception:
                 return 1
 
-        df['Week_Num'] = df['StartTime'].apply(get_week_of_month)
+        df.loc[valid_mask, 'Week_Num'] = df.loc[valid_mask, 'StartTime'].apply(get_week_of_month)
         
-        week_ranges = df.groupby(['Month_Name', 'Week_Num'])['Date'].agg(['min', 'max']).reset_index()
+        valid_df = df[valid_mask]
+        week_ranges = valid_df.groupby(['Month_Name', 'Week_Num'])['Date'].agg(['min', 'max']).reset_index()
         week_ranges['Week_Date_Range'] = (
             week_ranges['min'].apply(lambda x: x.strftime('%b %d') if pd.notna(x) else '') + " to " + 
             week_ranges['max'].apply(lambda x: x.strftime('%b %d') if pd.notna(x) else '')
         )
         
         df = df.merge(week_ranges[['Month_Name', 'Week_Num', 'Week_Date_Range']], on=['Month_Name', 'Week_Num'], how='left')
-        df['Month_Week_Label'] = df['StartTime'].dt.strftime('%b %Y') + " - Week " + df['Week_Num'].astype(str) + " (" + df['Week_Date_Range'] + ")"
-        df['Week'] = df['Month_Week_Label']
-    else:
-        df['Date'] = None
-        df['Month_Name'] = "N/A"
-        df['Week'] = "N/A"
+        df.loc[valid_mask, 'Month_Week_Label'] = df.loc[valid_mask, 'StartTime'].dt.strftime('%b %Y') + " - Week " + df.loc[valid_mask, 'Week_Num'].astype(str) + " (" + df.loc[valid_mask, 'Week_Date_Range'].fillna('') + ")"
+        df.loc[valid_mask, 'Week'] = df.loc[valid_mask, 'Month_Week_Label']
 
     master_teacher_roster = build_teacher_roster_cached(df)
     if master_teacher_roster.empty:
@@ -1540,7 +1530,7 @@ else:
     st.sidebar.header("📅 Calendar & Holiday Manager")
     
     available_months_df = school_filtered_df[['Month_Sort', 'Month_Name']].dropna().drop_duplicates().sort_values(by='Month_Sort', ascending=False)
-    month_options = available_months_df['Month_Name'].tolist()
+    month_options = [m for m in available_months_df['Month_Name'].tolist() if m != "N/A"]
     
     selected_month = st.sidebar.selectbox("Select Review Month:", options=month_options if month_options else ["No Month Data"])
     month_filtered_df = school_filtered_df[school_filtered_df['Month_Name'] == selected_month]
@@ -1568,8 +1558,8 @@ else:
 
     # --- GRANULARITY & CUSTOM DATE RANGE SELECTOR ---
     st.sidebar.subheader("🔍 Review View Level")
-    available_month_weeks = sorted(month_filtered_df['Month_Week_Label'].dropna().unique())
-    available_dates = sorted(month_filtered_df['Date'].dropna().unique(), reverse=True)
+    available_month_weeks = sorted([w for w in month_filtered_df['Month_Week_Label'].dropna().unique() if w != "N/A"])
+    available_dates = sorted([d for d in month_filtered_df['Date'].dropna().unique() if pd.notna(d)], reverse=True)
     
     view_mode = st.sidebar.radio("Granularity:", ["Full Month Summary", "Specific Week of Month", "Single Day Review", "Custom Date Range"])
     
@@ -1582,14 +1572,14 @@ else:
         selected_num_days = get_working_days(selected_month_start, selected_month_end, user_excluded_dates, exclude_sundays=exclude_sundays_flag)
         filter_description_text = f"Full Month: {selected_month} - {selected_num_days} Working Days ({selected_month_start} to {selected_month_end})"
     elif view_mode == "Specific Week of Month":
-        selected_week_label = st.sidebar.selectbox("Select Week:", options=available_month_weeks)
+        selected_week_label = st.sidebar.selectbox("Select Week:", options=available_month_weeks if available_month_weeks else ["No Weeks"])
         filtered_df = month_filtered_df[month_filtered_df['Month_Week_Label'] == selected_week_label]
-        w_start = filtered_df['Date'].min() if not filtered_df.empty else selected_month
-        w_end = filtered_df['Date'].max() if not filtered_df.empty else selected_month
+        w_start = filtered_df['Date'].min() if not filtered_df.empty else selected_month_start
+        w_end = filtered_df['Date'].max() if not filtered_df.empty else selected_month_end
         selected_num_days = get_working_days(w_start, w_end, user_excluded_dates, exclude_sundays=exclude_sundays_flag)
         filter_description_text = f"{selected_week_label} - {selected_num_days} Working Days"
     elif view_mode == "Single Day Review":
-        selected_date = st.sidebar.selectbox("Select Day:", options=available_dates)
+        selected_date = st.sidebar.selectbox("Select Day:", options=available_dates if available_dates else [pd.Timestamp.now().date()])
         filtered_df = month_filtered_df[month_filtered_df['Date'] == selected_date]
         selected_num_days = get_working_days(selected_date, selected_date, user_excluded_dates, exclude_sundays=exclude_sundays_flag)
         filter_description_text = f"Single Date: {selected_date} - {selected_num_days} Working Days"
@@ -1717,15 +1707,16 @@ else:
         c3.metric("Inactive Teachers (0m)", inactive_count, delta=f"{-inactive_count}" if inactive_count > 0 else "0", delta_color="inverse")
         c4.metric("Compliance Rate", f"{(met_count/total_teachers*100 if total_teachers>0 else 0):.1f}%")
 
-        fig_ld = px.bar(
-            ld_daily, x="FullName", y="Duration_Min", color="Performance Indicator Status",
-            title=f"Lesson Prep Minutes per Teacher" + (f" vs. {calc_ld_kpi_t1:.0f} Min Standard" if enable_quant_kpi_t1 else ""),
-            labels={"FullName": "Teacher Name", "Duration_Min": "Minutes Prepared"},
-            text_auto=".1f"
-        )
-        if enable_quant_kpi_t1 and calc_ld_kpi_t1 > 0:
-            fig_ld.add_hline(y=calc_ld_kpi_t1, line_dash="dash", line_color="black", annotation_text=f"Guideline ({calc_ld_kpi_t1:.0f} mins)")
-        st.plotly_chart(fig_ld, use_container_width=True)
+        if not ld_daily.empty:
+            fig_ld = px.bar(
+                ld_daily, x="FullName", y="Duration_Min", color="Performance Indicator Status",
+                title=f"Lesson Prep Minutes per Teacher" + (f" vs. {calc_ld_kpi_t1:.0f} Min Standard" if enable_quant_kpi_t1 else ""),
+                labels={"FullName": "Teacher Name", "Duration_Min": "Minutes Prepared"},
+                text_auto=".1f"
+            )
+            if enable_quant_kpi_t1 and calc_ld_kpi_t1 > 0:
+                fig_ld.add_hline(y=calc_ld_kpi_t1, line_dash="dash", line_color="black", annotation_text=f"Guideline ({calc_ld_kpi_t1:.0f} mins)")
+            st.plotly_chart(fig_ld, use_container_width=True)
 
         st.subheader("📋 Lesson Plan Preparation Table")
         display_ld_table = ld_daily.rename(columns={'Institution': 'School', 'FullName': 'Teacher Name', 'Duration_Min': 'Minutes Logged'}).round({'Minutes Logged': 1})
@@ -1867,15 +1858,16 @@ else:
         m3.metric("Inactive Teachers (0m)", lib_inactive_count, delta=f"{-lib_inactive_count}" if lib_inactive_count > 0 else "0", delta_color="inverse")
         m4.metric("Engagement Rate", f"{(lib_met_count/lib_total_teachers*100 if lib_total_teachers>0 else 0):.1f}%")
 
-        fig_lib = px.bar(
-            lib_daily, x="FullName", y="Duration_Min", color="Performance Indicator Status",
-            title=f"Library Usage Minutes per Teacher" + (f" vs. {calc_lib_kpi_t2:.0f} Min Standard" if enable_quant_kpi_t2 else ""),
-            labels={"FullName": "Teacher Name", "Duration_Min": "Minutes Logged"},
-            text_auto=".1f"
-        )
-        if enable_quant_kpi_t2 and calc_lib_kpi_t2 > 0:
-            fig_lib.add_hline(y=calc_lib_kpi_t2, line_dash="dash", line_color="black", annotation_text=f"Guideline ({calc_lib_kpi_t2:.0f} mins)")
-        st.plotly_chart(fig_lib, use_container_width=True)
+        if not lib_daily.empty:
+            fig_lib = px.bar(
+                lib_daily, x="FullName", y="Duration_Min", color="Performance Indicator Status",
+                title=f"Library Usage Minutes per Teacher" + (f" vs. {calc_lib_kpi_t2:.0f} Min Standard" if enable_quant_kpi_t2 else ""),
+                labels={"FullName": "Teacher Name", "Duration_Min": "Minutes Logged"},
+                text_auto=".1f"
+            )
+            if enable_quant_kpi_t2 and calc_lib_kpi_t2 > 0:
+                fig_lib.add_hline(y=calc_lib_kpi_t2, line_dash="dash", line_color="black", annotation_text=f"Guideline ({calc_lib_kpi_t2:.0f} mins)")
+            st.plotly_chart(fig_lib, use_container_width=True)
 
         st.subheader("📋 Library Usage Table")
         display_lib_table = lib_daily.rename(columns={'Institution': 'School', 'FullName': 'Teacher Name', 'Duration_Min': 'Minutes Logged'}).round({'Minutes Logged': 1})
@@ -2004,30 +1996,34 @@ else:
                 with col_c1:
                     if t3_teacher != "All Teachers":
                         ch_summary = t3_df.groupby(['Book', 'Grade'])['Duration_Min'].sum().reset_index()
-                        fig_ch = px.bar(
-                            ch_summary, x="Duration_Min", y="Book", color="Grade", orientation="h",
-                            title=f"Chapters Opened by {t3_teacher} (Mins)",
-                            labels={"Duration_Min": "Minutes", "Book": "Book / Chapter"},
-                            text_auto=".1f"
-                        )
-                        fig_ch.update_layout(yaxis={'categoryorder':'total ascending'})
+                        if not ch_summary.empty:
+                            fig_ch = px.bar(
+                                ch_summary, x="Duration_Min", y="Book", color="Grade", orientation="h",
+                                title=f"Chapters Opened by {t3_teacher} (Mins)",
+                                labels={"Duration_Min": "Minutes", "Book": "Book / Chapter"},
+                                text_auto=".1f"
+                            )
+                            fig_ch.update_layout(yaxis={'categoryorder':'total ascending'})
+                            st.plotly_chart(fig_ch, use_container_width=True)
                     else:
                         ch_summary = t3_df.groupby(['FullName', 'Book'])['Duration_Min'].sum().reset_index()
-                        fig_ch = px.bar(
-                            ch_summary, x="FullName", y="Duration_Min", color="Book",
-                            title="Textbooks / Chapters Opened per Teacher (Mins)",
-                            labels={"FullName": "Teacher", "Duration_Min": "Minutes", "Book": "Book / Chapter"},
-                            barmode="stack", text_auto=".1f"
-                        )
-                    st.plotly_chart(fig_ch, use_container_width=True)
+                        if not ch_summary.empty:
+                            fig_ch = px.bar(
+                                ch_summary, x="FullName", y="Duration_Min", color="Book",
+                                title="Textbooks / Chapters Opened per Teacher (Mins)",
+                                labels={"FullName": "Teacher", "Duration_Min": "Minutes", "Book": "Book / Chapter"},
+                                barmode="stack", text_auto=".1f"
+                            )
+                            st.plotly_chart(fig_ch, use_container_width=True)
 
                 with col_c2:
                     subj_summary = t3_df.groupby('Subject')['Duration_Min'].sum().reset_index()
-                    fig_sub = px.pie(
-                        subj_summary, names="Subject", values="Duration_Min",
-                        title="Subject / Theme Distribution (Minutes)"
-                    )
-                    st.plotly_chart(fig_sub, use_container_width=True)
+                    if not subj_summary.empty:
+                        fig_sub = px.pie(
+                            subj_summary, names="Subject", values="Duration_Min",
+                            title="Subject / Theme Distribution (Minutes)"
+                        )
+                        st.plotly_chart(fig_sub, use_container_width=True)
 
                 st.subheader("📋 Filtered Granular Textbook Log")
                 log_cols = ['Institution', 'FullName', 'Grade', 'Subject', 'Book', 'StartTime', 'Duration_Min']
@@ -2126,6 +2122,7 @@ else:
                 target_teacher = st.selectbox("Select Teacher to Audit:", options=all_roster_teachers, key="top_teacher_select")
         
         if target_teacher:
+            # Scope to only the exact target teacher and window
             teacher_all_data = school_filtered_df[school_filtered_df['FullName'] == target_teacher]
             teacher_date_data = filtered_df[filtered_df['FullName'] == target_teacher]
             teacher_school = school_master_roster[school_master_roster['FullName'] == target_teacher]['Institution'].values[0] if not school_master_roster[school_master_roster['FullName'] == target_teacher].empty else "N/A"
@@ -2149,12 +2146,9 @@ else:
             else:
                 lib_advice = "✅ Holiday / Scheduled Break"
 
-            t_books_raw = teacher_date_data[teacher_date_data['Book'].str.len() > 0]
-            if t_books_raw.empty:
-                t_books_raw = teacher_all_data[teacher_all_data['Book'].str.len() > 0]
-            teacher_books = t_books_raw[~t_books_raw['Book'].str.match(r'^Lesson Plan', case=False, na=False)]
-
-            evidence_source = teacher_date_data if not teacher_date_data.empty else teacher_all_data
+            # Strict filtering: Do not pull all-time data to pad empty periods
+            teacher_books = teacher_date_data[(teacher_date_data['Book'].str.len() > 0) & (~teacher_date_data['Book'].str.match(r'^Lesson Plan', case=False, na=False))]
+            evidence_source = teacher_date_data
             
             v_voice = extract_evidence_items_vectorized(evidence_source, 'Voice_Note_Link')
             v_pic = extract_evidence_items_vectorized(evidence_source, 'Lesson_Plan_Picture')
@@ -2296,21 +2290,22 @@ else:
                     'Performance Indicator Standard': [calc_ld_kpi_t4, calc_lib_kpi_t4]
                 })
                 
-                fig_ach = go.Figure()
-                fig_ach.add_trace(go.Bar(
-                    x=ach_df['Performance Indicator Category'], y=ach_df['Logged Minutes'],
-                    name='Logged Minutes', marker_color='#2CA02C', text=[f"{v:.1f} mins" for v in ach_df['Logged Minutes']], textposition='auto'
-                ))
-                if enable_quant_kpi_t4:
+                if not ach_df.empty:
+                    fig_ach = go.Figure()
                     fig_ach.add_trace(go.Bar(
-                        x=ach_df['Performance Indicator Category'], y=ach_df['Performance Indicator Standard'],
-                        name='Standard Guideline', marker_color='#E5E5E5', opacity=0.6, text=[f"{v:.1f} mins" for v in ach_df['Performance Indicator Standard']], textposition='auto'
+                        x=ach_df['Performance Indicator Category'], y=ach_df['Logged Minutes'],
+                        name='Logged Minutes', marker_color='#2CA02C', text=[f"{v:.1f} mins" for v in ach_df['Logged Minutes']], textposition='auto'
                     ))
-                fig_ach.update_layout(
-                    barmode='group', title=f"Logged Minutes vs. Standard Guideline ({selected_num_days} Working Day(s))",
-                    height=280, margin=dict(l=20, r=20, t=40, b=20)
-                )
-                st.plotly_chart(fig_ach, use_container_width=True)
+                    if enable_quant_kpi_t4:
+                        fig_ach.add_trace(go.Bar(
+                            x=ach_df['Performance Indicator Category'], y=ach_df['Performance Indicator Standard'],
+                            name='Standard Guideline', marker_color='#E5E5E5', opacity=0.6, text=[f"{v:.1f} mins" for v in ach_df['Performance Indicator Standard']], textposition='auto'
+                        ))
+                    fig_ach.update_layout(
+                        barmode='group', title=f"Logged Minutes vs. Standard Guideline ({selected_num_days} Working Day(s))",
+                        height=280, margin=dict(l=20, r=20, t=40, b=20)
+                    )
+                    st.plotly_chart(fig_ach, use_container_width=True)
 
             st.markdown("---")
 
@@ -2321,14 +2316,15 @@ else:
                 col_b1, col_b2 = st.columns(2)
                 with col_b1:
                     t_book_summary = teacher_books.groupby(['Book', 'Grade', 'Subject'])['Duration_Min'].sum().reset_index()
-                    fig_tb_bar = px.bar(
-                        t_book_summary, x="Duration_Min", y="Book", color="Grade", orientation="h",
-                        title=f"Time Spent per Book/Chapter by {target_teacher} (Minutes)",
-                        labels={"Duration_Min": "Time Spent (Minutes)", "Book": "Book / Chapter"},
-                        text_auto=".1f"
-                    )
-                    fig_tb_bar.update_layout(yaxis={'categoryorder':'total ascending'}, height=320)
-                    st.plotly_chart(fig_tb_bar, use_container_width=True)
+                    if not t_book_summary.empty:
+                        fig_tb_bar = px.bar(
+                            t_book_summary, x="Duration_Min", y="Book", color="Grade", orientation="h",
+                            title=f"Time Spent per Book/Chapter by {target_teacher} (Minutes)",
+                            labels={"Duration_Min": "Time Spent (Minutes)", "Book": "Book / Chapter"},
+                            text_auto=".1f"
+                        )
+                        fig_tb_bar.update_layout(yaxis={'categoryorder':'total ascending'}, height=320)
+                        st.plotly_chart(fig_tb_bar, use_container_width=True)
                     
                 with col_b2:
                     st.markdown("##### ⏱️ Time Allocation Table")
@@ -2408,9 +2404,8 @@ else:
             st.markdown(f"### 📱 School Audit WhatsApp & PDF Dispatch Hub for: **{teacher_school}**")
             
             sch_roster = school_master_roster[school_master_roster['Institution'] == teacher_school]
+            # Fix: Scope explicitly to the active filter period
             sch_data = filtered_df[filtered_df['Institution'] == teacher_school]
-            if sch_data.empty and not school_filtered_df.empty:
-                sch_data = school_filtered_df[school_filtered_df['Institution'] == teacher_school]
 
             sch_teachers_list = sorted(sch_roster['FullName'].unique().tolist())
             tot_teachers = len(sch_teachers_list)
@@ -2471,7 +2466,7 @@ else:
             pdf_link_markdown = f"\n\n📄 *Download Full School Audit Report (PDF):*\n{hosted_school_pdf_url}" if hosted_school_pdf_url else ""
 
             ld_bench_str = f" [Benchmark: {daily_ld_target_t4:.0f}m/day × {selected_num_days}d = {calc_ld_kpi_t4:.0f} mins total]" if (enable_quant_kpi_t4 and calc_ld_kpi_t4 > 0) else ""
-            lib_bench_str = f" [Benchmark: {daily_lib_target_t4:.0f}m/day × {selected_num_days}d = {calc_lib_kpi_t4:.0f} mins total]" if (enable_quant_kpi_t4 and calc_ld_kpi_t4 > 0) else ""
+            lib_bench_str = f" [Benchmark: {daily_lib_target_t4:.0f}m/day × {selected_num_days}d = {calc_lib_kpi_t4:.0f} mins total]" if (enable_quant_kpi_t4 and calc_lib_kpi_t4 > 0) else ""
 
             school_msg_parts = [
                 f"Respected Sir/Madam,\n\n",
@@ -2670,7 +2665,8 @@ else:
                 target_school_t6 = st.selectbox("Select School to Inspect:", options=all_schools_list_t6, key="t6_school_sel")
                 
             school_t6_roster = school_master_roster[school_master_roster['Institution'] == target_school_t6]
-            school_t6_data = school_filtered_df[school_filtered_df['Institution'] == target_school_t6]
+            # Fix: Compare against filtered_df to respect active temporal filter
+            school_t6_data = filtered_df[filtered_df['Institution'] == target_school_t6]
 
             t6_ld = school_t6_data[school_t6_data['Type'] == 'lessonDelivery'].groupby('FullName')['Duration_Min'].sum().reset_index()
             t6_lib = school_t6_data[school_t6_data['Type'] == 'library'].groupby('FullName')['Duration_Min'].sum().reset_index()
@@ -2711,13 +2707,14 @@ else:
             e2.metric("⚠️ Fluctuating / Partial", num_fluc)
             e3.metric("❌ Persistent Inactive", num_inact)
 
-            fig_t6_bar = px.bar(
-                t6_teachers_filtered, x="FullName", y=["Lesson_Mins", "Library_Mins"],
-                title=f"Teacher Usage Breakdown for {target_school_t6} (Mins)",
-                labels={"FullName": "Teacher Name", "value": "Logged Minutes", "variable": "Feature"},
-                barmode="group", text_auto=".1f"
-            )
-            st.plotly_chart(fig_t6_bar, use_container_width=True)
+            if not t6_teachers_filtered.empty:
+                fig_t6_bar = px.bar(
+                    t6_teachers_filtered, x="FullName", y=["Lesson_Mins", "Library_Mins"],
+                    title=f"Teacher Usage Breakdown for {target_school_t6} (Mins)",
+                    labels={"FullName": "Teacher Name", "value": "Logged Minutes", "variable": "Feature"},
+                    barmode="group", text_auto=".1f"
+                )
+                st.plotly_chart(fig_t6_bar, use_container_width=True)
 
             display_t6_table = t6_teachers_filtered.rename(columns={'FullName': 'Teacher Name', 'Lesson_Mins': 'Lesson Prep (m)', 'Library_Mins': 'Library Usage (m)', 'Execution_Tier': 'Execution Tier'})
             st.dataframe(display_t6_table, use_container_width=True)
