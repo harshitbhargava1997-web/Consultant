@@ -20,7 +20,7 @@ except Exception as e:
 
 # Must match the Admin Dashboard's teacher_records schema exactly.
 TEACHER_RECORDS_TABLE = "teacher_records"
-ROSTER_COLUMNS = ["State_Zone", "Uploaded_By", "Institution", "FullName"]
+ROSTER_COLUMNS = ["State_Zone", "Uploaded_By", "Institution", "FullName", "Role"]
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -147,6 +147,14 @@ if sub_school != "-- Select School --" and not master_df.empty and 'FullName' in
         (master_df['Uploaded_By'].str.lower() == sub_consultant.lower()) &
         (master_df['Institution'].str.lower() == sub_school.lower())
     ]
+    # Only show actual teachers in the roster dropdown -- exclude Principals,
+    # Owners, Coordinators, or any other non-teacher roles that may share
+    # the same teacher_records table.
+    if 'Role' in t_subset.columns:
+        role_lower = t_subset['Role'].astype(str).str.lower()
+        teacher_mask = role_lower.isin(['teacher', 'teachers'])
+        if teacher_mask.any():
+            t_subset = t_subset[teacher_mask]
     raw_names = t_subset['FullName'].astype(str).unique().tolist()
     filtered_teachers = sorted([n for n in raw_names if n and n.lower() not in ['nan', 'unknown teacher', 'none', '']])
 
