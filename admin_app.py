@@ -1176,7 +1176,7 @@ def calculate_kpi_status(minutes, target, enabled=True, break_period=False):
     return '❌ Inactive (0 Mins)'
 
 
-# --- RELAXED INGESTION LOGIC (NO SILENT DROPS) ---
+# --- ACCURATE INGESTION WITH PYTHON-LEVEL COMPOSITE KEY DEDUPLICATION ---
 def ingest_excel_to_postgresql(processed_dfs):
     if not processed_dfs:
         return 0, 0
@@ -1205,26 +1205,82 @@ def ingest_excel_to_postgresql(processed_dfs):
     if 'Duration_Min' in cleaned_df.columns:
         cleaned_df['Duration_Min'] = pd.to_numeric(cleaned_df['Duration_Min'], errors='coerce').fillna(0.0).clip(lower=0.0)
 
-    # If all StartTimes are invalid or empty, default to current timestamp
     if cleaned_df['StartTime'].isna().all():
         cleaned_df['StartTime'] = pd.Timestamp.now()
 
-    cleaned_df = cleaned_df.replace({np.nan: None})
+    # Step 1: Deduplicate within the uploaded batch first
+    dedupe_cols = ['Institution', 'FullName', 'Type', 'StartTime', 'Duration_Min', 'Subject', 'Book']
+    cleaned_df = cleaned_df.drop_duplicates(subset=dedupe_cols, keep='last')
+    
     total_incoming = len(cleaned_df)
-
     if cleaned_df.empty:
         return 0, 0
 
     engine = conn.engine
     try:
         with engine.begin() as bulk_conn:
-            before_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
-            # Direct multi-insert to guarantee records land
-            cleaned_df.to_sql('teacher_records', con=bulk_conn, index=False, if_exists='append', method='multi', chunksize=1000)
-            after_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
+            # Step 2: Fetch existing fingerprints from PostgreSQL table
+            existing_query = text("""
+                SELECT 
+                    COALESCE("Institution", '') AS "Institution",
+                    COALESCE("FullName", '') AS "FullName",
+                    COALESCE("Type", '') AS "Type",
+                    "StartTime",
+                    COALESCE("Duration_Min", 0.0) AS "Duration_Min",
+                    COALESCE("Subject", '') AS "Subject",
+                    COALESCE("Book", '') AS "Book"
+                FROM teacher_records
+            """)
+            existing_records = bulk_conn.execute(existing_query).fetchall()
+            
+            def make_sig(inst, name, typ, st_time, dur, subj, bk):
+                st_str = pd.to_datetime(st_time).strftime('%Y-%m-%d %H:%M') if pd.notna(st_time) else ""
+                dur_val = round(float(dur or 0.0), 1)
+                return (
+                    str(inst).strip().lower(),
+                    str(name).strip().lower(),
+                    str(typ).strip().lower(),
+                    st_str,
+                    dur_val,
+                    str(subj).strip().lower(),
+                    str(bk).strip().lower()
+                )
 
-        inserted_count = int(after_count - before_count)
-        return inserted_count, total_incoming - inserted_count
+            existing_set = {
+                make_sig(r[0], r[1], r[2], r[3], r[4], r[5], r[6])
+                for r in existing_records
+            }
+
+            # Step 3: Keep only rows that do not match existing signatures
+            incoming_mask = ~cleaned_df.apply(
+                lambda row: make_sig(
+                    row['Institution'], row['FullName'], row['Type'],
+                    row['StartTime'], row['Duration_Min'], row['Subject'], row['Book']
+                ) in existing_set,
+                axis=1
+            )
+
+            records_to_insert = cleaned_df[incoming_mask].copy()
+            records_to_insert = records_to_insert.replace({np.nan: None})
+
+            if not records_to_insert.empty:
+                records_to_insert.to_sql(
+                    'teacher_records',
+                    con=bulk_conn,
+                    index=False,
+                    if_exists='append',
+                    method='multi',
+                    chunksize=1000
+                )
+                inserted_count = len(records_to_insert)
+            else:
+                inserted_count = 0
+
+            duplicate_count = total_incoming - inserted_count
+
+        st.cache_data.clear()
+        return inserted_count, duplicate_count
+
     except Exception as e:
         st.error(f"Ingestion database error: {e}")
         return 0, 0
@@ -1332,7 +1388,10 @@ if uploaded_files:
             inserted_count, duplicate_count = ingest_excel_to_postgresql(new_processed_dfs)
             fetch_master_db_from_supabase.clear()
             build_teacher_roster_cached.clear()
-            st.sidebar.success(f"🎉 Database sync complete: {inserted_count} record(s) inserted successfully!")
+            if inserted_count > 0:
+                st.sidebar.success(f"🎉 Database sync complete: {inserted_count} record(s) inserted successfully! ({duplicate_count} duplicates skipped)")
+            else:
+                st.sidebar.info(f"ℹ️ All {duplicate_count} records are already present in the database.")
             st.rerun()
 
 df = fetch_master_db_from_supabase()
@@ -1381,7 +1440,7 @@ with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
             if not combined_legacy.empty:
                 combined_legacy = normalize_identity_columns(combined_legacy)
                 inserted_count, duplicate_count = ingest_excel_to_postgresql([combined_legacy])
-                st.sidebar.success(f"🎉 Historical import complete: {inserted_count} new record(s) inserted!")
+                st.sidebar.success(f"🎉 Historical import complete: {inserted_count} new record(s) inserted! ({duplicate_count} duplicates skipped)")
                 fetch_master_db_from_supabase.clear()
                 build_teacher_roster_cached.clear()
                 st.rerun()
@@ -2793,7 +2852,7 @@ else:
             with col_t7_f1:
                 t7_schools = ["All Schools"] + sorted([s for s in all_submissions_df['Institution'].unique() if str(s).strip()])
                 t7_selected_school = st.selectbox("Filter by School:", t7_schools, key="t7_school")
-            
+                
             t7_filtered = all_submissions_df if t7_selected_school == "All Schools" else all_submissions_df[all_submissions_df['Institution'] == t7_selected_school]
 
             with col_t7_f2:
