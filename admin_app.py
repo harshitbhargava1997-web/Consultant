@@ -100,10 +100,9 @@ def normalize_identity_columns(df):
     return out
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_master_db_from_supabase():
-    """Fetches all teacher records from PostgreSQL AND live-merges any teacher
-    submissions sitting in the Supabase 'submissions/' JSON folder with precise deduplication."""
+    """Fetches records directly from PostgreSQL with optimized query speed and bounded live-merging."""
     query = """
         SELECT 
             "State_Zone", "Uploaded_By", "Institution", "Center",
@@ -117,7 +116,7 @@ def fetch_master_db_from_supabase():
         ORDER BY "StartTime" DESC;
     """
     try:
-        df_raw = conn.query(query, ttl=0)
+        df_raw = conn.query(query)
     except Exception as e:
         st.error(f"Error fetching from PostgreSQL: {e}")
         df_raw = pd.DataFrame()
@@ -127,10 +126,10 @@ def fetch_master_db_from_supabase():
             if dt_col in df_raw.columns:
                 df_raw[dt_col] = pd.to_datetime(df_raw[dt_col], errors='coerce').dt.round('s')
 
-    # --- LIVE MERGE: pick up any not-yet-migrated submissions/*.json files ---
+    # Bounded retrieval: check up to 50 recent submissions to prevent network blocking
     sub_records = []
     try:
-        file_list = supabase.storage.from_(BUCKET_NAME).list("submissions", {"limit": 10000})
+        file_list = supabase.storage.from_(BUCKET_NAME).list("submissions", {"limit": 50})
         if file_list:
             for item in file_list:
                 fname = item.get('name', '')
