@@ -1315,6 +1315,12 @@ uploader_version = int(st.session_state.get("metrics_uploader_version", 0))
 uploader_key = f"metrics_uploader_{uploader_version}"
 uploaded_files = st.sidebar.file_uploader("Upload UserMetrics Excel (.xlsx)", type=["xlsx"], accept_multiple_files=True, key=uploader_key)
 
+if st.session_state.get("last_ingested_files"):
+    if st.sidebar.button("♻️ Clear Upload History (retry blocked files)"):
+        st.session_state["last_ingested_files"] = []
+        st.sidebar.success("Upload history cleared. Re-upload your file(s) now.")
+        st.rerun()
+
 if uploaded_files:
     if "last_ingested_files" not in st.session_state:
         st.session_state["last_ingested_files"] = []
@@ -1323,6 +1329,7 @@ if uploaded_files:
 
     if files_to_process:
         new_processed_dfs = []
+        successfully_parsed_files = []
         for file in files_to_process:
             try:
                 temp_dict = pd.read_excel(file, sheet_name=None)
@@ -1403,12 +1410,13 @@ if uploaded_files:
                         temp_df[qual_col] = None
 
                 new_processed_dfs.append(temp_df)
+                successfully_parsed_files.append(file)
             except Exception as e:
                 st.sidebar.error(f"Error reading {file.name}: {e}")
 
         if new_processed_dfs:
             inserted_count, duplicate_count = ingest_excel_to_postgresql(new_processed_dfs)
-            for f in files_to_process:
+            for f in successfully_parsed_files:
                 st.session_state["last_ingested_files"].append(f"{f.name}_{f.size}")
             st.sidebar.success(f"Database sync complete: {inserted_count} new record(s) inserted; {duplicate_count} duplicate record(s) skipped.")
             st.rerun()
