@@ -81,8 +81,7 @@ def normalize_identity_columns(df):
 def fetch_master_db_from_supabase():
     """Fetches all teacher records from PostgreSQL AND live-merges any teacher
     submissions still sitting in the Supabase 'submissions/' JSON folder that have
-    not yet been migrated into Postgres. This mirrors app_73's behavior so newly
-    uploaded records show up immediately instead of requiring a manual one-time import."""
+    not yet been migrated into Postgres."""
     query = """
         SELECT 
             "State_Zone", "Uploaded_By", "Institution", "Center",
@@ -96,7 +95,7 @@ def fetch_master_db_from_supabase():
         ORDER BY "StartTime" DESC;
     """
     try:
-        df_raw = conn.query(query)
+        df_raw = conn.query(query, ttl=0)
     except Exception as e:
         st.error(f"Error fetching from PostgreSQL: {e}")
         df_raw = pd.DataFrame()
@@ -126,7 +125,6 @@ def fetch_master_db_from_supabase():
             if dt_col in subs_df.columns:
                 subs_df[dt_col] = pd.to_datetime(subs_df[dt_col], errors='coerce')
         combined = pd.concat([df_raw, subs_df], ignore_index=True) if not df_raw.empty else subs_df
-        # De-duplicate in case a submission has already been migrated into Postgres
         dedupe_cols = [c for c in ['Uploaded_By', 'FullName', 'Institution', 'Type', 'StartTime', 'EndTime', 'Duration_Min'] if c in combined.columns]
         if dedupe_cols:
             combined = combined.drop_duplicates(subset=dedupe_cols, keep='last')
@@ -742,9 +740,6 @@ def extract_evidence_items_vectorized(df_src, col_name):
     items = []
     for _, r in valid_rows.iterrows():
         raw_val = str(r[col_name]).strip()
-        # A single submission can bundle multiple files together, joined with ", "
-        # by the Teacher Portal's multi-file uploader. Split them out so each file
-        # counts — and links — as its own evidence item instead of one glued blob.
         urls = [u.strip() for u in raw_val.split(',') if u.strip().lower().startswith(('http://', 'https://'))]
         if not urls:
             continue
@@ -762,6 +757,19 @@ def extract_evidence_items_vectorized(df_src, col_name):
             seen.add(item['url'])
             deduped.append(item)
     return deduped
+
+
+def evidence_items_across_columns(df_src, columns):
+    """Collect evidence across multiple columns and globally deduplicate by URL."""
+    items = []
+    seen = set()
+    for col in columns:
+        for item in extract_evidence_items_vectorized(df_src, col):
+            url = item.get('url', '').strip()
+            if url and url not in seen:
+                seen.add(url)
+                items.append(item)
+    return items
 
 
 def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_lib_kpi, daily_ld_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True):
@@ -785,8 +793,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     card_header = ParagraphStyle('CardHead', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748B'), fontName='Helvetica-Bold', alignment=1)
     card_value = ParagraphStyle('CardVal', parent=styles['Normal'], fontSize=11, leading=14, textColor=primary_color, fontName='Helvetica-Bold', alignment=1)
 
-    # Scope to school and ensure date filtering is respected across all teachers.
-    # A list/tuple is supported for callers that intentionally request a multi-school report.
     if isinstance(school_name, (list, tuple, set, np.ndarray, pd.Series)):
         school_names = [str(x) for x in school_name if str(x).strip()]
         school_curr_df = filtered_df[filtered_df['Institution'].isin(school_names)]
@@ -980,17 +986,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         v_writing = extract_evidence_items_vectorized(evidence_source, 'Writing_Sample_Link')
         v_phonics = extract_evidence_items_vectorized(evidence_source, 'Phonics_Evidence_Link')
         v_portfolio = extract_evidence_items_vectorized(evidence_source, 'Portfolio_Evidence_Link')
-
-        v_vid = []
-        for col in ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']:
-            v_vid.extend(extract_evidence_items_vectorized(evidence_source, col))
-        seen_v = set()
-        deduped_v = []
-        for item in v_vid:
-            if item['url'] not in seen_v:
-                seen_v.add(item['url'])
-                deduped_v.append(item)
-        v_vid = deduped_v
+        v_vid = evidence_items_across_columns(evidence_source, ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3'])
 
         lp_combo_total = len(v_voice) + len(v_pic)
         total_artifacts = lp_combo_total + len(v_vid) + len(v_writing) + len(v_phonics) + len(v_portfolio)
@@ -1073,9 +1069,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
 
 
 def get_working_days(start_date, end_date, excluded_dates_list=None, exclude_sundays=True):
-    """Return the exact number of valid working days in an inclusive date range.
-    IMPORTANT: zero is a valid result (Sunday-only / fully excluded holiday range).
-    """
     try:
         if start_date is None or end_date is None or pd.isna(start_date) or pd.isna(end_date):
             return 0
@@ -1096,14 +1089,12 @@ def get_working_days(start_date, end_date, excluded_dates_list=None, exclude_sun
 
 
 def safe_percentage(numerator, denominator):
-    """Percentage with an explicit zero-denominator result."""
     if denominator is None or denominator <= 0:
         return 0.0
     return float(numerator) / float(denominator) * 100.0
 
 
 def get_period_bounds_for_view(selected_month, view_mode, month_filtered_df, custom_start=None, custom_end=None):
-    """Return true calendar boundaries for the selected review period."""
     if view_mode == "Full Month Summary":
         try:
             start = pd.to_datetime(selected_month, format="%B %Y").normalize()
@@ -1116,8 +1107,8 @@ def get_period_bounds_for_view(selected_month, view_mode, month_filtered_df, cus
         return month_filtered_df['Date'].min(), month_filtered_df['Date'].max()
     return None, None
 
+
 def get_teacher_eligible_working_days(teacher_df, period_start, period_end, excluded_dates=None, exclude_sundays=True):
-    """Optional denominator based on first-to-last recorded activity in the period."""
     if teacher_df is None or teacher_df.empty or period_start is None or period_end is None:
         return 0
     dates = pd.to_datetime(teacher_df['Date'], errors='coerce').dropna()
@@ -1127,6 +1118,7 @@ def get_teacher_eligible_working_days(teacher_df, period_start, period_end, excl
     if dates.empty:
         return 0
     return get_working_days(dates.min().date(), dates.max().date(), excluded_dates, exclude_sundays)
+
 
 def teacher_days_map(roster_df, activity_df, period_start, period_end, excluded_dates=None, exclude_sundays=True):
     result = {}
@@ -1138,8 +1130,8 @@ def teacher_days_map(roster_df, activity_df, period_start, period_end, excluded_
         result[(inst, teacher)] = get_teacher_eligible_working_days(tdf, period_start, period_end, excluded_dates, exclude_sundays)
     return result
 
+
 def duration_sum(df, mask=None):
-    """Return a clean non-negative duration sum in minutes."""
     if df is None or df.empty:
         return 0.0
     work = df if mask is None else df.loc[mask]
@@ -1150,7 +1142,6 @@ def duration_sum(df, mask=None):
 
 
 def calculate_kpi_target(daily_target, working_days, enabled=True):
-    """Single source of truth for cumulative KPI benchmark."""
     if not enabled:
         return 0.0
     return max(0.0, float(daily_target)) * max(0, int(working_days))
@@ -1167,19 +1158,6 @@ def calculate_kpi_status(minutes, target, enabled=True, break_period=False):
     if minutes > 0:
         return f'⚠️ Below Performance Indicator (< {target:.0f}m)'
     return '❌ Inactive (0 Mins)'
-
-
-def evidence_items_across_columns(df_src, columns):
-    """Collect evidence across multiple columns and globally deduplicate by URL."""
-    items = []
-    seen = set()
-    for col in columns:
-        for item in extract_evidence_items_vectorized(df_src, col):
-            url = item.get('url', '').strip()
-            if url and url not in seen:
-                seen.add(url)
-                items.append(item)
-    return items
 
 
 # --- EXCEL / CSV BATCH INGESTION TO POSTGRESQL ---
@@ -1212,7 +1190,7 @@ def ingest_excel_to_postgresql(processed_dfs):
         cleaned_df['Duration_Min'] = pd.to_numeric(cleaned_df['Duration_Min'], errors='coerce')
         invalid_duration_count = int(cleaned_df['Duration_Min'].isna().sum())
         if invalid_duration_count:
-            st.warning(f"{invalid_duration_count} record(s) have missing/invalid Duration_Min. They will be stored as 0 minutes only because no valid duration was supplied.")
+            st.warning(f"{invalid_duration_count} record(s) have missing/invalid Duration_Min. They will be stored as 0 minutes.")
         cleaned_df['Duration_Min'] = cleaned_df['Duration_Min'].fillna(0.0).clip(lower=0.0)
 
     cleaned_df = cleaned_df.replace({np.nan: None})
@@ -1232,15 +1210,10 @@ def ingest_excel_to_postgresql(processed_dfs):
     engine = conn.engine
     try:
         with engine.begin() as bulk_conn:
-            # 1. Bulk-load the ENTIRE batch to a temp staging table in one operation
-            #    (a handful of multi-row INSERTs) instead of one round trip per row.
             cleaned_df.to_sql(staging_table, con=bulk_conn, index=False, if_exists='replace', method='multi', chunksize=1000)
 
             before_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
 
-            # 2. ONE set-based insert: Postgres compares the whole incoming batch
-            #    against teacher_records a single time (an anti-join), instead of
-            #    re-scanning the whole table once per uploaded row like before.
             insert_sql = text(f"""
                 INSERT INTO teacher_records ({col_list})
                 SELECT {select_s_cols}
@@ -1261,37 +1234,7 @@ def ingest_excel_to_postgresql(processed_dfs):
         st.error(f"Bulk ingestion failed: {e}")
         return 0, 0
 
-    fetch_master_db_from_supabase.clear()
     return inserted_count, skipped_duplicates
-
-
-def database_integrity_audit(df):
-    """Return high-value integrity checks used to catch duplicate or invalid data."""
-    result = {
-        "rows": int(len(df)) if df is not None else 0,
-        "duplicate_rows": 0,
-        "invalid_duration_rows": 0,
-        "negative_duration_rows": 0,
-        "missing_starttime_rows": 0,
-    }
-    if df is None or df.empty:
-        return result
-    key_cols = [c for c in [
-        "State_Zone", "Uploaded_By", "Institution", "Center", "FullName",
-        "Type", "Grade", "Subject", "Book", "StartTime", "EndTime",
-        "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
-        "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
-        "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link"
-    ] if c in df.columns]
-    if key_cols:
-        result["duplicate_rows"] = int(df.duplicated(subset=key_cols, keep=False).sum())
-    if "Duration_Min" in df.columns:
-        numeric = pd.to_numeric(df["Duration_Min"], errors="coerce")
-        result["invalid_duration_rows"] = int(numeric.isna().sum())
-        result["negative_duration_rows"] = int((numeric < 0).fillna(False).sum())
-    if "StartTime" in df.columns:
-        result["missing_starttime_rows"] = int(pd.to_datetime(df["StartTime"], errors="coerce").isna().sum())
-    return result
 
 
 # Page layout title
@@ -1313,19 +1256,27 @@ employee_state = st.sidebar.selectbox("Select State / Zone (India Region):", [
 
 uploader_version = int(st.session_state.get("metrics_uploader_version", 0))
 uploader_key = f"metrics_uploader_{uploader_version}"
-uploaded_files = st.sidebar.file_uploader("Upload UserMetrics Excel (.xlsx)", type=["xlsx"], accept_multiple_files=True, key=uploader_key)
+uploaded_files = st.sidebar.file_uploader(
+    "Upload UserMetrics Excel (.xlsx)", 
+    type=["xlsx"], 
+    accept_multiple_files=True, 
+    key=uploader_key
+)
 
 if st.session_state.get("last_ingested_files"):
     if st.sidebar.button("♻️ Clear Upload History (retry blocked files)"):
-        st.session_state["last_ingested_files"] = []
+        st.session_state["last_ingested_files"] = set()
         st.sidebar.success("Upload history cleared. Re-upload your file(s) now.")
         st.rerun()
 
 if uploaded_files:
-    if "last_ingested_files" not in st.session_state:
-        st.session_state["last_ingested_files"] = []
+    if "last_ingested_files" not in st.session_state or not isinstance(st.session_state["last_ingested_files"], set):
+        st.session_state["last_ingested_files"] = set()
 
-    files_to_process = [f for f in uploaded_files if f"{f.name}_{f.size}" not in st.session_state["last_ingested_files"]]
+    files_to_process = [
+        f for f in uploaded_files 
+        if f"{f.name}_{f.size}" not in st.session_state["last_ingested_files"]
+    ]
 
     if files_to_process:
         new_processed_dfs = []
@@ -1333,7 +1284,10 @@ if uploaded_files:
         for file in files_to_process:
             try:
                 temp_dict = pd.read_excel(file, sheet_name=None)
-                target_sheet = next((s for s in temp_dict.keys() if "usermetric" in s.lower()), list(temp_dict.keys())[0])
+                target_sheet = next(
+                    (s for s in temp_dict.keys() if "usermetric" in s.lower()), 
+                    list(temp_dict.keys())[0]
+                )
                 temp_df = temp_dict[target_sheet]
                 
                 if 'Institution' not in temp_df.columns:
@@ -1356,10 +1310,6 @@ if uploaded_files:
                         temp_df[col] = temp_df[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
 
                 def parse_duration_minutes(value):
-                    """Robustly convert Excel/Pandas duration values to minutes.
-                    Invalid/missing durations become NaN here and are handled explicitly later;
-                    they are never silently converted to a valid zero-minute activity record.
-                    """
                     if value is None or (isinstance(value, float) and np.isnan(value)) or pd.isna(value):
                         return np.nan
                     if isinstance(value, pd.Timedelta):
@@ -1370,8 +1320,6 @@ if uploaded_files:
                         except Exception:
                             return np.nan
                     if isinstance(value, (int, float, np.integer, np.floating)):
-                        # Excel time stored as fraction of a day; ordinary numeric minutes are
-                        # handled by the dedicated Duration (Minutes) column below.
                         return float(value) * 1440.0 if 0 <= float(value) < 1 else float(value)
                     text_value = str(value).strip()
                     if not text_value:
@@ -1380,7 +1328,6 @@ if uploaded_files:
                         td = pd.to_timedelta(text_value, errors='raise')
                         return td.total_seconds() / 60.0
                     except Exception:
-                        # Also accept plain numeric strings as minutes.
                         try:
                             return float(text_value)
                         except Exception:
@@ -1393,8 +1340,6 @@ if uploaded_files:
                 else:
                     temp_df['Duration_Min'] = np.nan
 
-                # Negative or non-finite durations are invalid. Keep them as NaN so the
-                # ingestion audit can report them instead of treating bad data as real activity.
                 temp_df.loc[~np.isfinite(pd.to_numeric(temp_df['Duration_Min'], errors='coerce')), 'Duration_Min'] = np.nan
                 temp_df.loc[pd.to_numeric(temp_df['Duration_Min'], errors='coerce') < 0, 'Duration_Min'] = np.nan
 
@@ -1417,7 +1362,12 @@ if uploaded_files:
         if new_processed_dfs:
             inserted_count, duplicate_count = ingest_excel_to_postgresql(new_processed_dfs)
             for f in successfully_parsed_files:
-                st.session_state["last_ingested_files"].append(f"{f.name}_{f.size}")
+                st.session_state["last_ingested_files"].add(f"{f.name}_{f.size}")
+            
+            # Explicit cache clearing
+            fetch_master_db_from_supabase.clear()
+            build_teacher_roster_cached.clear()
+            
             st.sidebar.success(f"Database sync complete: {inserted_count} new record(s) inserted; {duplicate_count} duplicate record(s) skipped.")
             st.rerun()
 
@@ -1429,6 +1379,7 @@ st.sidebar.header("🗄️ Granular Database Management")
 
 if st.sidebar.button("🔄 Sync Latest Records"):
     fetch_master_db_from_supabase.clear()
+    build_teacher_roster_cached.clear()
     st.rerun()
 
 # --- ONE-TIME DATA IMPORT SECTION FOR HISTORICAL PARQUET & JSON SUBMISSIONS ---
@@ -1468,6 +1419,7 @@ with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
                 inserted_count, duplicate_count = ingest_excel_to_postgresql([combined_legacy])
                 st.sidebar.success(f"🎉 Historical import complete: {inserted_count} new record(s) inserted; {duplicate_count} duplicate record(s) skipped out of {len(combined_legacy)} source record(s).")
                 fetch_master_db_from_supabase.clear()
+                build_teacher_roster_cached.clear()
                 st.rerun()
             else:
                 st.sidebar.error("No historical parquet or JSON files found in Supabase storage.")
@@ -1500,6 +1452,7 @@ if not df.empty:
                             )
                             s.commit()
                         fetch_master_db_from_supabase.clear()
+                        build_teacher_roster_cached.clear()
                         st.success(f"Successfully deleted records for {del_emp_name} in {del_state_zone}!")
                         st.rerun()
                 except Exception as e:
@@ -1514,6 +1467,7 @@ if not df.empty:
                         s.execute(text('DELETE FROM teacher_records WHERE "Institution" = :school'), {"school": target_del_school})
                         s.commit()
                     fetch_master_db_from_supabase.clear()
+                    build_teacher_roster_cached.clear()
                     st.success(f"Successfully removed data for {target_del_school} from database!")
                     st.rerun()
                 except Exception as e:
@@ -1522,13 +1476,10 @@ if not df.empty:
         else:
             if st.button("🚨 Clear Entire Database Table", key="clear_entire_teacher_db"):
                 try:
-                    # DELETE is safer than TRUNCATE when teacher_records has
-                    # foreign-key dependencies or restricted database permissions.
                     with conn.session as s:
                         delete_result = s.execute(text("DELETE FROM teacher_records;"))
                         deleted_count = delete_result.rowcount
 
-                        # Verify inside the same transaction before committing.
                         remaining_count = int(
                             s.execute(text("SELECT COUNT(*) FROM teacher_records;")).scalar() or 0
                         )
@@ -1539,27 +1490,24 @@ if not df.empty:
                             )
                         s.commit()
 
-                    # Only invalidate the Streamlit cache after the DB commit.
                     fetch_master_db_from_supabase.clear()
+                    build_teacher_roster_cached.clear()
                     st.session_state.pop("master_df", None)
                     st.session_state.pop("df", None)
                     st.session_state.pop("filtered_df", None)
                     st.session_state.pop("school_filtered_df", None)
 
-                    # Reset the uploader widget itself. This is stronger than merely
-                    # skipping one rerun: it prevents the same still-attached Excel file
-                    # from being automatically reinserted on the next interaction.
-                    st.session_state["last_ingested_files"] = []
+                    st.session_state["last_ingested_files"] = set()
                     st.session_state["metrics_uploader_version"] = int(
                         st.session_state.get("metrics_uploader_version", 0)
                     ) + 1
                     st.sidebar.success(
-                        f"✅ Database cleared successfully: {deleted_count if deleted_count >= 0 else 'all'} record(s) deleted. "
-                        "Upload the Excel file again intentionally to repopulate the database."
+                        f"✅ Database cleared successfully: {deleted_count if deleted_count >= 0 else 'all'} record(s) deleted."
                     )
                     st.rerun()
                 except Exception as e:
                     fetch_master_db_from_supabase.clear()
+                    build_teacher_roster_cached.clear()
                     st.sidebar.error(f"❌ Could not clear teacher_records: {type(e).__name__}: {e}")
 
 if df.empty:
@@ -1723,7 +1671,7 @@ else:
         user_excluded_dates, exclude_sundays_flag
     ) if use_teacher_eligible_days else {}
 
-    # --- SIDEBAR DIRECT EXCEL EXPORT (Only on click) ---
+    # --- SIDEBAR DIRECT EXCEL EXPORT ---
     st.sidebar.markdown("---")
     st.sidebar.subheader("📥 Direct Admin Master Export")
     if st.sidebar.button("📦 Prepare Master DB Export"):
@@ -1755,7 +1703,6 @@ else:
     with tab1:
         st.header("📘 Lesson Plan Preparation Tracker")
         
-        # Scoped In-Tab KPI Control
         with st.expander("🎯 Lesson Prep Target Benchmark Settings", expanded=False):
             t1_kcol1, t1_kcol2 = st.columns(2)
             with t1_kcol1:
@@ -1845,12 +1792,12 @@ else:
                             calc_lib_kpi=st.session_state.get('calc_lib_kpi_t2', calculate_kpi_target(30.0, selected_num_days, True)),
                             daily_ld_target=daily_ld_target_t1,
                             daily_lib_target=st.session_state.get('daily_lib_target_t2', 30.0),
-                        selected_num_days=selected_num_days,
-                        target_vid_count=3,
-                        target_writing_count=3,
-                        target_lp_combo_count=3,
-                        target_phonics_count=2,
-                        target_portfolio_count=1,
+                            selected_num_days=selected_num_days,
+                            target_vid_count=3,
+                            target_writing_count=3,
+                            target_lp_combo_count=3,
+                            target_phonics_count=2,
+                            target_portfolio_count=1,
                             enable_quant_kpi=enable_quant_kpi_t1,
                             enable_qual_kpi=True
                         ).getvalue()
@@ -1920,7 +1867,6 @@ else:
     with tab2:
         st.header("📚 Library Usage Tracker")
         
-        # Scoped In-Tab KPI Control
         with st.expander("🎯 Library Target Benchmark Settings", expanded=False):
             t2_kcol1, t2_kcol2 = st.columns(2)
             with t2_kcol1:
@@ -2010,12 +1956,12 @@ else:
                             calc_lib_kpi=calc_lib_kpi_t2,
                             daily_ld_target=st.session_state.get('daily_ld_target_t1', 10.0),
                             daily_lib_target=daily_lib_target_t2,
-                        selected_num_days=selected_num_days,
-                        target_vid_count=3,
-                        target_writing_count=3,
-                        target_lp_combo_count=3,
-                        target_phonics_count=2,
-                        target_portfolio_count=1,
+                            selected_num_days=selected_num_days,
+                            target_vid_count=3,
+                            target_writing_count=3,
+                            target_lp_combo_count=3,
+                            target_phonics_count=2,
+                            target_portfolio_count=1,
                             enable_quant_kpi=enable_quant_kpi_t2,
                             enable_qual_kpi=True
                         ).getvalue()
@@ -2218,7 +2164,6 @@ else:
         st.header("👤 Teacher 360° Performance Profile")
         st.caption("Review quantitative lesson metrics, detailed textbook time logs, and structured qualitative performance evidence with clickable artifact links.")
 
-        # Scoped In-Tab KPI Controls
         with st.expander("🎯 Teacher 360 Benchmark Controls", expanded=False):
             t4_kcol1, t4_kcol2, t4_kcol3 = st.columns(3)
             with t4_kcol1:
@@ -2288,7 +2233,6 @@ else:
             v_writing = extract_evidence_items_vectorized(evidence_source, 'Writing_Sample_Link')
             v_phonics = extract_evidence_items_vectorized(evidence_source, 'Phonics_Evidence_Link')
             v_portfolio = extract_evidence_items_vectorized(evidence_source, 'Portfolio_Evidence_Link')
-
             v_vid = evidence_items_across_columns(evidence_source, ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3'])
 
             lp_combo_total = len(v_voice) + len(v_pic)
@@ -2674,7 +2618,6 @@ else:
         if school_filtered_df.empty:
             st.warning("No data available for the selected school filter.")
         else:
-            # Scoped In-Tab KPI Controls
             with st.expander("🎯 Portfolio Quadrant Benchmark Settings", expanded=False):
                 t5_kcol1, t5_kcol2 = st.columns(2)
                 with t5_kcol1:
@@ -2804,7 +2747,6 @@ else:
     with tab6:
         st.header("🏫 School-Level Teacher Progression & Execution Tiers")
         
-        # Scoped In-Tab KPI Controls
         with st.expander("🎯 Progression Target Benchmark Settings", expanded=False):
             t6_kcol1, t6_kcol2 = st.columns(2)
             with t6_kcol1:
@@ -2881,7 +2823,6 @@ else:
     with tab7:
         st.header("📬 Live Evidence Submissions Feed & Qualitative Performance Indicator Tracker")
         
-        # Scoped In-Tab KPI Controls
         with st.expander("🎯 Qualitative Artifact Threshold Controls", expanded=False):
             t7_kcol1, t7_kcol2 = st.columns(2)
             with t7_kcol1:
