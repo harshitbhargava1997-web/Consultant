@@ -1128,7 +1128,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     headers_row = [Paragraph(k, card_header) for k in school_summary_metrics.keys()]
     values_row = [Paragraph(str(v), card_value) for v in school_summary_metrics.values()]
     col_w = 540 / len(school_summary_metrics)
-    kpi_table = Table([headers_row, values_row], colWidths=[col_w] * len(summary_metrics))
+    kpi_table = Table([headers_row, values_row], colWidths=[col_w] * len(school_summary_metrics))
     kpi_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), light_bg),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
