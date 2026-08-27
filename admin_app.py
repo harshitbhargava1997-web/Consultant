@@ -59,6 +59,7 @@ def normalize_identity_columns(df):
         return pd.DataFrame()
     out = df.copy()
 
+    # Normalize case-insensitive and alternative column headers
     col_map = {}
     for c in list(out.columns):
         c_low = str(c).strip().lower()
@@ -100,9 +101,8 @@ def normalize_identity_columns(df):
     return out
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_master_db_from_supabase():
-    """Fetches records directly from PostgreSQL with optimized query speed and bounded live-merging."""
     query = """
         SELECT 
             "State_Zone", "Uploaded_By", "Institution", "Center",
@@ -116,7 +116,7 @@ def fetch_master_db_from_supabase():
         ORDER BY "StartTime" DESC;
     """
     try:
-        df_raw = conn.query(query)
+        df_raw = conn.query(query, ttl=0)
     except Exception as e:
         st.error(f"Error fetching from PostgreSQL: {e}")
         df_raw = pd.DataFrame()
@@ -124,12 +124,11 @@ def fetch_master_db_from_supabase():
     if not df_raw.empty:
         for dt_col in ['StartTime', 'EndTime']:
             if dt_col in df_raw.columns:
-                df_raw[dt_col] = pd.to_datetime(df_raw[dt_col], errors='coerce').dt.round('s')
+                df_raw[dt_col] = pd.to_datetime(df_raw[dt_col], errors='coerce')
 
-    # Bounded retrieval: check up to 50 recent submissions to prevent network blocking
     sub_records = []
     try:
-        file_list = supabase.storage.from_(BUCKET_NAME).list("submissions", {"limit": 50})
+        file_list = supabase.storage.from_(BUCKET_NAME).list("submissions", {"limit": 10000})
         if file_list:
             for item in file_list:
                 fname = item.get('name', '')
@@ -144,9 +143,9 @@ def fetch_master_db_from_supabase():
         subs_df = pd.DataFrame(sub_records)
         for dt_col in ['StartTime', 'EndTime']:
             if dt_col in subs_df.columns:
-                subs_df[dt_col] = pd.to_datetime(subs_df[dt_col], errors='coerce').dt.round('s')
+                subs_df[dt_col] = pd.to_datetime(subs_df[dt_col], errors='coerce')
         combined = pd.concat([df_raw, subs_df], ignore_index=True) if not df_raw.empty else subs_df
-        dedupe_cols = [c for c in ['Uploaded_By', 'FullName', 'Institution', 'Type', 'Grade', 'Subject', 'Book', 'StartTime'] if c in combined.columns]
+        dedupe_cols = [c for c in ['Uploaded_By', 'FullName', 'Institution', 'Type', 'StartTime', 'EndTime', 'Duration_Min'] if c in combined.columns]
         if dedupe_cols:
             combined = combined.drop_duplicates(subset=dedupe_cols, keep='last')
         df_raw = combined
@@ -157,7 +156,6 @@ def fetch_master_db_from_supabase():
     return normalize_identity_columns(df_raw)
 
 
-# --- CACHED SUPABASE PERSISTENCE FOR CRM CONTACTS & CALL LOGS ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_crm_data_from_supabase():
     try:
@@ -249,7 +247,6 @@ def build_teacher_roster_cached(df):
     return candidate.reset_index(drop=True)
 
 
-# --- AI HELPER FUNCTIONS (GEMINI MULTIMODAL INTEGRATION) ---
 def get_gemini_summary(context_prompt, audio_file_obj=None):
     if not ai_client:
         return "⚠️ Gemini API key not found in Streamlit secrets."
@@ -1179,7 +1176,7 @@ def calculate_kpi_status(minutes, target, enabled=True, break_period=False):
     return '❌ Inactive (0 Mins)'
 
 
-# --- SAFE ANTI-JOIN INGESTION (PREVENTS DUPLICATION ACROSS SHEETS) ---
+# --- RELAXED INGESTION LOGIC WITH DATABASE-LEVEL DEDUPLICATION ---
 def ingest_excel_to_postgresql(processed_dfs):
     if not processed_dfs:
         return 0, 0
@@ -1203,54 +1200,84 @@ def ingest_excel_to_postgresql(processed_dfs):
     cleaned_df = combined_df[db_cols].copy()
     
     for dt_col in ['StartTime', 'EndTime']:
-        cleaned_df[dt_col] = pd.to_datetime(cleaned_df[dt_col], errors='coerce').dt.round('s')
+        cleaned_df[dt_col] = pd.to_datetime(cleaned_df[dt_col], errors='coerce')
 
     if 'Duration_Min' in cleaned_df.columns:
         cleaned_df['Duration_Min'] = pd.to_numeric(cleaned_df['Duration_Min'], errors='coerce').fillna(0.0).clip(lower=0.0)
 
+    # If all StartTimes are invalid or empty, default to current timestamp
     if cleaned_df['StartTime'].isna().all():
-        cleaned_df['StartTime'] = pd.Timestamp.now().round('s')
+        cleaned_df['StartTime'] = pd.Timestamp.now()
 
-    # Deduplicate within the batch itself
-    core_key = ["Uploaded_By", "Institution", "FullName", "Type", "Grade", "Subject", "Book", "StartTime"]
-    cleaned_df = cleaned_df.drop_duplicates(subset=core_key, keep='last')
+    # In-memory deduplication across the incoming batch
+    dedupe_key_cols = [c for c in ['Institution', 'FullName', 'Type', 'StartTime', 'Duration_Min', 'Subject', 'Book'] if c in cleaned_df.columns]
+    if dedupe_key_cols:
+        cleaned_df = cleaned_df.drop_duplicates(subset=dedupe_key_cols, keep='last')
+
     cleaned_df = cleaned_df.replace({np.nan: None})
     total_incoming = len(cleaned_df)
 
     if cleaned_df.empty:
         return 0, 0
 
-    staging_table = f"_staging_ingest_{uuid.uuid4().hex[:8]}"
-    col_list = ", ".join(f'"{c}"' for c in db_cols)
-    select_s_cols = ", ".join(f's."{c}"' for c in db_cols)
-    
-    join_conditions = "\n              AND ".join([
-        f't."{k}" IS NOT DISTINCT FROM s."{k}"' for k in core_key
-    ])
-
     engine = conn.engine
+    temp_stage_table = f"temp_stage_{uuid.uuid4().hex[:8]}"
+
     try:
         with engine.begin() as bulk_conn:
-            cleaned_df.to_sql(staging_table, con=bulk_conn, index=False, if_exists='replace', method='multi', chunksize=1000)
             before_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
-
-            insert_sql = text(f"""
-                INSERT INTO teacher_records ({col_list})
-                SELECT {select_s_cols}
-                FROM "{staging_table}" s
+            
+            # Upload incoming data to a temporary staging table
+            cleaned_df.to_sql(temp_stage_table, con=bulk_conn, index=False, if_exists='replace', method='multi', chunksize=1000)
+            
+            # Insert only rows that don't match on the unique business keys
+            insert_query = f"""
+                INSERT INTO teacher_records (
+                    "State_Zone", "Uploaded_By", "Institution", "Center",
+                    "FirstName", "LastName", "FullName", "Role", "Type",
+                    "Grade", "Subject", "Book", "StartTime", "EndTime",
+                    "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
+                    "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
+                    "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+                    "Assessment_Score_Pct"
+                )
+                SELECT 
+                    s."State_Zone", s."Uploaded_By", s."Institution", s."Center",
+                    s."FirstName", s."LastName", s."FullName", s."Role", s."Type",
+                    s."Grade", s."Subject", s."Book", s."StartTime", s."EndTime",
+                    s."Duration_Min", s."Voice_Note_Link", s."Lesson_Plan_Picture",
+                    s."Video_Evidence_1", s."Video_Evidence_2", s."Video_Evidence_3",
+                    s."Writing_Sample_Link", s."Phonics_Evidence_Link", s."Portfolio_Evidence_Link",
+                    s."Assessment_Score_Pct"
+                FROM {temp_stage_table} s
                 WHERE NOT EXISTS (
                     SELECT 1 FROM teacher_records t
-                    WHERE {join_conditions}
-                )
-            """)
-            bulk_conn.execute(insert_sql)
+                    WHERE COALESCE(t."Institution", '') = COALESCE(s."Institution", '')
+                      AND COALESCE(t."FullName", '') = COALESCE(s."FullName", '')
+                      AND COALESCE(t."Type", '') = COALESCE(s."Type", '')
+                      AND COALESCE(t."StartTime", '1970-01-01'::timestamp) = COALESCE(s."StartTime", '1970-01-01'::timestamp)
+                      AND COALESCE(t."Duration_Min", 0) = COALESCE(s."Duration_Min", 0)
+                      AND COALESCE(t."Subject", '') = COALESCE(s."Subject", '')
+                      AND COALESCE(t."Book", '') = COALESCE(s."Book", '')
+                );
+            """
+            bulk_conn.execute(text(insert_query))
+            
+            # Drop staging table
+            bulk_conn.execute(text(f"DROP TABLE IF EXISTS {temp_stage_table};"))
+            
             after_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
-            bulk_conn.execute(text(f'DROP TABLE IF EXISTS "{staging_table}"'))
 
         inserted_count = int(after_count - before_count)
-        skipped_duplicates = int(total_incoming - inserted_count)
-        return inserted_count, skipped_duplicates
+        duplicate_count = max(0, total_incoming - inserted_count)
+        return inserted_count, duplicate_count
+
     except Exception as e:
+        try:
+            with engine.begin() as cleanup_conn:
+                cleanup_conn.execute(text(f"DROP TABLE IF EXISTS {temp_stage_table};"))
+        except Exception:
+            pass
         st.error(f"Ingestion database error: {e}")
         return 0, 0
 
@@ -1357,7 +1384,7 @@ if uploaded_files:
             inserted_count, duplicate_count = ingest_excel_to_postgresql(new_processed_dfs)
             fetch_master_db_from_supabase.clear()
             build_teacher_roster_cached.clear()
-            st.sidebar.success(f"🎉 Database sync complete: {inserted_count} new record(s) inserted; {duplicate_count} duplicate record(s) skipped.")
+            st.sidebar.success(f"🎉 Database sync complete: {inserted_count} record(s) inserted successfully! ({duplicate_count} duplicates skipped)")
             st.rerun()
 
 df = fetch_master_db_from_supabase()
@@ -1406,7 +1433,7 @@ with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
             if not combined_legacy.empty:
                 combined_legacy = normalize_identity_columns(combined_legacy)
                 inserted_count, duplicate_count = ingest_excel_to_postgresql([combined_legacy])
-                st.sidebar.success(f"🎉 Historical import complete: {inserted_count} new record(s) inserted; {duplicate_count} duplicates skipped.")
+                st.sidebar.success(f"🎉 Historical import complete: {inserted_count} new record(s) inserted! ({duplicate_count} duplicates skipped)")
                 fetch_master_db_from_supabase.clear()
                 build_teacher_roster_cached.clear()
                 st.rerun()
@@ -2229,8 +2256,8 @@ else:
 
             pdf_custom_sections = {
                 "1. Lesson Preparation, Lesson Delivery, and Library Usage": [
-                    f"Lesson Preparation Duration: {t_day_ld:.1f} Minutes" + (f" ({ld_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""),
-                    f"Library & Digital Resources Duration: {t_day_lib:.1f} Minutes" + (f" ({lib_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""),
+                    f"Lesson Preparation Duration: {t_day_ld:.1f} Minutes" + (f" ({ld_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi_t4 else ""),
+                    f"Library & Digital Resources Duration: {t_day_lib:.1f} Minutes" + (f" ({lib_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi_t4 else ""),
                     f"Consultant Assessment: {ld_advice} in lesson preparation, {lib_advice} in library integration."
                 ],
                 "2. Content / Digital Book Content Usage": pdf_book_items,
@@ -2818,7 +2845,7 @@ else:
             with col_t7_f1:
                 t7_schools = ["All Schools"] + sorted([s for s in all_submissions_df['Institution'].unique() if str(s).strip()])
                 t7_selected_school = st.selectbox("Filter by School:", t7_schools, key="t7_school")
-            
+                
             t7_filtered = all_submissions_df if t7_selected_school == "All Schools" else all_submissions_df[all_submissions_df['Institution'] == t7_selected_school]
 
             with col_t7_f2:
