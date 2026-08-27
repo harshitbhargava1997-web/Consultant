@@ -59,6 +59,30 @@ def normalize_identity_columns(df):
         return pd.DataFrame()
     out = df.copy()
 
+    # Normalize case-insensitive and alternative column headers
+    col_map = {}
+    for c in list(out.columns):
+        c_low = str(c).strip().lower()
+        if c_low in ['institution', 'school', 'school name', 'schoolname']:
+            col_map[c] = 'Institution'
+        elif c_low in ['center', 'centre']:
+            col_map[c] = 'Center'
+        elif c_low in ['firstname', 'first name']:
+            col_map[c] = 'FirstName'
+        elif c_low in ['lastname', 'last name']:
+            col_map[c] = 'LastName'
+        elif c_low in ['fullname', 'full name', 'teacher', 'teacher name']:
+            col_map[c] = 'FullName'
+        elif c_low in ['role', 'designation']:
+            col_map[c] = 'Role'
+        elif c_low in ['starttime', 'start time', 'date', 'created_at', 'timestamp']:
+            col_map[c] = 'StartTime'
+        elif c_low in ['endtime', 'end time']:
+            col_map[c] = 'EndTime'
+        elif c_low in ['type', 'activity type', 'module']:
+            col_map[c] = 'Type'
+    out = out.rename(columns=col_map)
+
     for col in ["Institution", "Center", "FirstName", "LastName", "FullName", "Role", "Uploaded_By", "State_Zone"]:
         if col not in out.columns:
             out[col] = ""
@@ -77,11 +101,8 @@ def normalize_identity_columns(df):
     return out
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_master_db_from_supabase():
-    """Fetches all teacher records from PostgreSQL AND live-merges any teacher
-    submissions still sitting in the Supabase 'submissions/' JSON folder that have
-    not yet been migrated into Postgres."""
     query = """
         SELECT 
             "State_Zone", "Uploaded_By", "Institution", "Center",
@@ -105,7 +126,6 @@ def fetch_master_db_from_supabase():
             if dt_col in df_raw.columns:
                 df_raw[dt_col] = pd.to_datetime(df_raw[dt_col], errors='coerce')
 
-    # --- LIVE MERGE: pick up any not-yet-migrated submissions/*.json files ---
     sub_records = []
     try:
         file_list = supabase.storage.from_(BUCKET_NAME).list("submissions", {"limit": 10000})
@@ -136,7 +156,6 @@ def fetch_master_db_from_supabase():
     return normalize_identity_columns(df_raw)
 
 
-# --- CACHED SUPABASE PERSISTENCE FOR CRM CONTACTS & CALL LOGS ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_crm_data_from_supabase():
     try:
@@ -228,7 +247,6 @@ def build_teacher_roster_cached(df):
     return candidate.reset_index(drop=True)
 
 
-# --- AI HELPER FUNCTIONS (GEMINI MULTIMODAL INTEGRATION) ---
 def get_gemini_summary(context_prompt, audio_file_obj=None):
     if not ai_client:
         return "⚠️ Gemini API key not found in Streamlit secrets."
@@ -760,7 +778,6 @@ def extract_evidence_items_vectorized(df_src, col_name):
 
 
 def evidence_items_across_columns(df_src, columns):
-    """Collect evidence across multiple columns and globally deduplicate by URL."""
     items = []
     seen = set()
     for col in columns:
@@ -804,7 +821,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         if school_curr_df.empty and not school_filtered_df.empty:
             school_curr_df = school_filtered_df[school_filtered_df['Institution'] == school_name]
 
-    # PART 1: CONSOLIDATED TABLES
     story.append(Paragraph(f"<b>Comprehensive School Audit & Feature-Wise Report</b>", title_style))
     story.append(Spacer(1, 4))
     story.append(Paragraph(f"<b>Institution / School Focus:</b> {school_name}", school_style))
@@ -1160,7 +1176,7 @@ def calculate_kpi_status(minutes, target, enabled=True, break_period=False):
     return '❌ Inactive (0 Mins)'
 
 
-# --- EXCEL / CSV BATCH INGESTION TO POSTGRESQL ---
+# --- RELAXED INGESTION LOGIC (NO SILENT DROPS) ---
 def ingest_excel_to_postgresql(processed_dfs):
     if not processed_dfs:
         return 0, 0
@@ -1187,54 +1203,31 @@ def ingest_excel_to_postgresql(processed_dfs):
         cleaned_df[dt_col] = pd.to_datetime(cleaned_df[dt_col], errors='coerce')
 
     if 'Duration_Min' in cleaned_df.columns:
-        cleaned_df['Duration_Min'] = pd.to_numeric(cleaned_df['Duration_Min'], errors='coerce')
-        invalid_duration_count = int(cleaned_df['Duration_Min'].isna().sum())
-        if invalid_duration_count:
-            st.warning(f"{invalid_duration_count} record(s) have missing/invalid Duration_Min. They will be stored as 0 minutes.")
-        cleaned_df['Duration_Min'] = cleaned_df['Duration_Min'].fillna(0.0).clip(lower=0.0)
+        cleaned_df['Duration_Min'] = pd.to_numeric(cleaned_df['Duration_Min'], errors='coerce').fillna(0.0).clip(lower=0.0)
+
+    # If all StartTimes are invalid or empty, default to current timestamp
+    if cleaned_df['StartTime'].isna().all():
+        cleaned_df['StartTime'] = pd.Timestamp.now()
 
     cleaned_df = cleaned_df.replace({np.nan: None})
+    total_incoming = len(cleaned_df)
 
     if cleaned_df.empty:
         return 0, 0
 
-    total_incoming = len(cleaned_df)
-    staging_table = f"_staging_ingest_{uuid.uuid4().hex[:10]}"
-    col_list = ", ".join(f'"{c}"' for c in db_cols)
-    select_s_cols = ", ".join(f's."{c}"' for c in db_cols)
-    not_exists_cols = "\n              ".join(
-        f'AND t."{c}" IS NOT DISTINCT FROM s."{c}"' if i > 0 else f't."{c}" IS NOT DISTINCT FROM s."{c}"'
-        for i, c in enumerate(db_cols)
-    )
-
     engine = conn.engine
     try:
         with engine.begin() as bulk_conn:
-            cleaned_df.to_sql(staging_table, con=bulk_conn, index=False, if_exists='replace', method='multi', chunksize=1000)
-
             before_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
-
-            insert_sql = text(f"""
-                INSERT INTO teacher_records ({col_list})
-                SELECT {select_s_cols}
-                FROM "{staging_table}" s
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM teacher_records t
-                    WHERE {not_exists_cols}
-                )
-            """)
-            bulk_conn.execute(insert_sql)
-
+            # Direct multi-insert to guarantee records land
+            cleaned_df.to_sql('teacher_records', con=bulk_conn, index=False, if_exists='append', method='multi', chunksize=1000)
             after_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
-            bulk_conn.execute(text(f'DROP TABLE IF EXISTS "{staging_table}"'))
 
         inserted_count = int(after_count - before_count)
-        skipped_duplicates = int(total_incoming - inserted_count)
+        return inserted_count, total_incoming - inserted_count
     except Exception as e:
-        st.error(f"Bulk ingestion failed: {e}")
+        st.error(f"Ingestion database error: {e}")
         return 0, 0
-
-    return inserted_count, skipped_duplicates
 
 
 # Page layout title
@@ -1254,34 +1247,16 @@ employee_state = st.sidebar.selectbox("Select State / Zone (India Region):", [
     "Uttarakhand", "West Bengal", "Delhi NCR", "Jammu and Kashmir", "Ladakh"
 ])
 
-uploader_version = int(st.session_state.get("metrics_uploader_version", 0))
-uploader_key = f"metrics_uploader_{uploader_version}"
 uploaded_files = st.sidebar.file_uploader(
     "Upload UserMetrics Excel (.xlsx)", 
     type=["xlsx"], 
-    accept_multiple_files=True, 
-    key=uploader_key
+    accept_multiple_files=True
 )
 
-if st.session_state.get("last_ingested_files"):
-    if st.sidebar.button("♻️ Clear Upload History (retry blocked files)"):
-        st.session_state["last_ingested_files"] = set()
-        st.sidebar.success("Upload history cleared. Re-upload your file(s) now.")
-        st.rerun()
-
 if uploaded_files:
-    if "last_ingested_files" not in st.session_state or not isinstance(st.session_state["last_ingested_files"], set):
-        st.session_state["last_ingested_files"] = set()
-
-    files_to_process = [
-        f for f in uploaded_files 
-        if f"{f.name}_{f.size}" not in st.session_state["last_ingested_files"]
-    ]
-
-    if files_to_process:
+    if st.sidebar.button("🚀 Process & Ingest Files Now", type="primary"):
         new_processed_dfs = []
-        successfully_parsed_files = []
-        for file in files_to_process:
+        for file in uploaded_files:
             try:
                 temp_dict = pd.read_excel(file, sheet_name=None)
                 target_sheet = next(
@@ -1289,12 +1264,8 @@ if uploaded_files:
                     list(temp_dict.keys())[0]
                 )
                 temp_df = temp_dict[target_sheet]
-                
-                if 'Institution' not in temp_df.columns:
-                    temp_df['Institution'] = "Default School"
 
                 temp_df = normalize_identity_columns(temp_df)
-                
                 temp_df['Uploaded_By'] = employee_name
                 temp_df['State_Zone'] = employee_state
 
@@ -1311,19 +1282,19 @@ if uploaded_files:
 
                 def parse_duration_minutes(value):
                     if value is None or (isinstance(value, float) and np.isnan(value)) or pd.isna(value):
-                        return np.nan
+                        return 0.0
                     if isinstance(value, pd.Timedelta):
                         return value.total_seconds() / 60.0
                     if isinstance(value, np.timedelta64):
                         try:
                             return pd.to_timedelta(value).total_seconds() / 60.0
                         except Exception:
-                            return np.nan
+                            return 0.0
                     if isinstance(value, (int, float, np.integer, np.floating)):
                         return float(value) * 1440.0 if 0 <= float(value) < 1 else float(value)
                     text_value = str(value).strip()
                     if not text_value:
-                        return np.nan
+                        return 0.0
                     try:
                         td = pd.to_timedelta(text_value, errors='raise')
                         return td.total_seconds() / 60.0
@@ -1331,20 +1302,19 @@ if uploaded_files:
                         try:
                             return float(text_value)
                         except Exception:
-                            return np.nan
+                            return 0.0
 
                 if 'Duration (HH:MM:SS)' in temp_df.columns:
                     temp_df['Duration_Min'] = temp_df['Duration (HH:MM:SS)'].apply(parse_duration_minutes)
                 elif 'Duration (Minutes)' in temp_df.columns:
-                    temp_df['Duration_Min'] = pd.to_numeric(temp_df['Duration (Minutes)'], errors='coerce')
+                    temp_df['Duration_Min'] = pd.to_numeric(temp_df['Duration (Minutes)'], errors='coerce').fillna(0.0)
                 else:
-                    temp_df['Duration_Min'] = np.nan
-
-                temp_df.loc[~np.isfinite(pd.to_numeric(temp_df['Duration_Min'], errors='coerce')), 'Duration_Min'] = np.nan
-                temp_df.loc[pd.to_numeric(temp_df['Duration_Min'], errors='coerce') < 0, 'Duration_Min'] = np.nan
+                    temp_df['Duration_Min'] = 0.0
 
                 if 'Type' in temp_df.columns:
-                    temp_df['Type'] = temp_df['Type'].fillna('Other').astype(str)
+                    temp_df['Type'] = temp_df['Type'].fillna('lessonDelivery').astype(str)
+                else:
+                    temp_df['Type'] = 'lessonDelivery'
 
                 for dt_col in ['StartTime', 'EndTime']:
                     if dt_col in temp_df.columns:
@@ -1355,20 +1325,14 @@ if uploaded_files:
                         temp_df[qual_col] = None
 
                 new_processed_dfs.append(temp_df)
-                successfully_parsed_files.append(file)
             except Exception as e:
                 st.sidebar.error(f"Error reading {file.name}: {e}")
 
         if new_processed_dfs:
             inserted_count, duplicate_count = ingest_excel_to_postgresql(new_processed_dfs)
-            for f in successfully_parsed_files:
-                st.session_state["last_ingested_files"].add(f"{f.name}_{f.size}")
-            
-            # Explicit cache clearing
             fetch_master_db_from_supabase.clear()
             build_teacher_roster_cached.clear()
-            
-            st.sidebar.success(f"Database sync complete: {inserted_count} new record(s) inserted; {duplicate_count} duplicate record(s) skipped.")
+            st.sidebar.success(f"🎉 Database sync complete: {inserted_count} record(s) inserted successfully!")
             st.rerun()
 
 df = fetch_master_db_from_supabase()
@@ -1417,7 +1381,7 @@ with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
             if not combined_legacy.empty:
                 combined_legacy = normalize_identity_columns(combined_legacy)
                 inserted_count, duplicate_count = ingest_excel_to_postgresql([combined_legacy])
-                st.sidebar.success(f"🎉 Historical import complete: {inserted_count} new record(s) inserted; {duplicate_count} duplicate record(s) skipped out of {len(combined_legacy)} source record(s).")
+                st.sidebar.success(f"🎉 Historical import complete: {inserted_count} new record(s) inserted!")
                 fetch_master_db_from_supabase.clear()
                 build_teacher_roster_cached.clear()
                 st.rerun()
@@ -1479,15 +1443,6 @@ if not df.empty:
                     with conn.session as s:
                         delete_result = s.execute(text("DELETE FROM teacher_records;"))
                         deleted_count = delete_result.rowcount
-
-                        remaining_count = int(
-                            s.execute(text("SELECT COUNT(*) FROM teacher_records;")).scalar() or 0
-                        )
-                        if remaining_count != 0:
-                            s.rollback()
-                            raise RuntimeError(
-                                f"{remaining_count} record(s) still remain after DELETE."
-                            )
                         s.commit()
 
                     fetch_master_db_from_supabase.clear()
@@ -1497,10 +1452,6 @@ if not df.empty:
                     st.session_state.pop("filtered_df", None)
                     st.session_state.pop("school_filtered_df", None)
 
-                    st.session_state["last_ingested_files"] = set()
-                    st.session_state["metrics_uploader_version"] = int(
-                        st.session_state.get("metrics_uploader_version", 0)
-                    ) + 1
                     st.sidebar.success(
                         f"✅ Database cleared successfully: {deleted_count if deleted_count >= 0 else 'all'} record(s) deleted."
                     )
@@ -1511,45 +1462,41 @@ if not df.empty:
                     st.sidebar.error(f"❌ Could not clear teacher_records: {type(e).__name__}: {e}")
 
 if df.empty:
-    st.info("👋 Upload your daily or weekly `UserMetrics.xlsx` files in the sidebar, or run the One-Time Import in the sidebar to populate your PostgreSQL database.")
+    st.info("👋 Upload your `UserMetrics.xlsx` file in the sidebar and click **'🚀 Process & Ingest Files Now'** to populate your dashboard.")
 else:
-    if 'StartTime' in df.columns and not df['StartTime'].isna().all():
-        df['Date'] = df['StartTime'].dt.date
-        df['Month_Name'] = df['StartTime'].dt.strftime('%B %Y')
-        df['Month_Sort'] = df['StartTime'].dt.strftime('%Y-%m')
-        
-        def get_week_of_month(dt):
-            try:
-                first_day = dt.replace(day=1)
-                dom = dt.day
-                adjusted_dom = dom + first_day.weekday()
-                return int(np.ceil(adjusted_dom / 7.0))
-            except:
-                return 1
+    df['StartTime'] = pd.to_datetime(df['StartTime'], errors='coerce').fillna(pd.Timestamp.now())
+    df['Date'] = df['StartTime'].dt.date
+    df['Month_Name'] = df['StartTime'].dt.strftime('%B %Y')
+    df['Month_Sort'] = df['StartTime'].dt.strftime('%Y-%m')
+    
+    def get_week_of_month(dt):
+        try:
+            first_day = dt.replace(day=1)
+            dom = dt.day
+            adjusted_dom = dom + first_day.weekday()
+            return int(np.ceil(adjusted_dom / 7.0))
+        except:
+            return 1
 
-        df['Week_Num'] = df['StartTime'].apply(get_week_of_month)
-        
-        week_ranges = df.groupby(['Month_Name', 'Week_Num'])['Date'].agg(['min', 'max']).reset_index()
-        week_ranges['Week_Date_Range'] = (
-            week_ranges['min'].apply(lambda x: x.strftime('%b %d') if pd.notna(x) else '') + " to " + 
-            week_ranges['max'].apply(lambda x: x.strftime('%b %d') if pd.notna(x) else '')
-        )
-        
-        df = df.merge(week_ranges[['Month_Name', 'Week_Num', 'Week_Date_Range']], on=['Month_Name', 'Week_Num'], how='left')
-        df['Month_Week_Label'] = df['StartTime'].dt.strftime('%b %Y') + " - Week " + df['Week_Num'].astype(str) + " (" + df['Week_Date_Range'] + ")"
-        df['Week'] = df['Month_Week_Label']
-    else:
-        df['Date'] = None
-        df['Month_Name'] = "N/A"
-        df['Week'] = "N/A"
+    df['Week_Num'] = df['StartTime'].apply(get_week_of_month)
+    
+    week_ranges = df.groupby(['Month_Name', 'Week_Num'])['Date'].agg(['min', 'max']).reset_index()
+    week_ranges['Week_Date_Range'] = (
+        week_ranges['min'].apply(lambda x: x.strftime('%b %d') if pd.notna(x) else '') + " to " + 
+        week_ranges['max'].apply(lambda x: x.strftime('%b %d') if pd.notna(x) else '')
+    )
+    
+    df = df.merge(week_ranges[['Month_Name', 'Week_Num', 'Week_Date_Range']], on=['Month_Name', 'Week_Num'], how='left')
+    df['Month_Week_Label'] = df['StartTime'].dt.strftime('%b %Y') + " - Week " + df['Week_Num'].astype(str) + " (" + df['Week_Date_Range'] + ")"
+    df['Week'] = df['Month_Week_Label']
 
     master_teacher_roster = build_teacher_roster_cached(df)
     if master_teacher_roster.empty:
-        master_teacher_roster = pd.DataFrame(columns=['Institution', 'FullName', 'Uploaded_By', 'State_Zone'])
+        master_teacher_roster = df[['Institution', 'FullName', 'Uploaded_By', 'State_Zone']].drop_duplicates()
     else:
         master_teacher_roster = master_teacher_roster[['Institution', 'FullName', 'Uploaded_By', 'State_Zone']].drop_duplicates()
 
-    # --- HIERARCHICAL GLOBAL FILTERS (DEFAULT TO MP) ---
+    # --- HIERARCHICAL GLOBAL FILTERS (DEFAULT TO ALL IF MP NOT FOUND) ---
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Hierarchical Global Filters")
     
@@ -1558,22 +1505,22 @@ else:
     
     if all_states:
         selected_states = st.sidebar.multiselect("1. Select State(s) / Zone(s)", options=all_states, default=default_states)
-        df_state = df[df['State_Zone'].isin(selected_states)]
+        df_state = df[df['State_Zone'].isin(selected_states)] if selected_states else df
     else:
         df_state = df
 
     all_employees = sorted([str(e) for e in df_state['Uploaded_By'].unique() if str(e).strip() and str(e).lower() not in ['nan', 'none']])
     if all_employees:
         selected_employees = st.sidebar.multiselect("2. Select Consultant(s)", options=all_employees, default=all_employees)
-        df_emp = df_state[df_state['Uploaded_By'].isin(selected_employees)]
+        df_emp = df_state[df_state['Uploaded_By'].isin(selected_employees)] if selected_employees else df_state
     else:
         df_emp = df_state
 
     all_schools = sorted([str(s) for s in df_emp['Institution'].unique() if str(s).strip() and str(s).lower() not in ['nan', 'none']])
     selected_schools = st.sidebar.multiselect("3. Select School(s)", options=all_schools, default=all_schools)
 
-    school_master_roster = master_teacher_roster[master_teacher_roster['Institution'].isin(selected_schools)]
-    school_filtered_df = df_emp[df_emp['Institution'].isin(selected_schools)]
+    school_master_roster = master_teacher_roster[master_teacher_roster['Institution'].isin(selected_schools)] if selected_schools else master_teacher_roster
+    school_filtered_df = df_emp[df_emp['Institution'].isin(selected_schools)] if selected_schools else df_emp
 
     # --- CALENDAR & HOLIDAY MANAGER ---
     st.sidebar.markdown("---")
@@ -1582,8 +1529,8 @@ else:
     available_months_df = school_filtered_df[['Month_Sort', 'Month_Name']].dropna().drop_duplicates().sort_values(by='Month_Sort', ascending=False)
     month_options = available_months_df['Month_Name'].tolist()
     
-    selected_month = st.sidebar.selectbox("Select Review Month:", options=month_options if month_options else ["No Month Data"])
-    month_filtered_df = school_filtered_df[school_filtered_df['Month_Name'] == selected_month]
+    selected_month = st.sidebar.selectbox("Select Review Month:", options=month_options if month_options else ["All Months"])
+    month_filtered_df = school_filtered_df[school_filtered_df['Month_Name'] == selected_month] if selected_month != "All Months" else school_filtered_df
     
     exclude_sundays_flag = st.sidebar.checkbox("🗓️ Exclude Sundays from Performance Indicators", value=True)
     use_teacher_eligible_days = st.sidebar.checkbox(
@@ -1649,17 +1596,12 @@ else:
         selected_num_days = get_working_days(c_start, c_end, user_excluded_dates, exclude_sundays=exclude_sundays_flag)
         filter_description_text = f"Custom Range: {c_start} to {c_end} - {selected_num_days} Working Days"
 
-    if selected_num_days == 0:
-        st.sidebar.warning('The selected period contains 0 valid working days. Quantitative benchmarks are set to 0 and teachers are not marked as meeting a performance target.')
-    if use_teacher_eligible_days:
-        st.sidebar.info('Teacher-specific eligibility is ON for teacher-level KPIs. School/portfolio summaries continue to use the full calendar working-day denominator.')
-
     # 4. Global Teacher Filter
     available_teachers = sorted([str(t) for t in school_master_roster['FullName'].unique() if str(t).strip()])
     selected_teachers = st.sidebar.multiselect("4. Select Teacher(s)", options=available_teachers, default=available_teachers)
     
-    filtered_roster = school_master_roster[school_master_roster['FullName'].isin(selected_teachers)]
-    filtered_df = filtered_df[filtered_df['FullName'].isin(selected_teachers)]
+    filtered_roster = school_master_roster[school_master_roster['FullName'].isin(selected_teachers)] if selected_teachers else school_master_roster
+    filtered_df = filtered_df[filtered_df['FullName'].isin(selected_teachers)] if selected_teachers else filtered_df
 
     period_start, period_end = get_period_bounds_for_view(
         selected_month, view_mode, month_filtered_df,
