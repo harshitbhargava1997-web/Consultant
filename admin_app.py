@@ -1868,7 +1868,7 @@ else:
     # TAB 8: CLASSROOM VISIT OBSERVATION FORM (NEW COMPREHENSIVE GENERATOR)
     with tab8:
         st.header("📋 Physical School Visit: Classroom Observation Form & Audit Generator")
-        st.caption("Fill in physical visit observations, select parameter rubrics, punch narrative details, and generate the formal audit PDF without writing into Excel.")[cite: 1]
+        st.caption("Fill in physical visit observations, select parameter rubrics, punch narrative details, and generate the formal audit PDF without writing into Excel.")
 
         with st.form("classroom_visit_full_form"):
             st.subheader("1. General Information & Metadata")
@@ -1878,22 +1878,22 @@ else:
                 input_school = st.selectbox("Name of the School / Institution:", options=all_schools, key="obs_school_sel")
                 input_teacher = st.selectbox("Name of the Teacher:", options=available_teachers, key="obs_teacher_sel")
                 input_custom_teacher = st.text_input("Or Type Custom Teacher Name (if not in list):", key="obs_custom_teacher")
-                input_mentor = st.text_input("Name of the Academic Mentor:", value=employee_name, key="obs_mentor_name")[cite: 1]
+                input_mentor = st.text_input("Name of the Academic Mentor:", value=employee_name, key="obs_mentor_name")
 
             with col_m2:
-                input_class_sec = st.text_input("Class and Section:", placeholder="e.g. 3rd", value="3rd", key="obs_class_sec")[cite: 1]
-                input_subject = st.text_input("Subject:", placeholder="e.g. Science", value="Science", key="obs_subject")[cite: 1]
-                input_topic = st.text_input("Topic:", placeholder="e.g. States of Matter", value="States of Matter", key="obs_topic")[cite: 1]
+                input_class_sec = st.text_input("Class and Section:", placeholder="e.g. 3rd", value="3rd", key="obs_class_sec")
+                input_subject = st.text_input("Subject:", placeholder="e.g. Science", value="Science", key="obs_subject")
+                input_topic = st.text_input("Topic:", placeholder="e.g. States of Matter", value="States of Matter", key="obs_topic")
 
             with col_m3:
-                input_date = st.date_input("Observation Date:", value=pd.Timestamp.now().date(), key="obs_date_pick")[cite: 1]
-                input_duration = st.text_input("Total Time Duration of Observation:", value="40 Min", key="obs_dur")[cite: 1]
-                input_students = st.number_input("Total number of students present:", min_value=1, max_value=120, value=26, key="obs_num_students")[cite: 1]
-                input_print_disp = st.selectbox("Print displayed in class:", ["Yes", "No"], index=0, key="obs_print_disp")[cite: 1]
+                input_date = st.date_input("Observation Date:", value=pd.Timestamp.now().date(), key="obs_date_pick")
+                input_duration = st.text_input("Total Time Duration of Observation:", value="40 Min", key="obs_dur")
+                input_students = st.number_input("Total number of students present:", min_value=1, max_value=120, value=26, key="obs_num_students")
+                input_print_disp = st.selectbox("Print displayed in class:", ["Yes", "No"], index=0, key="obs_print_disp")
 
             st.markdown("---")
             st.subheader("2. Parameter-Wise Evaluation Rubric (A / B / C / NA)")
-            st.caption("Select the grade that matches the teacher's execution and type specific remarks/action items for each parameter.")[cite: 1]
+            st.caption("Select the grade that matches the teacher's execution and type specific remarks/action items for each parameter.")
 
             final_rubric_responses = {}
 
@@ -1908,19 +1908,19 @@ else:
                         format_func=lambda opt, d=desc_dict: f"**{opt}**: {d.get(opt, 'Not Applicable')}" if opt in d else "NA: Not Applicable / Not Observed",
                         horizontal=False,
                         key=f"rubric_opt_{cat_name}"
-                    )[cite: 1]
+                    )
 
                 with col_r2:
                     param_remark = st.text_input(
                         f"Remarks for {cat_name}:",
                         placeholder="Enter observation remark...",
                         key=f"rubric_rem_{cat_name}"
-                    )[cite: 1]
+                    )
                 
                 final_rubric_responses[cat_name] = {
                     "Grade": selected_grade,
                     "Remarks": param_remark.strip()
-                }[cite: 1]
+                }
                 st.markdown("<hr style='margin: 8px 0; border-top: 1px dashed #e2e8f0;'>", unsafe_allow_html=True)
 
             st.markdown("---")
@@ -1933,7 +1933,7 @@ else:
                 "4. Used a bilingual approach during explanation of gases to support conceptual clarity.\n"
                 "5. Conducted Cold Calling CFU questions throughout the lesson.\n"
                 "6. Concluded the class with a recap activity and lesson summary."
-            )[cite: 1]
+            )
 
             high_points_default = (
                 "1. Effective use of the Digital Book and visuals to explain the concepts.\n"
@@ -1941,18 +1941,18 @@ else:
                 "3. Regular use of CFU questions and cold calling.\n"
                 "4. The teacher used a bilingual approach to support conceptual clarity.\n"
                 "5. The lesson ended with an effective recap and summarization."
-            )[cite: 1]
+            )
 
             recom_default = (
                 "1. Start the lesson with open-ended, curiosity-driven questions before introducing the concept to activate prior knowledge.\n"
                 "2. Follow the complete Lesson Plan flow consistently: Warm-up → Curiosity Questions → Concept Explanation → Reflection.\n"
                 "3. Use simple Teaching-Learning Materials (TLMs) like stones, water bottles, or balloons for experiential understanding.\n"
                 "4. Increase opportunities for students to predict, observe, and reason before providing explanations."
-            )[cite: 1]
+            )
 
-            input_flow = st.text_area("Flow of the Class (Step-by-step chronology):", value=flow_default, height=130, key="obs_narr_flow")[cite: 1]
-            input_high_points = st.text_area("High Points of the Class:", value=high_points_default, height=110, key="obs_narr_high")[cite: 1]
-            input_recom = st.text_area("Recommendations by the Academic Mentor:", value=recom_default, height=110, key="obs_narr_recom")[cite: 1]
+            input_flow = st.text_area("Flow of the Class (Step-by-step chronology):", value=flow_default, height=130, key="obs_narr_flow")
+            input_high_points = st.text_area("High Points of the Class:", value=high_points_default, height=110, key="obs_narr_high")
+            input_recom = st.text_area("Recommendations by the Academic Mentor:", value=recom_default, height=110, key="obs_narr_recom")
 
             submit_obs_form = st.form_submit_button("🚀 Compile & Generate Classroom Observation Report (PDF)")
 
@@ -1970,13 +1970,13 @@ else:
                 "Students": input_students,
                 "PrintDisplay": input_print_disp,
                 "Mentor": input_mentor.strip() if input_mentor.strip() else employee_name
-            }[cite: 1]
+            }
 
             obs_narrative_payload = {
                 "Flow": input_flow,
                 "HighPoints": input_high_points,
                 "Recommendations": input_recom
-            }[cite: 1]
+            }
 
             with st.spinner("Compiling Classroom Observation PDF via ReportLab..."):
                 obs_pdf_buffer = generate_classroom_observation_visit_pdf(
