@@ -55,7 +55,7 @@ def _norm_key(value):
 
 
 def normalize_identity_columns(df):
-    if df is None or df.empty:
+    if df is None:
         return pd.DataFrame()
     out = df.copy()
 
@@ -733,7 +733,7 @@ def extract_evidence_items_vectorized(df_src, col_name):
         return []
     
     col_str = df_src[col_name].fillna('').astype(str).str.strip()
-    valid_mask = col_str.str.startswith(('http://', 'https://'))
+    valid_mask = col_str.str.contains('http://', regex=False) | col_str.str.contains('https://', regex=False)
     valid_rows = df_src[valid_mask]
     
     if valid_rows.empty:
@@ -741,12 +741,19 @@ def extract_evidence_items_vectorized(df_src, col_name):
         
     items = []
     for _, r in valid_rows.iterrows():
-        val = str(r[col_name]).strip()
+        raw_val = str(r[col_name]).strip()
+        # A single submission can bundle multiple files together, joined with ", "
+        # by the Teacher Portal's multi-file uploader. Split them out so each file
+        # counts — and links — as its own evidence item instead of one glued blob.
+        urls = [u.strip() for u in raw_val.split(',') if u.strip().lower().startswith(('http://', 'https://'))]
+        if not urls:
+            continue
         d_str = str(r['Date']) if 'Date' in r and pd.notna(r['Date']) else "Recent"
         g_str = f"Grade {r['Grade']}" if 'Grade' in r and str(r['Grade']).strip() else "Grade N/A"
         s_str = str(r['Subject']).strip() if 'Subject' in r and str(r['Subject']).strip() else "General Subject"
         b_str = str(r['Book']).strip() if 'Book' in r and str(r['Book']).strip() else "Lesson Plan"
-        items.append({'url': val, 'date': d_str, 'grade': g_str, 'subject': s_str, 'lesson': b_str})
+        for u in urls:
+            items.append({'url': u, 'date': d_str, 'grade': g_str, 'subject': s_str, 'lesson': b_str})
         
     seen = set()
     deduped = []
