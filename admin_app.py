@@ -63,23 +63,23 @@ def normalize_identity_columns(df):
     col_map = {}
     for c in list(out.columns):
         c_low = str(c).strip().lower()
-        if c_low in ['institution', 'school', 'school name', 'schoolname', 'school_name', 'institution_name']:
+        if c_low in ['institution', 'school', 'school name', 'schoolname']:
             col_map[c] = 'Institution'
-        elif c_low in ['center', 'centre', 'branch', 'campus']:
+        elif c_low in ['center', 'centre']:
             col_map[c] = 'Center'
-        elif c_low in ['firstname', 'first name', 'first_name']:
+        elif c_low in ['firstname', 'first name']:
             col_map[c] = 'FirstName'
-        elif c_low in ['lastname', 'last name', 'last_name']:
+        elif c_low in ['lastname', 'last name']:
             col_map[c] = 'LastName'
-        elif c_low in ['fullname', 'full name', 'full_name', 'teacher', 'teacher name', 'teacher_name', 'user', 'name']:
+        elif c_low in ['fullname', 'full name', 'teacher', 'teacher name']:
             col_map[c] = 'FullName'
-        elif c_low in ['role', 'designation', 'user role']:
+        elif c_low in ['role', 'designation']:
             col_map[c] = 'Role'
-        elif c_low in ['starttime', 'start time', 'start_time', 'date', 'created_at', 'timestamp', 'activity date', 'session date']:
+        elif c_low in ['starttime', 'start time', 'date', 'created_at', 'timestamp']:
             col_map[c] = 'StartTime'
-        elif c_low in ['endtime', 'end time', 'end_time']:
+        elif c_low in ['endtime', 'end time']:
             col_map[c] = 'EndTime'
-        elif c_low in ['type', 'activity type', 'activity_type', 'module', 'feature']:
+        elif c_low in ['type', 'activity type', 'module']:
             col_map[c] = 'Type'
     out = out.rename(columns=col_map)
 
@@ -101,7 +101,7 @@ def normalize_identity_columns(df):
     return out
 
 
-@st.cache_data(ttl=0, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_master_db_from_supabase():
     query = """
         SELECT 
@@ -1176,7 +1176,7 @@ def calculate_kpi_status(minutes, target, enabled=True, break_period=False):
     return '❌ Inactive (0 Mins)'
 
 
-# --- RELAXED INGESTION LOGIC WITH COMPREHENSIVE DEDUPLICATION & NULL-SAFETY ---
+# --- RELAXED INGESTION LOGIC (NO SILENT DROPS) ---
 def ingest_excel_to_postgresql(processed_dfs):
     if not processed_dfs:
         return 0, 0
@@ -1205,13 +1205,9 @@ def ingest_excel_to_postgresql(processed_dfs):
     if 'Duration_Min' in cleaned_df.columns:
         cleaned_df['Duration_Min'] = pd.to_numeric(cleaned_df['Duration_Min'], errors='coerce').fillna(0.0).clip(lower=0.0)
 
-    # If StartTime is completely missing, populate with current time
-    cleaned_df['StartTime'] = cleaned_df['StartTime'].fillna(pd.Timestamp.now())
-
-    # Pre-deduplicate the incoming batch itself
-    dedupe_key_cols = [c for c in ['Institution', 'FullName', 'Type', 'StartTime', 'Duration_Min', 'Subject', 'Book'] if c in cleaned_df.columns]
-    if dedupe_key_cols:
-        cleaned_df = cleaned_df.drop_duplicates(subset=dedupe_key_cols, keep='last')
+    # If all StartTimes are invalid or empty, default to current timestamp
+    if cleaned_df['StartTime'].isna().all():
+        cleaned_df['StartTime'] = pd.Timestamp.now()
 
     cleaned_df = cleaned_df.replace({np.nan: None})
     total_incoming = len(cleaned_df)
@@ -1220,65 +1216,16 @@ def ingest_excel_to_postgresql(processed_dfs):
         return 0, 0
 
     engine = conn.engine
-    temp_stage_table = f"temp_stage_{uuid.uuid4().hex[:8]}"
-
     try:
         with engine.begin() as bulk_conn:
             before_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
-            
-            # Step 1: Upload batch to isolated staging table
-            cleaned_df.to_sql(temp_stage_table, con=bulk_conn, index=False, if_exists='replace', method='multi', chunksize=1000)
-            
-            # Step 2: Safe upsert matching on lower-cased text & minute-truncated timestamps
-            insert_query = f"""
-                INSERT INTO teacher_records (
-                    "State_Zone", "Uploaded_By", "Institution", "Center",
-                    "FirstName", "LastName", "FullName", "Role", "Type",
-                    "Grade", "Subject", "Book", "StartTime", "EndTime",
-                    "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
-                    "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
-                    "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
-                    "Assessment_Score_Pct"
-                )
-                SELECT 
-                    s."State_Zone", s."Uploaded_By", s."Institution", s."Center",
-                    s."FirstName", s."LastName", s."FullName", s."Role", s."Type",
-                    s."Grade", s."Subject", s."Book", s."StartTime", s."EndTime",
-                    s."Duration_Min", s."Voice_Note_Link", s."Lesson_Plan_Picture",
-                    s."Video_Evidence_1", s."Video_Evidence_2", s."Video_Evidence_3",
-                    s."Writing_Sample_Link", s."Phonics_Evidence_Link", s."Portfolio_Evidence_Link",
-                    s."Assessment_Score_Pct"
-                FROM {temp_stage_table} s
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM teacher_records t
-                    WHERE LOWER(TRIM(COALESCE(t."Institution", ''))) = LOWER(TRIM(COALESCE(s."Institution", '')))
-                      AND LOWER(TRIM(COALESCE(t."FullName", ''))) = LOWER(TRIM(COALESCE(s."FullName", '')))
-                      AND LOWER(TRIM(COALESCE(t."Type", ''))) = LOWER(TRIM(COALESCE(s."Type", '')))
-                      AND DATE_TRUNC('minute', COALESCE(t."StartTime", '1970-01-01'::timestamp)) = DATE_TRUNC('minute', COALESCE(s."StartTime", '1970-01-01'::timestamp))
-                      AND ROUND(COALESCE(t."Duration_Min", 0)::numeric, 1) = ROUND(COALESCE(s."Duration_Min", 0)::numeric, 1)
-                      AND LOWER(TRIM(COALESCE(t."Subject", ''))) = LOWER(TRIM(COALESCE(s."Subject", '')))
-                      AND LOWER(TRIM(COALESCE(t."Book", ''))) = LOWER(TRIM(COALESCE(s."Book", '')))
-                );
-            """
-            bulk_conn.execute(text(insert_query))
-            bulk_conn.execute(text(f"DROP TABLE IF EXISTS {temp_stage_table};"))
-            
+            # Direct multi-insert to guarantee records land
+            cleaned_df.to_sql('teacher_records', con=bulk_conn, index=False, if_exists='append', method='multi', chunksize=1000)
             after_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
 
         inserted_count = int(after_count - before_count)
-        duplicate_count = max(0, total_incoming - inserted_count)
-        
-        # Clear Streamlit cache immediately
-        st.cache_data.clear()
-        
-        return inserted_count, duplicate_count
-
+        return inserted_count, total_incoming - inserted_count
     except Exception as e:
-        try:
-            with engine.begin() as cleanup_conn:
-                cleanup_conn.execute(text(f"DROP TABLE IF EXISTS {temp_stage_table};"))
-        except Exception:
-            pass
         st.error(f"Ingestion database error: {e}")
         return 0, 0
 
@@ -1361,8 +1308,6 @@ if uploaded_files:
                     temp_df['Duration_Min'] = temp_df['Duration (HH:MM:SS)'].apply(parse_duration_minutes)
                 elif 'Duration (Minutes)' in temp_df.columns:
                     temp_df['Duration_Min'] = pd.to_numeric(temp_df['Duration (Minutes)'], errors='coerce').fillna(0.0)
-                elif 'Duration' in temp_df.columns:
-                    temp_df['Duration_Min'] = temp_df['Duration'].apply(parse_duration_minutes)
                 else:
                     temp_df['Duration_Min'] = 0.0
 
@@ -1385,10 +1330,9 @@ if uploaded_files:
 
         if new_processed_dfs:
             inserted_count, duplicate_count = ingest_excel_to_postgresql(new_processed_dfs)
-            if inserted_count > 0:
-                st.sidebar.success(f"🎉 Database sync complete: {inserted_count} record(s) inserted successfully! ({duplicate_count} duplicates skipped)")
-            else:
-                st.sidebar.info(f"ℹ️ No new records added. All {duplicate_count} records in the uploaded file already exist in the database.")
+            fetch_master_db_from_supabase.clear()
+            build_teacher_roster_cached.clear()
+            st.sidebar.success(f"🎉 Database sync complete: {inserted_count} record(s) inserted successfully!")
             st.rerun()
 
 df = fetch_master_db_from_supabase()
@@ -1398,7 +1342,8 @@ st.sidebar.markdown("---")
 st.sidebar.header("🗄️ Granular Database Management")
 
 if st.sidebar.button("🔄 Sync Latest Records"):
-    st.cache_data.clear()
+    fetch_master_db_from_supabase.clear()
+    build_teacher_roster_cached.clear()
     st.rerun()
 
 # --- ONE-TIME DATA IMPORT SECTION FOR HISTORICAL PARQUET & JSON SUBMISSIONS ---
@@ -1436,7 +1381,9 @@ with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
             if not combined_legacy.empty:
                 combined_legacy = normalize_identity_columns(combined_legacy)
                 inserted_count, duplicate_count = ingest_excel_to_postgresql([combined_legacy])
-                st.sidebar.success(f"🎉 Historical import complete: {inserted_count} new record(s) inserted! ({duplicate_count} duplicates skipped)")
+                st.sidebar.success(f"🎉 Historical import complete: {inserted_count} new record(s) inserted!")
+                fetch_master_db_from_supabase.clear()
+                build_teacher_roster_cached.clear()
                 st.rerun()
             else:
                 st.sidebar.error("No historical parquet or JSON files found in Supabase storage.")
@@ -1468,7 +1415,8 @@ if not df.empty:
                                 {"name": del_emp_name.strip(), "state": del_state_zone}
                             )
                             s.commit()
-                        st.cache_data.clear()
+                        fetch_master_db_from_supabase.clear()
+                        build_teacher_roster_cached.clear()
                         st.success(f"Successfully deleted records for {del_emp_name} in {del_state_zone}!")
                         st.rerun()
                 except Exception as e:
@@ -1482,7 +1430,8 @@ if not df.empty:
                     with conn.session as s:
                         s.execute(text('DELETE FROM teacher_records WHERE "Institution" = :school'), {"school": target_del_school})
                         s.commit()
-                    st.cache_data.clear()
+                    fetch_master_db_from_supabase.clear()
+                    build_teacher_roster_cached.clear()
                     st.success(f"Successfully removed data for {target_del_school} from database!")
                     st.rerun()
                 except Exception as e:
@@ -1496,7 +1445,8 @@ if not df.empty:
                         deleted_count = delete_result.rowcount
                         s.commit()
 
-                    st.cache_data.clear()
+                    fetch_master_db_from_supabase.clear()
+                    build_teacher_roster_cached.clear()
                     st.session_state.pop("master_df", None)
                     st.session_state.pop("df", None)
                     st.session_state.pop("filtered_df", None)
@@ -1507,7 +1457,8 @@ if not df.empty:
                     )
                     st.rerun()
                 except Exception as e:
-                    st.cache_data.clear()
+                    fetch_master_db_from_supabase.clear()
+                    build_teacher_roster_cached.clear()
                     st.sidebar.error(f"❌ Could not clear teacher_records: {type(e).__name__}: {e}")
 
 if df.empty:
@@ -1545,7 +1496,7 @@ else:
     else:
         master_teacher_roster = master_teacher_roster[['Institution', 'FullName', 'Uploaded_By', 'State_Zone']].drop_duplicates()
 
-    # --- HIERARCHICAL GLOBAL FILTERS ---
+    # --- HIERARCHICAL GLOBAL FILTERS (DEFAULT TO ALL IF MP NOT FOUND) ---
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Hierarchical Global Filters")
     
@@ -2842,7 +2793,7 @@ else:
             with col_t7_f1:
                 t7_schools = ["All Schools"] + sorted([s for s in all_submissions_df['Institution'].unique() if str(s).strip()])
                 t7_selected_school = st.selectbox("Filter by School:", t7_schools, key="t7_school")
-                
+            
             t7_filtered = all_submissions_df if t7_selected_school == "All Schools" else all_submissions_df[all_submissions_df['Institution'] == t7_selected_school]
 
             with col_t7_f2:
