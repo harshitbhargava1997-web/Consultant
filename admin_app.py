@@ -192,6 +192,100 @@ def normalize_identity_columns(df):
     return out
 
 
+# --- CALCULATION & WORKING DAYS HELPERS ---
+def get_working_days(start_date, end_date, excluded_dates_list=None, exclude_sundays=True):
+    try:
+        if start_date is None or end_date is None or pd.isna(start_date) or pd.isna(end_date):
+            return 0
+        start = pd.Timestamp(start_date).normalize()
+        end = pd.Timestamp(end_date).normalize()
+        if end < start:
+            return 0
+        holidays = []
+        for d in (excluded_dates_list or []):
+            try:
+                holidays.append(np.datetime64(pd.Timestamp(d).date()))
+            except Exception:
+                continue
+        weekmask = '1111110' if exclude_sundays else '1111111'
+        return max(0, int(np.busday_count(np.datetime64(start.date()), np.datetime64((end + pd.Timedelta(days=1)).date()), weekmask=weekmask, holidays=holidays)))
+    except Exception:
+        return 0
+
+
+def safe_percentage(numerator, denominator):
+    if denominator is None or denominator <= 0:
+        return 0.0
+    return float(numerator) / float(denominator) * 100.0
+
+
+def get_period_bounds_for_view(selected_month, view_mode, month_filtered_df, custom_start=None, custom_end=None):
+    if view_mode == "Full Month Summary":
+        try:
+            start = pd.to_datetime(selected_month, format="%B %Y").normalize()
+            return start.date(), (start + pd.offsets.MonthEnd(1)).date()
+        except Exception:
+            pass
+    if view_mode == "Custom Date Range":
+        return custom_start, custom_end
+    if month_filtered_df is not None and not month_filtered_df.empty:
+        return month_filtered_df['Date'].min(), month_filtered_df['Date'].max()
+    return None, None
+
+
+def get_teacher_eligible_working_days(teacher_df, period_start, period_end, excluded_dates=None, exclude_sundays=True):
+    if teacher_df is None or teacher_df.empty or period_start is None or period_end is None:
+        return 0
+    dates = pd.to_datetime(teacher_df['Date'], errors='coerce').dropna()
+    if dates.empty:
+        return 0
+    dates = dates[(dates.dt.date >= pd.Timestamp(period_start).date()) & (dates.dt.date <= pd.Timestamp(period_end).date())]
+    if dates.empty:
+        return 0
+    return get_working_days(dates.min().date(), dates.max().date(), excluded_dates, exclude_sundays)
+
+
+def teacher_days_map(roster_df, activity_df, period_start, period_end, excluded_dates=None, exclude_sundays=True):
+    result = {}
+    if roster_df is None or roster_df.empty:
+        return result
+    for _, row in roster_df[['Institution','FullName']].drop_duplicates().iterrows():
+        inst, teacher = row['Institution'], row['FullName']
+        tdf = activity_df[(activity_df['Institution'] == inst) & (activity_df['FullName'] == teacher)] if activity_df is not None and not activity_df.empty else pd.DataFrame()
+        result[(inst, teacher)] = get_teacher_eligible_working_days(tdf, period_start, period_end, excluded_dates, exclude_sundays)
+    return result
+
+
+def duration_sum(df, mask=None):
+    if df is None or df.empty:
+        return 0.0
+    work = df if mask is None else df.loc[mask]
+    if 'Duration_Min' not in work.columns:
+        return 0.0
+    vals = pd.to_numeric(work['Duration_Min'], errors='coerce').replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return max(0.0, float(vals.sum()))
+
+
+def calculate_kpi_target(daily_target, working_days, enabled=True):
+    if not enabled:
+        return 0.0
+    return max(0.0, float(daily_target)) * max(0, int(working_days))
+
+
+def calculate_kpi_status(minutes, target, enabled=True, break_period=False):
+    minutes = max(0.0, float(minutes or 0.0))
+    if break_period:
+        return '🏖️ Scheduled Break / No Working Days'
+    if not enabled or target <= 0:
+        return 'Activity Logged' if minutes > 0 else 'No Activity Logged'
+    if minutes >= target:
+        return f'✅ Met Performance Indicator (>= {target:.0f}m)'
+    if minutes > 0:
+        return f'⚠️ Below Performance Indicator (< {target:.0f}m)'
+    return '❌ Inactive (0 Mins)'
+
+
+# --- DATABASE FUNCTIONS ---
 def init_observation_db():
     create_query = """
         CREATE TABLE IF NOT EXISTS classroom_observations (
@@ -505,7 +599,7 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
         return f"AI Generation Notice: {e}"
 
 
-# --- REPORTLAB PDF GENERATOR FOR CLASSROOM OBSERVATION ---
+# --- REPORTLAB PDF GENERATORS ---
 def generate_classroom_observation_visit_pdf(metadata, rubric_scores, narratives):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
@@ -613,7 +707,6 @@ def generate_classroom_observation_visit_pdf(metadata, rubric_scores, narratives
     return buffer
 
 
-# --- CRM HELPER 1: SCHOOL LEVEL DISPATCH BOX ---
 def render_school_audit_crm_box(tab_name, active_school, current_filter_description, school_audit_whatsapp_message):
     st.markdown("---")
     st.subheader(f"📞 School & Coordinator CRM, Call Notes & WhatsApp Generators ({tab_name})")
@@ -801,7 +894,6 @@ def render_school_audit_crm_box(tab_name, active_school, current_filter_descript
             st.info(f"No call discussion logs recorded yet for {target_crm_school}.")
 
 
-# --- CRM HELPER 2: UNIVERSAL DISPATCH BOX (FOR ALL TABS) ---
 def render_universal_crm_box(tab_name, active_selected_schools, current_filter_description, metrics_summary_text):
     st.markdown("---")
     st.subheader(f"📞 School & Coordinator CRM, Call Notes & WhatsApp Generators ({tab_name})")
@@ -997,7 +1089,6 @@ def render_universal_crm_box(tab_name, active_selected_schools, current_filter_d
             st.info(f"No call discussion logs recorded yet for {target_crm_school}.")
 
 
-# --- GENERAL PDF REPORT GENERATOR ---
 def generate_pdf_report(title_text, subtitle_text, school_name, summary_metrics, dataframe=None, custom_sections=None):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
@@ -1133,7 +1224,6 @@ def evidence_items_across_columns(df_src, columns):
     return items
 
 
-# --- DYNAMIC COMPREHENSIVE SCHOOL PDF REPORT GENERATOR ---
 def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_content_kpi, calc_lib_kpi, daily_ld_target, daily_content_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True, active_metric_mode="Content / Book Usage"):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
@@ -1484,6 +1574,80 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     doc.build(story)
     buffer.seek(0)
     return buffer
+
+
+def ingest_excel_to_postgresql(processed_dfs):
+    if not processed_dfs:
+        return 0, 0
+    combined_df = pd.concat(processed_dfs, ignore_index=True)
+    combined_df = normalize_identity_columns(combined_df)
+    
+    db_cols = [
+        "State_Zone", "Uploaded_By", "Institution", "Center",
+        "FirstName", "LastName", "FullName", "Role", "Type",
+        "Grade", "Subject", "Book", "StartTime", "EndTime",
+        "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
+        "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
+        "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+        "Assessment_Score_Pct", "Record_Hash"
+    ]
+    
+    for col in db_cols:
+        if col not in combined_df.columns:
+            combined_df[col] = None
+
+    for dt_col in ['StartTime', 'EndTime']:
+        combined_df[dt_col] = pd.to_datetime(combined_df[dt_col], errors='coerce')
+
+    if 'Duration_Min' in combined_df.columns:
+        combined_df['Duration_Min'] = pd.to_numeric(combined_df['Duration_Min'], errors='coerce').fillna(0.0).clip(lower=0.0)
+
+    if combined_df['StartTime'].isna().all():
+        combined_df['StartTime'] = pd.Timestamp.now()
+
+    combined_df['Record_Hash'] = combined_df.apply(compute_record_hash, axis=1)
+
+    cleaned_df = combined_df[db_cols].copy()
+    cleaned_df = cleaned_df.replace({np.nan: None})
+    total_incoming = len(cleaned_df)
+
+    cleaned_df = cleaned_df.drop_duplicates(subset=['Record_Hash'], keep='last')
+    skipped_within_batch = total_incoming - len(cleaned_df)
+
+    if cleaned_df.empty:
+        return 0, 0
+
+    engine = conn.engine
+    try:
+        with engine.begin() as bulk_conn:
+            existing_hashes = set()
+            try:
+                existing_hashes = set(
+                    h for (h,) in bulk_conn.execute(
+                        text('SELECT DISTINCT "Record_Hash" FROM teacher_records WHERE "Record_Hash" IS NOT NULL')
+                    ).fetchall()
+                )
+            except Exception:
+                pass
+
+            insert_df = cleaned_df[~cleaned_df['Record_Hash'].isin(existing_hashes)] if existing_hashes else cleaned_df
+            skipped_exact_duplicates = (total_incoming - len(insert_df))
+
+            before_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
+            if not insert_df.empty:
+                insert_df.to_sql('teacher_records', con=bulk_conn, index=False, if_exists='append', method='multi', chunksize=1000)
+            after_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
+
+        inserted_count = int(after_count - before_count)
+        return inserted_count, skipped_exact_duplicates
+    except Exception as e:
+        st.error(f"Ingestion database error: {e}")
+        return 0, 0
+
+
+# Page layout title
+st.title("🏫 Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard")
+st.markdown("Track **School Portfolio Management**, **School WoW Velocity**, **Teacher Execution Tiers**, **Quantitative Performance Indicators (Lesson Prep / Book Content Usage)**, and **360° Qualitative Evidences & Artifact Compliance**.")
 
 
 # --- 2. MULTI-EMPLOYEE HIERARCHY & DATA UPLOAD MANAGER ---
@@ -2331,7 +2495,7 @@ else:
             )
             render_universal_crm_box("Content & Chapters", t3_school if t3_school != "All Selected Schools" else selected_schools, filter_description_text, tab3_metrics_summary)
 
-    # TAB 4: TEACHER 360° PROFILE REPORT (DYNAMIC REPORT GENERATION)
+    # TAB 4: TEACHER 360° PROFILE REPORT
     with tab4:
         st.header("👤 Teacher 360° Performance Profile")
         st.caption("Review quantitative lesson metrics, textbook delivery logs, and structured qualitative performance evidence.")
