@@ -254,6 +254,39 @@ def init_teacher_records_hash_column():
 init_teacher_records_hash_column()
 
 
+def backfill_teacher_records_hash():
+    """
+    One-time-per-row backfill: computes Record_Hash for legacy rows inserted
+    before this fix existed (Record_Hash IS NULL). Without this, those old
+    rows are invisible to the ingest-time duplicate check, so re-uploading a
+    file that was already ingested pre-fix inserts a second full copy of it.
+    Cheap to call every startup - only touches rows still missing a hash.
+    """
+    try:
+        with conn.engine.begin() as c:
+            legacy = pd.read_sql(
+                text('''
+                    SELECT ctid, "Uploaded_By","FullName","Institution","Center","Type",
+                           "Grade","Subject","Book","StartTime","EndTime","Duration_Min"
+                    FROM teacher_records WHERE "Record_Hash" IS NULL
+                '''),
+                con=c
+            )
+            if legacy.empty:
+                return 0
+            legacy['Record_Hash'] = legacy.apply(compute_record_hash, axis=1)
+            for _, r in legacy.iterrows():
+                c.execute(
+                    text('UPDATE teacher_records SET "Record_Hash" = :h WHERE ctid = :ctid'),
+                    {"h": r['Record_Hash'], "ctid": r['ctid']}
+                )
+            return len(legacy)
+    except Exception:
+        return 0
+
+backfill_teacher_records_hash()
+
+
 def save_observation_to_db(meta, rubrics, narratives, pdf_url=""):
     insert_query = text("""
         INSERT INTO classroom_observations (
@@ -1183,6 +1216,14 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     lib_df = school_curr_df[school_curr_df['Type'] == 'library']
     lib_usage = lib_df.groupby('FullName')['Duration_Min'].sum().to_dict()
 
+    # Content Usage = time spent on textbooks/chapters (Book column), same
+    # definition Tab 3 "Content & Chapters" and the Teacher 360 profile use -
+    # excludes blank Book entries and anything logged as a Lesson Plan.
+    content_raw = school_curr_df[school_curr_df['Book'].str.len() > 0]
+    content_df = content_raw[~content_raw['Book'].str.match(r'^Lesson Plan', case=False, na=False)]
+    content_usage = content_df.groupby('FullName')['Duration_Min'].sum().to_dict()
+    content_books_opened = content_df.groupby('FullName')['Book'].nunique().to_dict()
+
     total_teachers_count = len(teachers_list)
     met_ld_count = 0
     met_lib_count = 0
@@ -1286,8 +1327,31 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     story.append(lib_table_obj)
     story.append(Spacer(1, 14))
 
+    story.append(Paragraph("<b>3. Content Usage Consolidated Report</b>", sec_head_style))
+    content_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Textbooks/Chapters Opened"]]
+    for t_name in teachers_list:
+        t_content_mins = content_usage.get(t_name, 0.0)
+        t_content_avg = t_content_mins / selected_num_days if selected_num_days > 0 else 0.0
+        t_content_books = content_books_opened.get(t_name, 0)
+        content_summary_table_data.append([t_name, f"{t_content_mins:.1f}m", f"{t_content_avg:.1f}m/day", str(t_content_books)])
+
+    content_table_obj = Table(content_summary_table_data, colWidths=[140, 110, 100, 190])
+    content_table_obj.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.4, border_color),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.append(content_table_obj)
+    story.append(Spacer(1, 14))
+
     if enable_qual_kpi:
-        story.append(Paragraph("<b>3. Qualitative Submissions & Evidence Compliance</b>", sec_head_style))
+        story.append(Paragraph("<b>4. Qualitative Submissions & Evidence Compliance</b>", sec_head_style))
         qual_summary_table_data = [["Teacher Name", "LP / Audio Notes", "Activity Videos", "Writing Samples", "Phonics Evidences", "Portfolio Artifacts", "Status"]]
         
         for t_name in teachers_list:
@@ -1338,6 +1402,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         if t_books_raw.empty:
             t_books_raw = teacher_all_data[teacher_all_data['Book'].str.len() > 0]
         teacher_books = t_books_raw[~t_books_raw['Book'].str.match(r'^Lesson Plan', case=False, na=False)]
+        t_day_content = teacher_books['Duration_Min'].sum() if not teacher_books.empty else 0.0
 
         evidence_source = teacher_date_data if not teacher_date_data.empty else teacher_all_data
 
@@ -1385,6 +1450,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             "Teacher": target_teacher,
             "Lesson Prep": f"{t_day_ld:.1f}m",
             "Library Usage": f"{t_day_lib:.1f}m",
+            "Content Usage": f"{t_day_content:.1f}m",
             "Phonics / Portfolio": f"{len(v_phonics)} / {len(v_portfolio)}",
             "Activity Submissions": f"{total_artifacts}"
         }
@@ -1407,6 +1473,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             "1. Lesson Preparation, Lesson Delivery, and Library Usage": [
                 f"Lesson Preparation Duration: {t_day_ld:.1f} Minutes" + (f" ({ld_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""),
                 f"Library & Digital Resources Duration: {t_day_lib:.1f} Minutes" + (f" ({lib_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""),
+                f"Content Usage (Textbooks/Chapters) Duration: {t_day_content:.1f} Minutes across {teacher_books['Book'].nunique() if not teacher_books.empty else 0} unique textbook(s)/chapter(s).",
                 f"Consultant Assessment: {ld_advice} in lesson preparation, {lib_advice} in library integration."
             ],
             "2. Content / Digital Book Content Usage": pdf_book_items,
@@ -1755,7 +1822,34 @@ with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
 
 if not df.empty:
     st.sidebar.metric("Database Total Records", len(df))
-    
+
+    if st.sidebar.button("🧹 Remove Exact Duplicate Records"):
+        with st.spinner("Backfilling content hashes and collapsing exact duplicates..."):
+            backfilled = backfill_teacher_records_hash()
+            removed = 0
+            try:
+                with conn.engine.begin() as c:
+                    before = c.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
+                    # Keeps one row per Record_Hash, deletes the rest (classic
+                    # Postgres ctid self-join dedup). Only touches rows that
+                    # are byte-for-byte the same lesson - never distinct ones.
+                    c.execute(text('''
+                        DELETE FROM teacher_records a
+                        USING teacher_records b
+                        WHERE a.ctid < b.ctid
+                          AND a."Record_Hash" = b."Record_Hash"
+                          AND a."Record_Hash" IS NOT NULL
+                    '''))
+                    after = c.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
+                    removed = before - after
+            except Exception as e:
+                st.sidebar.error(f"Dedup cleanup error: {e}")
+
+            fetch_master_db_from_supabase.clear()
+            build_teacher_roster_cached.clear()
+            st.sidebar.success(f"✅ Backfilled {backfilled} legacy row(s), removed {removed} duplicate row(s).")
+            st.rerun()
+
     with st.sidebar.expander("🛠️ Selective Database Cleanup"):
         clean_mode = st.radio("Select Cleanup Scope:", ["By Consultant Name & State/Zone", "By School", "Clear Entire DB"])
         
@@ -2533,6 +2627,7 @@ else:
             if t_books_raw.empty:
                 t_books_raw = teacher_all_data[teacher_all_data['Book'].str.len() > 0]
             teacher_books = t_books_raw[~t_books_raw['Book'].str.match(r'^Lesson Plan', case=False, na=False)]
+            t_day_content = teacher_books['Duration_Min'].sum() if not teacher_books.empty else 0.0
 
             evidence_source = teacher_date_data if not teacher_date_data.empty else teacher_all_data
             
@@ -2572,6 +2667,7 @@ else:
                 "1. Lesson Preparation, Lesson Delivery, and Library Usage": [
                     f"Lesson Preparation Duration: {t_day_ld:.1f} Minutes" + (f" ({ld_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi_t4 else ""),
                     f"Library & Digital Resources Duration: {t_day_lib:.1f} Minutes" + (f" ({lib_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi_t4 else ""),
+                    f"Content Usage (Textbooks/Chapters) Duration: {t_day_content:.1f} Minutes across {teacher_books['Book'].nunique() if not teacher_books.empty else 0} unique textbook(s)/chapter(s).",
                     f"Consultant Assessment: {ld_advice} in lesson preparation, {lib_advice} in library integration."
                 ],
                 "2. Content / Digital Book Content Usage": pdf_book_items,
@@ -2590,6 +2686,7 @@ else:
                                 "Teacher": target_teacher,
                                 "Lesson Prep": f"{t_day_ld:.1f}m",
                                 "Library Usage": f"{t_day_lib:.1f}m",
+                                "Content Usage": f"{t_day_content:.1f}m",
                                 "Phonics / Portfolio": f"{len(v_phonics)} / {len(v_portfolio)}",
                                 "Activity Submissions": f"{total_artifacts}"
                             },
