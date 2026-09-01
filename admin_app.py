@@ -1194,13 +1194,9 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     if isinstance(school_name, (list, tuple, set, np.ndarray, pd.Series)):
         school_names = [str(x) for x in school_name if str(x).strip()]
         school_curr_df = filtered_df[filtered_df['Institution'].isin(school_names)]
-        if school_curr_df.empty and not school_filtered_df.empty:
-            school_curr_df = school_filtered_df[school_filtered_df['Institution'].isin(school_names)]
     else:
         school_names = [str(school_name)]
         school_curr_df = filtered_df[filtered_df['Institution'] == school_name]
-        if school_curr_df.empty and not school_filtered_df.empty:
-            school_curr_df = school_filtered_df[school_filtered_df['Institution'] == school_name]
 
     story.append(Paragraph(f"<b>Comprehensive School Audit & Feature-Wise Report</b>", title_style))
     story.append(Spacer(1, 4))
@@ -1387,7 +1383,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         story.append(PageBreak())
 
         teacher_date_data = school_curr_df[school_curr_df['FullName'] == target_teacher]
-        teacher_all_data = school_filtered_df[(school_filtered_df['FullName'] == target_teacher) & (school_filtered_df['Institution'] == school_name)]
 
         t_day_ld = teacher_date_data[teacher_date_data['Type'] == 'lessonDelivery']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
         t_day_lib = teacher_date_data[teacher_date_data['Type'] == 'library']['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
@@ -1399,12 +1394,10 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         lib_advice = f"Steady Execution ({t_day_lib:.1f}m logged)" if (calc_lib_kpi > 0 and t_day_lib >= calc_lib_kpi) else (f"In-Progress ({t_day_lib:.1f}m logged)" if t_day_lib > 0 else "Pending Activity")
 
         t_books_raw = teacher_date_data[teacher_date_data['Book'].str.len() > 0]
-        if t_books_raw.empty:
-            t_books_raw = teacher_all_data[teacher_all_data['Book'].str.len() > 0]
         teacher_books = t_books_raw[~t_books_raw['Book'].str.match(r'^Lesson Plan', case=False, na=False)]
         t_day_content = teacher_books['Duration_Min'].sum() if not teacher_books.empty else 0.0
 
-        evidence_source = teacher_date_data if not teacher_date_data.empty else teacher_all_data
+        evidence_source = teacher_date_data
 
         v_voice = extract_evidence_items_vectorized(evidence_source, 'Voice_Note_Link')
         v_pic = extract_evidence_items_vectorized(evidence_source, 'Lesson_Plan_Picture')
@@ -2631,12 +2624,10 @@ else:
                 lib_advice = "✅ Holiday / Scheduled Break"
 
             t_books_raw = teacher_date_data[teacher_date_data['Book'].str.len() > 0]
-            if t_books_raw.empty:
-                t_books_raw = teacher_all_data[teacher_all_data['Book'].str.len() > 0]
             teacher_books = t_books_raw[~t_books_raw['Book'].str.match(r'^Lesson Plan', case=False, na=False)]
             t_day_content = teacher_books['Duration_Min'].sum() if not teacher_books.empty else 0.0
 
-            evidence_source = teacher_date_data if not teacher_date_data.empty else teacher_all_data
+            evidence_source = teacher_date_data
             
             v_voice = extract_evidence_items_vectorized(evidence_source, 'Voice_Note_Link')
             v_pic = extract_evidence_items_vectorized(evidence_source, 'Lesson_Plan_Picture')
@@ -2918,8 +2909,6 @@ else:
 
             sch_roster = school_master_roster[school_master_roster['Institution'] == teacher_school]
             sch_data = filtered_df[filtered_df['Institution'] == teacher_school]
-            if sch_data.empty and not school_filtered_df.empty:
-                sch_data = school_filtered_df[school_filtered_df['Institution'] == teacher_school]
 
             sch_teachers_list = sorted(sch_roster['FullName'].unique().tolist())
             tot_teachers = len(sch_teachers_list)
@@ -3179,7 +3168,7 @@ else:
                 target_school_t6 = st.selectbox("Select School to Inspect:", options=all_schools_list_t6, key="t6_school_sel")
                 
             school_t6_roster = school_master_roster[school_master_roster['Institution'] == target_school_t6]
-            school_t6_data = school_filtered_df[school_filtered_df['Institution'] == target_school_t6]
+            school_t6_data = filtered_df[filtered_df['Institution'] == target_school_t6]
 
             t6_ld = school_t6_data[school_t6_data['Type'] == 'lessonDelivery'].groupby('FullName')['Duration_Min'].sum().reset_index()
             t6_lib = school_t6_data[school_t6_data['Type'] == 'library'].groupby('FullName')['Duration_Min'].sum().reset_index()
