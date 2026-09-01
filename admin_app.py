@@ -1627,6 +1627,13 @@ def ingest_excel_to_postgresql(processed_dfs):
     cleaned_df = cleaned_df.replace({np.nan: None})
     total_incoming = len(cleaned_df)
 
+    # Two or more rows in the SAME upload can be byte-for-byte identical (e.g. a
+    # copy-pasted row in the source sheet, or two exported sheets that overlap).
+    # Collapse those before checking against the DB, otherwise both survive the
+    # DB-side check (neither exists yet) and both get inserted.
+    cleaned_df = cleaned_df.drop_duplicates(subset=['Record_Hash'], keep='last')
+    skipped_within_batch = total_incoming - len(cleaned_df)
+
     if cleaned_df.empty:
         return 0, 0
 
@@ -1647,7 +1654,7 @@ def ingest_excel_to_postgresql(processed_dfs):
                 pass
 
             insert_df = cleaned_df[~cleaned_df['Record_Hash'].isin(existing_hashes)] if existing_hashes else cleaned_df
-            skipped_exact_duplicates = total_incoming - len(insert_df)
+            skipped_exact_duplicates = (total_incoming - len(insert_df))
 
             before_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
             if not insert_df.empty:
