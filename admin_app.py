@@ -7,6 +7,7 @@ import os
 import re
 import json
 import uuid
+import hashlib
 import urllib.parse
 from io import BytesIO
 from sqlalchemy import text
@@ -118,6 +119,44 @@ def _norm_key(value):
     return _norm_text(value).casefold()
 
 
+def compute_record_hash(row):
+    """
+    Deterministic content fingerprint for a single class/lesson record.
+
+    This replaces the old dedupe key (Uploaded_By + FullName + Institution +
+    Type + StartTime + EndTime + Duration_Min), which silently collapsed
+    genuinely different lessons whenever those fields happened to match
+    (e.g. bulk-imported rows sharing a StartTime/EndTime). Grade/Subject/Book
+    are folded into the fingerprint so two different lessons never collide,
+    while a true re-upload of the exact same row still hashes identically
+    and gets deduped.
+    """
+    def _s(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)) or pd.isna(v):
+            return ""
+        return _norm_key(v)
+
+    def _t(v):
+        ts = pd.to_datetime(v, errors='coerce')
+        return "" if pd.isna(ts) else ts.strftime("%Y-%m-%d %H:%M:%S")
+
+    def _n(v):
+        try:
+            if v is None or pd.isna(v):
+                return "0.00"
+            return f"{float(v):.2f}"
+        except (TypeError, ValueError):
+            return "0.00"
+
+    parts = [
+        _s(row.get("Uploaded_By")), _s(row.get("FullName")), _s(row.get("Institution")),
+        _s(row.get("Center")), _s(row.get("Type")), _s(row.get("Grade")),
+        _s(row.get("Subject")), _s(row.get("Book")),
+        _t(row.get("StartTime")), _t(row.get("EndTime")), _n(row.get("Duration_Min")),
+    ]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
 def normalize_identity_columns(df):
     if df is None:
         return pd.DataFrame()
@@ -196,6 +235,25 @@ def init_observation_db():
 init_observation_db()
 
 
+# --- TEACHER_RECORDS DEDUP-FIX MIGRATION ---
+def init_teacher_records_hash_column():
+    """
+    Adds a Record_Hash column to teacher_records (idempotent) so uploads/fetches
+    can dedupe on actual record content instead of a narrow, collision-prone
+    set of business columns. Safe to run every startup.
+    """
+    try:
+        with conn.engine.begin() as c:
+            c.execute(text('ALTER TABLE teacher_records ADD COLUMN IF NOT EXISTS "Record_Hash" TEXT;'))
+            c.execute(text('CREATE INDEX IF NOT EXISTS idx_teacher_records_hash ON teacher_records ("Record_Hash");'))
+    except Exception:
+        # Table may not exist yet (created on first ingest via to_sql) - that's fine,
+        # the column will be included from the very first insert.
+        pass
+
+init_teacher_records_hash_column()
+
+
 def save_observation_to_db(meta, rubrics, narratives, pdf_url=""):
     insert_query = text("""
         INSERT INTO classroom_observations (
@@ -267,7 +325,8 @@ def fetch_master_db_from_supabase():
             COALESCE("Duration_Min", 0.0) AS "Duration_Min",
             "Voice_Note_Link", "Lesson_Plan_Picture",
             "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
-            "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link"
+            "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+            "Record_Hash"
         FROM teacher_records
         ORDER BY "StartTime" DESC;
     """
@@ -300,10 +359,30 @@ def fetch_master_db_from_supabase():
         for dt_col in ['StartTime', 'EndTime']:
             if dt_col in subs_df.columns:
                 subs_df[dt_col] = pd.to_datetime(subs_df[dt_col], errors='coerce')
+        # JSON submissions may not carry a Record_Hash (older format) - compute one
+        # from content so they line up with hashed Postgres rows for the same lesson.
+        if not subs_df.empty:
+            if 'Record_Hash' not in subs_df.columns:
+                subs_df['Record_Hash'] = None
+            missing_hash = subs_df['Record_Hash'].isna() | (subs_df['Record_Hash'].astype(str).str.strip() == '')
+            if missing_hash.any():
+                subs_df.loc[missing_hash, 'Record_Hash'] = subs_df.loc[missing_hash].apply(compute_record_hash, axis=1)
+
         combined = pd.concat([df_raw, subs_df], ignore_index=True) if not df_raw.empty else subs_df
-        dedupe_cols = [c for c in ['Uploaded_By', 'FullName', 'Institution', 'Type', 'StartTime', 'EndTime', 'Duration_Min'] if c in combined.columns]
-        if dedupe_cols:
-            combined = combined.drop_duplicates(subset=dedupe_cols, keep='last')
+
+        if 'Record_Hash' in combined.columns:
+            has_hash = combined['Record_Hash'].notna() & (combined['Record_Hash'].astype(str).str.strip() != '')
+        else:
+            has_hash = pd.Series(False, index=combined.index)
+
+        # Rows with a real content hash: dedupe on that hash only - two rows only
+        # collapse when every business field (incl. Grade/Subject/Book) truly matches.
+        hashed_part = combined.loc[has_hash].drop_duplicates(subset=['Record_Hash'], keep='last')
+        # Legacy rows ingested before this fix have no hash - keep them as-is rather
+        # than guessing with the old collision-prone key, so nothing is silently dropped.
+        unhashed_part = combined.loc[~has_hash]
+        combined = pd.concat([hashed_part, unhashed_part], ignore_index=True)
+
         df_raw = combined
 
     if df_raw.empty:
@@ -1455,25 +1534,29 @@ def ingest_excel_to_postgresql(processed_dfs):
         "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
         "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
         "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
-        "Assessment_Score_Pct"
+        "Assessment_Score_Pct", "Record_Hash"
     ]
     
     for col in db_cols:
         if col not in combined_df.columns:
             combined_df[col] = None
 
-    cleaned_df = combined_df[db_cols].copy()
-    
     for dt_col in ['StartTime', 'EndTime']:
-        cleaned_df[dt_col] = pd.to_datetime(cleaned_df[dt_col], errors='coerce')
+        combined_df[dt_col] = pd.to_datetime(combined_df[dt_col], errors='coerce')
 
-    if 'Duration_Min' in cleaned_df.columns:
-        cleaned_df['Duration_Min'] = pd.to_numeric(cleaned_df['Duration_Min'], errors='coerce').fillna(0.0).clip(lower=0.0)
+    if 'Duration_Min' in combined_df.columns:
+        combined_df['Duration_Min'] = pd.to_numeric(combined_df['Duration_Min'], errors='coerce').fillna(0.0).clip(lower=0.0)
 
     # If all StartTimes are invalid or empty, default to current timestamp
-    if cleaned_df['StartTime'].isna().all():
-        cleaned_df['StartTime'] = pd.Timestamp.now()
+    if combined_df['StartTime'].isna().all():
+        combined_df['StartTime'] = pd.Timestamp.now()
 
+    # Content fingerprint per row - lets fetch-time dedup tell "same lesson
+    # re-uploaded twice" apart from "two different lessons that share a
+    # teacher/time/duration", instead of collapsing both cases together.
+    combined_df['Record_Hash'] = combined_df.apply(compute_record_hash, axis=1)
+
+    cleaned_df = combined_df[db_cols].copy()
     cleaned_df = cleaned_df.replace({np.nan: None})
     total_incoming = len(cleaned_df)
 
@@ -1483,13 +1566,30 @@ def ingest_excel_to_postgresql(processed_dfs):
     engine = conn.engine
     try:
         with engine.begin() as bulk_conn:
+            # Skip rows whose exact content already exists in the DB, so
+            # re-uploading the same Excel file doesn't create true duplicate
+            # rows that later have to be silently deduped away at fetch time.
+            existing_hashes = set()
+            try:
+                existing_hashes = set(
+                    h for (h,) in bulk_conn.execute(
+                        text('SELECT DISTINCT "Record_Hash" FROM teacher_records WHERE "Record_Hash" IS NOT NULL')
+                    ).fetchall()
+                )
+            except Exception:
+                pass
+
+            insert_df = cleaned_df[~cleaned_df['Record_Hash'].isin(existing_hashes)] if existing_hashes else cleaned_df
+            skipped_exact_duplicates = total_incoming - len(insert_df)
+
             before_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
-            # Direct multi-insert to guarantee records land
-            cleaned_df.to_sql('teacher_records', con=bulk_conn, index=False, if_exists='append', method='multi', chunksize=1000)
+            if not insert_df.empty:
+                # Direct multi-insert to guarantee records land
+                insert_df.to_sql('teacher_records', con=bulk_conn, index=False, if_exists='append', method='multi', chunksize=1000)
             after_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
 
         inserted_count = int(after_count - before_count)
-        return inserted_count, total_incoming - inserted_count
+        return inserted_count, skipped_exact_duplicates
     except Exception as e:
         st.error(f"Ingestion database error: {e}")
         return 0, 0
