@@ -505,6 +505,634 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
         return f"AI Generation Notice: {e}"
 
 
+# --- REPORTLAB PDF GENERATOR FOR CLASSROOM OBSERVATION ---
+def generate_classroom_observation_visit_pdf(metadata, rubric_scores, narratives):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
+    story = []
+    styles = getSampleStyleSheet()
+
+    header_blue = colors.HexColor('#0284C7')
+    dark_neutral = colors.HexColor('#0F172A')
+    light_bg = colors.HexColor('#F8FAFC')
+    border_color = colors.HexColor('#CBD5E1')
+    highlight_yellow = colors.HexColor('#FEF08A')
+
+    title_style = ParagraphStyle('ObsTitle', parent=styles['Heading1'], fontSize=12, leading=15, textColor=header_blue, fontName='Helvetica-Bold')
+    sub_title = ParagraphStyle('ObsSub', parent=styles['Normal'], fontSize=8, leading=11, textColor=dark_neutral)
+    cell_bold = ParagraphStyle('CellB', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=dark_neutral, fontName='Helvetica-Bold')
+    cell_norm = ParagraphStyle('CellN', parent=styles['Normal'], fontSize=6.5, leading=8.5, textColor=dark_neutral)
+    header_style = ParagraphStyle('HeadS', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.white, fontName='Helvetica-Bold', alignment=1)
+    sec_head = ParagraphStyle('SecH', parent=styles['Heading2'], fontSize=9, leading=12, textColor=header_blue, fontName='Helvetica-Bold', spaceBefore=8, spaceAfter=4)
+    narrative_p = ParagraphStyle('NarrP', parent=styles['Normal'], fontSize=7.5, leading=10.5, textColor=dark_neutral)
+
+    story.append(Paragraph(f"<b>OneLern Classroom Observation :- {metadata.get('School', 'N/A')}</b>", title_style))
+    story.append(Spacer(1, 4))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=header_blue, spaceAfter=8))
+
+    meta_data = [
+        [Paragraph("<b>Name of the Teacher</b>", cell_bold), Paragraph(metadata.get("Teacher", ""), sub_title), Paragraph("<b>Date</b>", cell_bold), Paragraph(str(metadata.get("Date", "")), sub_title)],
+        [Paragraph("<b>Class and section</b>", cell_bold), Paragraph(metadata.get("Class", ""), sub_title), Paragraph("<b>Total Duration of Observation</b>", cell_bold), Paragraph(metadata.get("Duration", ""), sub_title)],
+        [Paragraph("<b>Subject</b>", cell_bold), Paragraph(metadata.get("Subject", ""), sub_title), Paragraph("<b>Total Students Present</b>", cell_bold), Paragraph(str(metadata.get("Students", "")), sub_title)],
+        [Paragraph("<b>Topic</b>", cell_bold), Paragraph(metadata.get("Topic", ""), sub_title), Paragraph("<b>Print displayed in class</b>", cell_bold), Paragraph(metadata.get("PrintDisplay", "Yes"), sub_title)],
+        [Paragraph("<b>Academic Mentor</b>", cell_bold), Paragraph(metadata.get("Mentor", "Harshit Bhargava"), sub_title), Paragraph("", sub_title), Paragraph("", sub_title)]
+    ]
+    meta_table = Table(meta_data, colWidths=[100, 182, 120, 162])
+    meta_table.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.5, border_color),
+        ('BACKGROUND', (0, 0), (0, -1), light_bg),
+        ('BACKGROUND', (2, 0), (2, -1), light_bg),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    story.append(meta_table)
+    story.append(Spacer(1, 8))
+
+    rubric_rows = [[
+        Paragraph("Category", header_style),
+        Paragraph("A", header_style),
+        Paragraph("B", header_style),
+        Paragraph("C", header_style),
+        Paragraph("A/B/C", header_style),
+        Paragraph("Remarks", header_style)
+    ]]
+
+    custom_table_styles = [
+        ('BACKGROUND', (0, 0), (-1, 0), header_blue),
+        ('GRID', (0, 0), (-1, -1), 0.4, border_color),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]
+
+    col_map = {"A": 1, "B": 2, "C": 3}
+
+    for idx, (cat_name, desc_dict) in enumerate(OBSERVATION_RUBRIC_CONFIG.items(), start=1):
+        res = rubric_scores.get(cat_name, {"Grade": "NA", "Remarks": ""})
+        awarded_grade = res.get("Grade", "NA")
+
+        rubric_rows.append([
+            Paragraph(cat_name, cell_bold),
+            Paragraph(desc_dict.get("A", ""), cell_norm),
+            Paragraph(desc_dict.get("B", ""), cell_norm),
+            Paragraph(desc_dict.get("C", ""), cell_norm),
+            Paragraph(f"<b>{awarded_grade}</b>", ParagraphStyle('Ctr', parent=cell_bold, alignment=1)),
+            Paragraph(res.get("Remarks", ""), cell_norm)
+        ])
+
+        base_bg = colors.white if idx % 2 != 0 else light_bg
+        custom_table_styles.append(('BACKGROUND', (0, idx), (-1, idx), base_bg))
+
+        if awarded_grade in col_map:
+            target_col = col_map[awarded_grade]
+            custom_table_styles.append(('BACKGROUND', (target_col, idx), (target_col, idx), highlight_yellow))
+            custom_table_styles.append(('BACKGROUND', (4, idx), (4, idx), highlight_yellow))
+
+    rubric_table = Table(rubric_rows, colWidths=[80, 130, 130, 110, 34, 80], repeatRows=1)
+    rubric_table.setStyle(TableStyle(custom_table_styles))
+    story.append(rubric_table)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("<b>Flow of the class</b>", sec_head))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=border_color, spaceAfter=4))
+    story.append(Paragraph(narratives.get("Flow", "N/A").replace('\n', '<br/>'), narrative_p))
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("<b>High Points of the class</b>", sec_head))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=border_color, spaceAfter=4))
+    story.append(Paragraph(narratives.get("HighPoints", "N/A").replace('\n', '<br/>'), narrative_p))
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("<b>Recommendations by the Academic Mentor</b>", sec_head))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=border_color, spaceAfter=4))
+    story.append(Paragraph(narratives.get("Recommendations", "N/A").replace('\n', '<br/>'), narrative_p))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+# --- CRM HELPER 1: SCHOOL LEVEL DISPATCH BOX ---
+def render_school_audit_crm_box(tab_name, active_school, current_filter_description, school_audit_whatsapp_message):
+    st.markdown("---")
+    st.subheader(f"📞 School & Coordinator CRM, Call Notes & WhatsApp Generators ({tab_name})")
+    
+    if "crm_global_data" not in st.session_state:
+        st.session_state["crm_global_data"] = load_crm_data_from_supabase()
+
+    if "crm_call_logs_store" not in st.session_state:
+        st.session_state["crm_call_logs_store"] = load_call_logs_from_supabase()
+
+    crm_data = st.session_state["crm_global_data"]
+    if "contacts" not in crm_data:
+        crm_data["contacts"] = {}
+
+    target_crm_school = active_school
+
+    c_col1, c_col2 = st.columns([1, 2])
+    with c_col1:
+        st.write(f"🏫 **Target School:** `{target_crm_school}`")
+        
+        if target_crm_school not in crm_data["contacts"]:
+            crm_data["contacts"][target_crm_school] = {
+                "Principal": {"name": "", "phone": ""},
+                "Owner": {"name": "", "phone": ""},
+                "Coordinator": {"name": "", "phone": ""}
+            }
+
+        st.markdown("##### 👥 Select Entity & Contact Details")
+        selected_entity_type = st.selectbox("Target Entity Type:", options=["Principal", "Owner", "Coordinator"], key=f"entity_type_{tab_name}_{target_crm_school}")
+        
+        current_entity_data = crm_data["contacts"][target_crm_school].get(selected_entity_type, {"name": "", "phone": ""})
+        
+        input_contact_name = st.text_input(f"{selected_entity_type} Name:", value=current_entity_data.get("name", ""), key=f"cname_{tab_name}_{target_crm_school}_{selected_entity_type}")
+        input_phone = st.text_input(f"{selected_entity_type} Mobile (+91...):", value=current_entity_data.get("phone", ""), key=f"cphone_{tab_name}_{target_crm_school}_{selected_entity_type}")
+
+        if st.button(f"💾 Save {selected_entity_type} Contact to Supabase", key=f"save_contact_btn_{tab_name}_{target_crm_school}_{selected_entity_type}"):
+            crm_data["contacts"][target_crm_school][selected_entity_type] = {
+                "name": input_contact_name,
+                "phone": input_phone
+            }
+            save_crm_data_to_supabase(crm_data)
+            st.success(f"Successfully saved {selected_entity_type} details for {target_crm_school} to Supabase!")
+
+        active_phone = input_phone.strip()
+        if active_phone:
+            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
+            contact_greeting = input_contact_name if input_contact_name else selected_entity_type
+            quick_wa = urllib.parse.quote(f"Namaste {contact_greeting} ji, checking in from Onelearn Academic Team regarding school audit metrics for {target_crm_school} - {current_filter_description}.")
+            st.markdown(f'<a href="tel:{active_phone}" target="_blank" style="text-decoration:none;"><button style="background-color:#2CA02C;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;margin-bottom:6px;width:100%;">📞 Call {selected_entity_type}</button></a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={quick_wa}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">📱 Quick WhatsApp Message</button></a>', unsafe_allow_html=True)
+        else:
+            st.warning(f"Please enter and save a mobile number for the selected {selected_entity_type}.")
+
+    with c_col2:
+        st.markdown("##### 💬 WhatsApp & Calling Generators (Indian Context)")
+        
+        custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}_{target_crm_school}")
+        
+        with st.expander("✨ AI-Driven Calling Script & Smart Message Generator (Voice & Text)"):
+            manager_voice_audio = st.audio_input(
+                "🎙️ Record Voice Instructions (Speak your custom prompt):",
+                key=f"voice_input_{tab_name}_{target_crm_school}"
+            )
+            user_custom_instruction = st.text_area(
+                "Or Type Custom Instructions (Alternative to voice):",
+                placeholder="e.g., Focus heavily on improving content book delivery and phonics submissions...",
+                key=f"ai_custom_prompt_{tab_name}_{target_crm_school}"
+            )
+            
+            if st.button("Generate AI Script & Message", key=f"gen_ai_both_{tab_name}_{target_crm_school}"):
+                if not ai_client:
+                    st.error("Gemini API client is not initialized.")
+                else:
+                    ai_prompt = f"""
+                    You are an expert Academic Consultant. 
+                    Based on these school audit metrics for {target_crm_school} ({current_filter_description}):
+                    Metrics & Breakdown: {school_audit_whatsapp_message}
+                    Target Entity: {selected_entity_type} named {input_contact_name or 'Sir/Madam'}
+                    Tone: {custom_tone}
+                    Text Instructions Provided: {user_custom_instruction if user_custom_instruction else 'None'}
+                    
+                    Generate two distinct outputs:
+                    1. **Calling Script**: A structured phone conversation script calling out specific teacher data points, praises, and areas of concern to discuss with this {selected_entity_type}.
+                    2. **AI WhatsApp Follow-up Message**: A concise, professional message summarizing these exact findings and action items to send on WhatsApp afterward. Sign off with 'Onelearn Academic Team'.
+                    """
+                    with st.spinner("Processing voice/text instructions with Gemini..."):
+                        try:
+                            ai_result = get_gemini_summary(ai_prompt, audio_file_obj=manager_voice_audio)
+                            st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"] = ai_result
+                        except Exception as e:
+                            st.error(f"Error generating AI content: {e}")
+            
+            if f"ai_gen_output_{tab_name}_{target_crm_school}" in st.session_state:
+                st.markdown(st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"])
+
+        st.markdown("##### 📝 Quick WhatsApp Message Draft (Full School Audit)")
+        draft_state_key = f"wa_draft_text_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        sync_track_key = f"last_raw_msg_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        
+        if draft_state_key not in st.session_state or st.session_state.get(sync_track_key) != school_audit_whatsapp_message:
+            st.session_state[draft_state_key] = school_audit_whatsapp_message
+            st.session_state[sync_track_key] = school_audit_whatsapp_message
+
+        editable_wa_area = st.text_area(
+            "Confirm or Edit Final WhatsApp Message Draft:",
+            value=st.session_state[draft_state_key],
+            height=220,
+            key=f"wa_textarea_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        )
+        st.session_state[draft_state_key] = editable_wa_area
+
+        if active_phone:
+            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
+            encoded_final_text = urllib.parse.quote(editable_wa_area)
+            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown(f"##### 📝 Post-Call Discussion Notes & Follow-up Scheduler ({target_crm_school} - {selected_entity_type})")
+    
+    with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}"):
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}_{target_crm_school}")
+        with col_f2:
+            next_followup_date = st.date_input("Next Scheduled Follow-up Date:", value=pd.Timestamp.now().date() + pd.Timedelta(days=7), key=f"fdate_{tab_name}_{target_crm_school}")
+            
+        discussion_notes = st.text_area("Discussion Summary / Notes from Call:", placeholder="Punch key talking points, agreed commitments, and action items...", key=f"dnotes_{tab_name}_{target_crm_school}")
+        call_status_opt = st.selectbox("Call Status / Resolution:", options=["Open Action Item", "In Progress", "Successfully Resolved"], key=f"cstat_{tab_name}_{target_crm_school}")
+        
+        submit_call_log = st.form_submit_button("💾 Save Call Note & Sync to Supabase Cloud")
+        
+        if submit_call_log:
+            if discussion_notes.strip():
+                new_log_entry = {
+                    "School": target_crm_school,
+                    "Entity Type": selected_entity_type,
+                    "Contact Name": input_contact_name or "N/A",
+                    "Module Tab": tab_name,
+                    "Filter Window": current_filter_description,
+                    "Call Date": str(call_date_punched),
+                    "Discussion Notes": discussion_notes.strip(),
+                    "Next Follow-up Date": str(next_followup_date),
+                    "Status": call_status_opt
+                }
+                st.session_state["crm_call_logs_store"].append(new_log_entry)
+                save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
+                st.success("✅ Call notes and follow-up schedule successfully saved and synced to Supabase Cloud!")
+            else:
+                st.warning("Please enter discussion notes before saving.")
+
+    if st.session_state["crm_call_logs_store"]:
+        st.markdown(f"##### 📊 Filterable Call Discussion Logs & Audit Trail for {target_crm_school}")
+        logs_df = pd.DataFrame(st.session_state["crm_call_logs_store"])
+        
+        if 'School' in logs_df.columns:
+            logs_df = logs_df[logs_df['School'] == target_crm_school]
+
+        if not logs_df.empty:
+            desired_cols = ['School', 'Entity Type', 'Contact Name', 'Module Tab', 'Filter Window', 'Call Date', 'Discussion Notes', 'Next Follow-up Date', 'Status']
+            available_log_cols = [c for c in desired_cols if c in logs_df.columns]
+            
+            st.dataframe(logs_df[available_log_cols], use_container_width=True)
+            
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                output_buffer = BytesIO()
+                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+                    logs_df[available_log_cols].to_excel(writer, index=False, sheet_name='Call_Discussion_Logs')
+                output_buffer.seek(0)
+                
+                st.download_button(
+                    label="📥 Download Filtered Call Logs (Excel)",
+                    data=output_buffer,
+                    file_name=f"School_CRM_Call_Logs_{target_crm_school.replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_excel_{tab_name}_{target_crm_school}"
+                )
+            with dl_col2:
+                if st.button("🗑️ Clear Call Logs for this School", key=f"clear_logs_btn_{tab_name}_{target_crm_school}"):
+                    st.session_state["crm_call_logs_store"] = [l for l in st.session_state["crm_call_logs_store"] if l.get("School") != target_crm_school]
+                    save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
+                    st.success(f"Successfully cleared call logs for {target_crm_school}!")
+                    st.rerun()
+        else:
+            st.info(f"No call discussion logs recorded yet for {target_crm_school}.")
+
+
+# --- CRM HELPER 2: UNIVERSAL DISPATCH BOX (FOR ALL TABS) ---
+def render_universal_crm_box(tab_name, active_selected_schools, current_filter_description, metrics_summary_text):
+    st.markdown("---")
+    st.subheader(f"📞 School & Coordinator CRM, Call Notes & WhatsApp Generators ({tab_name})")
+    
+    if "crm_global_data" not in st.session_state:
+        st.session_state["crm_global_data"] = load_crm_data_from_supabase()
+
+    if "crm_call_logs_store" not in st.session_state:
+        st.session_state["crm_call_logs_store"] = load_call_logs_from_supabase()
+
+    crm_data = st.session_state["crm_global_data"]
+    if "contacts" not in crm_data:
+        crm_data["contacts"] = {}
+
+    c_col1, c_col2 = st.columns([1, 2])
+    with c_col1:
+        if isinstance(active_selected_schools, str):
+            schools_list = [active_selected_schools]
+        elif isinstance(active_selected_schools, (list, tuple, pd.Series, np.ndarray)):
+            schools_list = [str(s) for s in active_selected_schools if str(s).strip()]
+        else:
+            schools_list = ["Default School"]
+            
+        if not schools_list:
+            schools_list = ["Default School"]
+
+        target_crm_school = st.selectbox("Select School:", options=schools_list, key=f"crm_school_{tab_name}")
+        
+        if target_crm_school not in crm_data["contacts"]:
+            crm_data["contacts"][target_crm_school] = {
+                "Principal": {"name": "", "phone": ""},
+                "Owner": {"name": "", "phone": ""},
+                "Coordinator": {"name": "", "phone": ""}
+            }
+
+        st.markdown("##### 👥 Select Entity & Contact Details")
+        selected_entity_type = st.selectbox("Target Entity Type:", options=["Principal", "Owner", "Coordinator"], key=f"entity_type_{tab_name}_{target_crm_school}")
+        
+        current_entity_data = crm_data["contacts"][target_crm_school].get(selected_entity_type, {"name": "", "phone": ""})
+        
+        input_contact_name = st.text_input(f"{selected_entity_type} Name:", value=current_entity_data.get("name", ""), key=f"cname_{tab_name}_{target_crm_school}_{selected_entity_type}")
+        input_phone = st.text_input(f"{selected_entity_type} Mobile (+91...):", value=current_entity_data.get("phone", ""), key=f"cphone_{tab_name}_{target_crm_school}_{selected_entity_type}")
+
+        if st.button(f"💾 Save {selected_entity_type} Contact to Supabase", key=f"save_contact_btn_{tab_name}_{target_crm_school}_{selected_entity_type}"):
+            crm_data["contacts"][target_crm_school][selected_entity_type] = {
+                "name": input_contact_name,
+                "phone": input_phone
+            }
+            save_crm_data_to_supabase(crm_data)
+            st.success(f"Successfully saved {selected_entity_type} details for {target_crm_school} to Supabase!")
+
+        active_phone = input_phone.strip()
+        if active_phone:
+            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
+            contact_greeting = input_contact_name if input_contact_name else selected_entity_type
+            quick_wa = urllib.parse.quote(f"Namaste {contact_greeting} ji, checking in from Onelearn Academic Team regarding {tab_name} metrics for {target_crm_school} - {current_filter_description}.")
+            st.markdown(f'<a href="tel:{active_phone}" target="_blank" style="text-decoration:none;"><button style="background-color:#2CA02C;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;margin-bottom:6px;width:100%;">📞 Call {selected_entity_type}</button></a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={quick_wa}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:8px 14px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">📱 Quick WhatsApp Message</button></a>', unsafe_allow_html=True)
+        else:
+            st.warning(f"Please enter and save a mobile number for the selected {selected_entity_type}.")
+
+    with c_col2:
+        st.markdown("##### 💬 WhatsApp & Calling Generators (Indian Context)")
+        custom_tone = st.selectbox("Select Message Tone:", ["Encouraging & Supportive", "Constructive & Corrective", "Executive Summary"], key=f"tone_{tab_name}_{target_crm_school}")
+        
+        with st.expander("✨ AI-Driven Calling Script & Smart Message Generator (Voice & Text)"):
+            manager_voice_audio = st.audio_input("🎙️ Record Voice Instructions:", key=f"voice_input_{tab_name}_{target_crm_school}")
+            user_custom_instruction = st.text_area("Or Type Custom Instructions:", placeholder="e.g., Focus heavily on improving classroom book engagement...", key=f"ai_custom_prompt_{tab_name}_{target_crm_school}")
+            
+            if st.button("Generate AI Script & Message", key=f"gen_ai_both_{tab_name}_{target_crm_school}"):
+                if not ai_client:
+                    st.error("Gemini API client is not initialized.")
+                else:
+                    ai_prompt = f"""
+                    You are an expert Academic Consultant. 
+                    Based on these filtered metrics for {tab_name} at {target_crm_school} ({current_filter_description}):
+                    Metrics & Breakdown: {metrics_summary_text}
+                    Target Entity: {selected_entity_type} named {input_contact_name or 'Sir/Madam'}
+                    Tone: {custom_tone}
+                    
+                    Generate two outputs: 1. Calling Script, 2. AI WhatsApp Follow-up Message. Sign off with 'Onelearn Academic Team'.
+                    """
+                    with st.spinner("Processing with Gemini..."):
+                        try:
+                            ai_result = get_gemini_summary(ai_prompt, audio_file_obj=manager_voice_audio)
+                            st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"] = ai_result
+                        except Exception as e:
+                            st.error(f"Error generating AI content: {e}")
+            
+            if f"ai_gen_output_{tab_name}_{target_crm_school}" in st.session_state:
+                st.markdown(st.session_state[f"ai_gen_output_{tab_name}_{target_crm_school}"])
+
+        st.markdown("##### 📝 Quick WhatsApp Message Draft (Standard Template)")
+        draft_state_key = f"wa_draft_text_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        name_prefix = f" {input_contact_name}" if input_contact_name and input_contact_name.strip() else ""
+        
+        default_template_string = (
+            f"Dear {name_prefix} ji,\n\n"
+            f"Here is the performance update for {target_crm_school} - {current_filter_description}:\n\n"
+            f"📊 *Module:* {tab_name}\n"
+            f"{metrics_summary_text}\n\n"
+            f"Regards,\n"
+            f"Harshit Bhargava,\n"
+            f"OneLearn Academic Team"
+        )
+
+        sync_track_key = f"last_raw_template_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        if draft_state_key not in st.session_state or st.session_state.get(sync_track_key) != default_template_string:
+            st.session_state[draft_state_key] = default_template_string
+            st.session_state[sync_track_key] = default_template_string
+
+        editable_wa_area = st.text_area(
+            "Confirm or Edit Final WhatsApp Message Draft:",
+            value=st.session_state[draft_state_key],
+            height=140,
+            key=f"wa_textarea_{tab_name}_{target_crm_school}_{selected_entity_type}"
+        )
+        st.session_state[draft_state_key] = editable_wa_area
+
+        if active_phone:
+            clean_phone = re.sub(r'[^0-9+]', '', active_phone)
+            encoded_final_text = urllib.parse.quote(editable_wa_area)
+            st.markdown(f'<a href="https://wa.me/{clean_phone}?text={encoded_final_text}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;width:100%;">🚀 Send Final WhatsApp Message</button></a>', unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown(f"##### 📝 Post-Call Discussion Notes & Follow-up Scheduler ({target_crm_school} - {selected_entity_type})")
+    
+    with st.form(key=f"call_log_form_{tab_name}_{target_crm_school}_{selected_entity_type}"):
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            call_date_punched = st.date_input("Call Conducted Date:", value=pd.Timestamp.now().date(), key=f"cdate_{tab_name}_{target_crm_school}")
+        with col_f2:
+            next_followup_date = st.date_input("Next Scheduled Follow-up Date:", value=pd.Timestamp.now().date() + pd.Timedelta(days=7), key=f"fdate_{tab_name}_{target_crm_school}")
+            
+        discussion_notes = st.text_area("Discussion Summary / Notes from Call:", placeholder="Punch key talking points, agreed commitments, and action items...", key=f"dnotes_{tab_name}_{target_crm_school}")
+        call_status_opt = st.selectbox("Call Status / Resolution:", options=["Open Action Item", "In Progress", "Successfully Resolved"], key=f"cstat_{tab_name}_{target_crm_school}")
+        
+        submit_call_log = st.form_submit_button("💾 Save Call Note & Sync to Supabase Cloud")
+        
+        if submit_call_log:
+            if discussion_notes.strip():
+                new_log_entry = {
+                    "School": target_crm_school,
+                    "Entity Type": selected_entity_type,
+                    "Contact Name": input_contact_name or "N/A",
+                    "Module Tab": tab_name,
+                    "Filter Window": current_filter_description,
+                    "Call Date": str(call_date_punched),
+                    "Discussion Notes": discussion_notes.strip(),
+                    "Next Follow-up Date": str(next_followup_date),
+                    "Status": call_status_opt
+                }
+                st.session_state["crm_call_logs_store"].append(new_log_entry)
+                save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
+                st.success("✅ Call notes and follow-up schedule successfully saved and synced to Supabase Cloud!")
+            else:
+                st.warning("Please enter discussion notes before saving.")
+
+    if st.session_state["crm_call_logs_store"]:
+        st.markdown(f"##### 📊 Filterable Call Discussion Logs & Audit Trail for {target_crm_school}")
+        logs_df = pd.DataFrame(st.session_state["crm_call_logs_store"])
+        
+        if 'School' in logs_df.columns:
+            logs_df = logs_df[logs_df['School'] == target_crm_school]
+
+        if not logs_df.empty:
+            desired_cols = ['School', 'Entity Type', 'Contact Name', 'Module Tab', 'Filter Window', 'Call Date', 'Discussion Notes', 'Next Follow-up Date', 'Status']
+            available_log_cols = [c for c in desired_cols if c in logs_df.columns]
+            
+            st.dataframe(logs_df[available_log_cols], use_container_width=True)
+            
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                output_buffer = BytesIO()
+                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+                    logs_df[available_log_cols].to_excel(writer, index=False, sheet_name='Call_Discussion_Logs')
+                output_buffer.seek(0)
+                
+                st.download_button(
+                    label="📥 Download Filtered Call Logs (Excel)",
+                    data=output_buffer,
+                    file_name=f"School_CRM_Call_Logs_{target_crm_school.replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_excel_{tab_name}_{target_crm_school}"
+                )
+            with dl_col2:
+                if st.button("🗑️ Clear Call Logs for this School", key=f"clear_logs_btn_{tab_name}_{target_crm_school}"):
+                    st.session_state["crm_call_logs_store"] = [l for l in st.session_state["crm_call_logs_store"] if l.get("School") != target_crm_school]
+                    save_call_logs_to_supabase(st.session_state["crm_call_logs_store"])
+                    st.success(f"Successfully cleared call logs for {target_crm_school}!")
+                    st.rerun()
+        else:
+            st.info(f"No call discussion logs recorded yet for {target_crm_school}.")
+
+
+# --- GENERAL PDF REPORT GENERATOR ---
+def generate_pdf_report(title_text, subtitle_text, school_name, summary_metrics, dataframe=None, custom_sections=None):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    story = []
+    styles = getSampleStyleSheet()
+
+    primary_color = colors.HexColor('#2563EB')
+    dark_neutral = colors.HexColor('#1E293B')
+    light_bg = colors.HexColor('#F8FAFC')
+    border_color = colors.HexColor('#E2E8F0')
+    accent_color = colors.HexColor('#0F172A')
+
+    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=16, leading=20, textColor=primary_color, fontName='Helvetica-Bold')
+    subtitle_style = ParagraphStyle('DocSubTitle', parent=styles['Normal'], fontSize=9, leading=13, textColor=dark_neutral)
+    school_style = ParagraphStyle('SchoolHead', parent=styles['Normal'], fontSize=10, leading=14, textColor=accent_color, fontName='Helvetica-Bold')
+    sec_head_style = ParagraphStyle('SecHead', parent=styles['Heading2'], fontSize=11, leading=15, textColor=primary_color, fontName='Helvetica-Bold', spaceBefore=12, spaceAfter=5)
+    normal_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=8.5, leading=13, textColor=dark_neutral)
+    link_style = ParagraphStyle('LinkStyle', parent=styles['Normal'], fontSize=8, leading=11, textColor=colors.HexColor('#2563EB'), fontName='Helvetica-Bold')
+    card_header = ParagraphStyle('CardHead', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748B'), fontName='Helvetica-Bold', alignment=1)
+    card_value = ParagraphStyle('CardVal', parent=styles['Normal'], fontSize=11, leading=14, textColor=primary_color, fontName='Helvetica-Bold', alignment=1)
+    
+    story.append(Paragraph(f"<b>{title_text}</b>", title_style))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(f"🏫 <b>Institution / School Focus:</b> {school_name}", school_style))
+    story.append(Spacer(1, 3))
+    story.append(Paragraph(subtitle_text, subtitle_style))
+    story.append(Spacer(1, 8))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=primary_color, spaceAfter=12))
+
+    if summary_metrics:
+        headers_row = [Paragraph(k, card_header) for k in summary_metrics.keys()]
+        values_row = [Paragraph(str(v), card_value) for v in summary_metrics.values()]
+        col_w = 540 / len(summary_metrics)
+        kpi_table = Table([headers_row, values_row], colWidths=[col_w] * len(summary_metrics))
+        kpi_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), light_bg),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, border_color),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        story.append(kpi_table)
+        story.append(Spacer(1, 12))
+
+    if custom_sections:
+        for heading, body_items in custom_sections.items():
+            story.append(Paragraph(f"<b>{heading}</b>", sec_head_style))
+            story.append(HRFlowable(width="100%", thickness=0.5, color=border_color, spaceAfter=6))
+            for item in body_items:
+                if "<a href=" in item:
+                    story.append(Paragraph(f"{item}", link_style))
+                else:
+                    story.append(Paragraph(f"• {item}", normal_style))
+            story.append(Spacer(1, 10))
+
+    if dataframe is not None and not dataframe.empty:
+        story.append(Spacer(1, 4))
+        raw_data = [dataframe.columns.tolist()] + dataframe.astype(str).values.tolist()
+        cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=8, leading=12, textColor=dark_neutral)
+        header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontSize=8.5, leading=12, textColor=colors.white, fontName='Helvetica-Bold')
+
+        formatted_data = []
+        for i, row in enumerate(raw_data):
+            formatted_row = []
+            for cell in row:
+                st_to_use = header_style if i == 0 else cell_style
+                formatted_row.append(Paragraph(str(cell), st_to_use))
+            formatted_data.append(formatted_row)
+
+        num_cols = len(dataframe.columns)
+        col_width = 540 / num_cols
+
+        pdf_table = Table(formatted_data, colWidths=[col_width] * num_cols, repeatRows=1)
+        pdf_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.4, border_color),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(pdf_table)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+def extract_evidence_items_vectorized(df_src, col_name):
+    if col_name not in df_src.columns or df_src.empty:
+        return []
+    
+    col_str = df_src[col_name].fillna('').astype(str).str.strip()
+    valid_mask = col_str.str.contains('http://', regex=False) | col_str.str.contains('https://', regex=False)
+    valid_rows = df_src[valid_mask]
+    
+    if valid_rows.empty:
+        return []
+        
+    items = []
+    for _, r in valid_rows.iterrows():
+        raw_val = str(r[col_name]).strip()
+        urls = [u.strip() for u in raw_val.split(',') if u.strip().lower().startswith(('http://', 'https://'))]
+        if not urls:
+            continue
+        d_str = str(r['Date']) if 'Date' in r and pd.notna(r['Date']) else "Recent"
+        g_str = f"Grade {r['Grade']}" if 'Grade' in r and str(r['Grade']).strip() else "Grade N/A"
+        s_str = str(r['Subject']).strip() if 'Subject' in r and str(r['Subject']).strip() else "General Subject"
+        b_str = str(r['Book']).strip() if 'Book' in r and str(r['Book']).strip() else "Lesson Plan"
+        for u in urls:
+            items.append({'url': u, 'date': d_str, 'grade': g_str, 'subject': s_str, 'lesson': b_str})
+        
+    seen = set()
+    deduped = []
+    for item in items:
+        if item['url'] not in seen:
+            seen.add(item['url'])
+            deduped.append(item)
+    return deduped
+
+
+def evidence_items_across_columns(df_src, columns):
+    items = []
+    seen = set()
+    for col in columns:
+        for item in extract_evidence_items_vectorized(df_src, col):
+            url = item.get('url', '').strip()
+            if url and url not in seen:
+                seen.add(url)
+                items.append(item)
+    return items
+
+
 # --- DYNAMIC COMPREHENSIVE SCHOOL PDF REPORT GENERATOR ---
 def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_content_kpi, calc_lib_kpi, daily_ld_target, daily_content_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True, active_metric_mode="Content / Book Usage"):
     buffer = BytesIO()
@@ -609,7 +1237,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             story.append(Paragraph(f"• <b>Library Usage Standard:</b> {daily_lib_target:.0f} mins/day × {selected_num_days} working days ({calc_lib_kpi:.0f} mins total benchmark standard)", normal_style))
         story.append(Spacer(1, 10))
 
-    # 1. Lesson Plan Prep Table
     story.append(Paragraph("<b>1. Lesson Plan Preparation Consolidated Report</b>", sec_head_style))
     ld_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Performance Indicator Status"]]
     for t_name in teachers_list:
@@ -640,7 +1267,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     story.append(ld_table_obj)
     story.append(Spacer(1, 14))
 
-    # 2. Content & Chapters Table (Only if active)
     if include_content:
         story.append(Paragraph("<b>2. Content & Chapter Usage Consolidated Report</b>", sec_head_style))
         content_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Textbooks/Chapters Opened", "Status"]]
@@ -673,7 +1299,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         story.append(content_table_obj)
         story.append(Spacer(1, 14))
 
-    # 3. Library Usage Table (Only if active)
     if include_library:
         sec_num = "3" if include_content else "2"
         story.append(Paragraph(f"<b>{sec_num}. Library Usage Overview (Digital Resources)</b>", sec_head_style))
@@ -706,7 +1331,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         story.append(lib_table_obj)
         story.append(Spacer(1, 14))
 
-    # Qualitative Compliance
     if enable_qual_kpi:
         story.append(Paragraph("<b>Classroom Submissions & Evidence Compliance</b>", sec_head_style))
         qual_summary_table_data = [["Teacher Name", "LP / Audio Notes", "Activity Videos", "Writing Samples", "Phonics Evidences", "Portfolio Artifacts", "Status"]]
@@ -860,172 +1484,6 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     doc.build(story)
     buffer.seek(0)
     return buffer
-
-
-def get_working_days(start_date, end_date, excluded_dates_list=None, exclude_sundays=True):
-    try:
-        if start_date is None or end_date is None or pd.isna(start_date) or pd.isna(end_date):
-            return 0
-        start = pd.Timestamp(start_date).normalize()
-        end = pd.Timestamp(end_date).normalize()
-        if end < start:
-            return 0
-        holidays = []
-        for d in (excluded_dates_list or []):
-            try:
-                holidays.append(np.datetime64(pd.Timestamp(d).date()))
-            except Exception:
-                continue
-        weekmask = '1111110' if exclude_sundays else '1111111'
-        return max(0, int(np.busday_count(np.datetime64(start.date()), np.datetime64((end + pd.Timedelta(days=1)).date()), weekmask=weekmask, holidays=holidays)))
-    except Exception:
-        return 0
-
-
-def safe_percentage(numerator, denominator):
-    if denominator is None or denominator <= 0:
-        return 0.0
-    return float(numerator) / float(denominator) * 100.0
-
-
-def get_period_bounds_for_view(selected_month, view_mode, month_filtered_df, custom_start=None, custom_end=None):
-    if view_mode == "Full Month Summary":
-        try:
-            start = pd.to_datetime(selected_month, format="%B %Y").normalize()
-            return start.date(), (start + pd.offsets.MonthEnd(1)).date()
-        except Exception:
-            pass
-    if view_mode == "Custom Date Range":
-        return custom_start, custom_end
-    if month_filtered_df is not None and not month_filtered_df.empty:
-        return month_filtered_df['Date'].min(), month_filtered_df['Date'].max()
-    return None, None
-
-
-def get_teacher_eligible_working_days(teacher_df, period_start, period_end, excluded_dates=None, exclude_sundays=True):
-    if teacher_df is None or teacher_df.empty or period_start is None or period_end is None:
-        return 0
-    dates = pd.to_datetime(teacher_df['Date'], errors='coerce').dropna()
-    if dates.empty:
-        return 0
-    dates = dates[(dates.dt.date >= pd.Timestamp(period_start).date()) & (dates.dt.date <= pd.Timestamp(period_end).date())]
-    if dates.empty:
-        return 0
-    return get_working_days(dates.min().date(), dates.max().date(), excluded_dates, exclude_sundays)
-
-
-def teacher_days_map(roster_df, activity_df, period_start, period_end, excluded_dates=None, exclude_sundays=True):
-    result = {}
-    if roster_df is None or roster_df.empty:
-        return result
-    for _, row in roster_df[['Institution','FullName']].drop_duplicates().iterrows():
-        inst, teacher = row['Institution'], row['FullName']
-        tdf = activity_df[(activity_df['Institution'] == inst) & (activity_df['FullName'] == teacher)] if activity_df is not None and not activity_df.empty else pd.DataFrame()
-        result[(inst, teacher)] = get_teacher_eligible_working_days(tdf, period_start, period_end, excluded_dates, exclude_sundays)
-    return result
-
-
-def duration_sum(df, mask=None):
-    if df is None or df.empty:
-        return 0.0
-    work = df if mask is None else df.loc[mask]
-    if 'Duration_Min' not in work.columns:
-        return 0.0
-    vals = pd.to_numeric(work['Duration_Min'], errors='coerce').replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    return max(0.0, float(vals.sum()))
-
-
-def calculate_kpi_target(daily_target, working_days, enabled=True):
-    if not enabled:
-        return 0.0
-    return max(0.0, float(daily_target)) * max(0, int(working_days))
-
-
-def calculate_kpi_status(minutes, target, enabled=True, break_period=False):
-    minutes = max(0.0, float(minutes or 0.0))
-    if break_period:
-        return '🏖️ Scheduled Break / No Working Days'
-    if not enabled or target <= 0:
-        return 'Activity Logged' if minutes > 0 else 'No Activity Logged'
-    if minutes >= target:
-        return f'✅ Met Performance Indicator (>= {target:.0f}m)'
-    if minutes > 0:
-        return f'⚠️ Below Performance Indicator (< {target:.0f}m)'
-    return '❌ Inactive (0 Mins)'
-
-
-def ingest_excel_to_postgresql(processed_dfs):
-    if not processed_dfs:
-        return 0, 0
-    combined_df = pd.concat(processed_dfs, ignore_index=True)
-    combined_df = normalize_identity_columns(combined_df)
-    
-    db_cols = [
-        "State_Zone", "Uploaded_By", "Institution", "Center",
-        "FirstName", "LastName", "FullName", "Role", "Type",
-        "Grade", "Subject", "Book", "StartTime", "EndTime",
-        "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
-        "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
-        "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
-        "Assessment_Score_Pct", "Record_Hash"
-    ]
-    
-    for col in db_cols:
-        if col not in combined_df.columns:
-            combined_df[col] = None
-
-    for dt_col in ['StartTime', 'EndTime']:
-        combined_df[dt_col] = pd.to_datetime(combined_df[dt_col], errors='coerce')
-
-    if 'Duration_Min' in combined_df.columns:
-        combined_df['Duration_Min'] = pd.to_numeric(combined_df['Duration_Min'], errors='coerce').fillna(0.0).clip(lower=0.0)
-
-    if combined_df['StartTime'].isna().all():
-        combined_df['StartTime'] = pd.Timestamp.now()
-
-    combined_df['Record_Hash'] = combined_df.apply(compute_record_hash, axis=1)
-
-    cleaned_df = combined_df[db_cols].copy()
-    cleaned_df = cleaned_df.replace({np.nan: None})
-    total_incoming = len(cleaned_df)
-
-    cleaned_df = cleaned_df.drop_duplicates(subset=['Record_Hash'], keep='last')
-    skipped_within_batch = total_incoming - len(cleaned_df)
-
-    if cleaned_df.empty:
-        return 0, 0
-
-    engine = conn.engine
-    try:
-        with engine.begin() as bulk_conn:
-            existing_hashes = set()
-            try:
-                existing_hashes = set(
-                    h for (h,) in bulk_conn.execute(
-                        text('SELECT DISTINCT "Record_Hash" FROM teacher_records WHERE "Record_Hash" IS NOT NULL')
-                    ).fetchall()
-                )
-            except Exception:
-                pass
-
-            insert_df = cleaned_df[~cleaned_df['Record_Hash'].isin(existing_hashes)] if existing_hashes else cleaned_df
-            skipped_exact_duplicates = (total_incoming - len(insert_df))
-
-            before_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
-            if not insert_df.empty:
-                insert_df.to_sql('teacher_records', con=bulk_conn, index=False, if_exists='append', method='multi', chunksize=1000)
-            after_count = bulk_conn.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
-
-        inserted_count = int(after_count - before_count)
-        return inserted_count, skipped_exact_duplicates
-    except Exception as e:
-        st.error(f"Ingestion database error: {e}")
-        return 0, 0
-
-
-# Page layout title
-st.title("🏫 Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard")
-st.markdown("Track **School Portfolio Management**, **School WoW Velocity**, **Teacher Execution Tiers**, **Quantitative Performance Indicators (Lesson Prep / Book Content Usage)**, and **360° Qualitative Evidences & Artifact Compliance**.")
 
 
 # --- 2. MULTI-EMPLOYEE HIERARCHY & DATA UPLOAD MANAGER ---
@@ -1503,11 +1961,8 @@ else:
         ld_daily = tab1_active_roster.merge(ld_usage, on=['Institution', 'FullName'], how='left').fillna(0.0)
         ld_daily['Eligible Working Days'] = ld_daily.apply(lambda r: teacher_days.get((r['Institution'], r['FullName']), selected_num_days) if use_teacher_eligible_days else selected_num_days, axis=1)
         ld_daily['Performance Benchmark (Min)'] = ld_daily['Eligible Working Days'] * daily_ld_target_t1
-
-        def get_ld_status_row(r):
-            return calculate_kpi_status(r['Duration_Min'], r['Performance Benchmark (Min)'], enable_quant_kpi_t1, r['Eligible Working Days'] == 0)
         
-        ld_daily['Performance Indicator Status'] = ld_daily.apply(get_ld_status_row, axis=1)
+        ld_daily['Performance Indicator Status'] = ld_daily.apply(lambda r: calculate_kpi_status(r['Duration_Min'], r['Performance Benchmark (Min)'], enable_quant_kpi_t1, r['Eligible Working Days'] == 0), axis=1)
 
         c1, c2, c3, c4 = st.columns(4)
         total_teachers = len(ld_daily)
@@ -1536,47 +1991,23 @@ else:
         with col_t1_d1:
             if st.button("⚙️ Compile Tab 1 PDF Report", key="prep_pdf_tab1_btn"):
                 with st.spinner("Compiling PDF report..."):
-                    if len(selected_schools) == 1:
-                        pdf_bytes = generate_comprehensive_school_pdf_report(
-                            school_name=selected_schools[0],
-                            teachers_list=filtered_roster[filtered_roster['Institution'] == selected_schools[0]]['FullName'].unique().tolist(),
-                            school_filtered_df=school_filtered_df,
-                            filtered_df=filtered_df,
-                            filter_desc=filter_description_text,
-                            calc_ld_kpi=calc_ld_kpi_t1,
-                            calc_content_kpi=st.session_state.get('calc_content_kpi_t3', calculate_kpi_target(30.0, selected_num_days, True)),
-                            calc_lib_kpi=st.session_state.get('calc_lib_kpi_t2', calculate_kpi_target(30.0, selected_num_days, True)),
-                            daily_ld_target=daily_ld_target_t1,
-                            daily_content_target=st.session_state.get('daily_content_target_t3', 30.0),
-                            daily_lib_target=st.session_state.get('daily_lib_target_t2', 30.0),
-                            selected_num_days=selected_num_days,
-                            target_vid_count=3,
-                            target_writing_count=3,
-                            target_lp_combo_count=3,
-                            target_phonics_count=2,
-                            target_portfolio_count=1,
-                            enable_quant_kpi=enable_quant_kpi_t1,
-                            enable_qual_kpi=True,
-                            active_metric_mode="Both"
-                        ).getvalue()
-                    else:
-                        pdf_bytes = generate_comprehensive_school_pdf_report(
-                            school_name="Multiple Portfolio Schools",
-                            teachers_list=filtered_roster['FullName'].unique().tolist(),
-                            school_filtered_df=school_filtered_df,
-                            filtered_df=filtered_df,
-                            filter_desc=filter_description_text,
-                            calc_ld_kpi=calc_ld_kpi_t1,
-                            calc_content_kpi=st.session_state.get('calc_content_kpi_t3', calculate_kpi_target(30.0, selected_num_days, True)),
-                            calc_lib_kpi=st.session_state.get('calc_lib_kpi_t2', calculate_kpi_target(30.0, selected_num_days, True)),
-                            daily_ld_target=daily_ld_target_t1,
-                            daily_content_target=st.session_state.get('daily_content_target_t3', 30.0),
-                            daily_lib_target=st.session_state.get('daily_lib_target_t2', 30.0),
-                            selected_num_days=selected_num_days,
-                            enable_quant_kpi=enable_quant_kpi_t1,
-                            enable_qual_kpi=True,
-                            active_metric_mode="Both"
-                        ).getvalue()
+                    pdf_bytes = generate_comprehensive_school_pdf_report(
+                        school_name=tab1_selected_school if tab1_selected_school != "All Selected Schools" else "Multiple Schools",
+                        teachers_list=tab1_active_roster['FullName'].unique().tolist(),
+                        school_filtered_df=school_filtered_df,
+                        filtered_df=filtered_df,
+                        filter_desc=filter_description_text,
+                        calc_ld_kpi=calc_ld_kpi_t1,
+                        calc_content_kpi=st.session_state.get('calc_content_kpi_t3', calculate_kpi_target(30.0, selected_num_days, True)),
+                        calc_lib_kpi=st.session_state.get('calc_lib_kpi_t2', calculate_kpi_target(30.0, selected_num_days, True)),
+                        daily_ld_target=daily_ld_target_t1,
+                        daily_content_target=st.session_state.get('daily_content_target_t3', 30.0),
+                        daily_lib_target=st.session_state.get('daily_lib_target_t2', 30.0),
+                        selected_num_days=selected_num_days,
+                        enable_quant_kpi=enable_quant_kpi_t1,
+                        enable_qual_kpi=True,
+                        active_metric_mode="Both"
+                    ).getvalue()
                     st.session_state["tab1_pdf_ready"] = pdf_bytes
 
             if "tab1_pdf_ready" in st.session_state:
