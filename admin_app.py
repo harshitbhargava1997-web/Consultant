@@ -38,6 +38,23 @@ try:
 except Exception as e:
     st.error(f"Supabase credentials missing or misconfigured in Streamlit Secrets: {e}")
 
+# --- CLOUDFLARE R2 (PUBLIC EVIDENCE BUCKET) SETUP ---
+# teacher_records evidence columns now store R2 OBJECT KEYS (written by the
+# already-migrated Teacher App) instead of full URLs. The bucket is public
+# (either the built-in r2.dev subdomain, or a custom domain you've connected
+# to the bucket for public serving), so a key resolves to a URL with simple
+# string concatenation — no signing, no credentials, no gateway needed.
+# R2_PUBLIC_BASE_URL examples:
+#   "https://pub-xxxxxxxxxxxxxxxx.r2.dev"
+#   "https://evidence.yourdomain.com"   (custom domain mapped to the bucket)
+R2_ENABLED = False
+try:
+    R2_PUBLIC_BASE_URL = st.secrets["r2"]["public_base_url"].rstrip('/')
+    R2_ENABLED = True
+except Exception as e:
+    R2_PUBLIC_BASE_URL = None
+    st.warning(f"R2 public base URL missing or misconfigured in Streamlit Secrets — evidence files will not load: {e}")
+
 try:
     GEMINI_API_KEY = st.secrets["gemini"]["api_key"]
     ai_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -1179,35 +1196,152 @@ def generate_pdf_report(title_text, subtitle_text, school_name, summary_metrics,
     return buffer
 
 
+# --- R2 EVIDENCE RESOLUTION HELPERS ------------------------------------------------
+# These helpers translate a raw value stored in a teacher_records evidence column
+# into a single playable/linkable URL. A raw value may be:
+#   - a legacy Supabase Storage http(s) URL (records created before the Teacher App
+#     migration to R2) -> used as-is, unchanged.
+#   - a Cloudflare R2 object key (records created after migration), e.g.
+#     "teacher_uploads/DPS_Rohini/Anita_Sharma/2026-08-14/8f2c1e/video/clip1.mp4"
+#     -> resolved by joining it onto the bucket's public base URL. The bucket is
+#     public, so this is plain string concatenation — no signing, no credentials,
+#     no expiry, which is exactly what makes it safe to print permanently in a
+#     PDF report: the same link works today and will still work years from now.
+
+def _is_legacy_http_url(value: str) -> bool:
+    return value.strip().lower().startswith(("http://", "https://"))
+
+
+def split_evidence_raw_value(raw_val: str):
+    """One DB field can hold multiple comma-separated files (URLs or R2 keys)."""
+    if raw_val is None:
+        return []
+    raw_val = str(raw_val).strip()
+    if not raw_val or raw_val.lower() in ("nan", "none", "null"):
+        return []
+    return [v.strip() for v in raw_val.split(",") if v.strip()]
+
+
+def detect_evidence_file_type(value: str) -> str:
+    """Classify a URL or R2 key by extension so the app knows which widget to use."""
+    path_part = urllib.parse.urlparse(value).path if _is_legacy_http_url(value) else value
+    ext = os.path.splitext(path_part)[1].lower()
+    if ext in (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".weba"):
+        return "audio"
+    if ext in (".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"):
+        return "video"
+    if ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic"):
+        return "image"
+    if ext == ".pdf":
+        return "pdf"
+    return "other"
+
+
+def get_public_evidence_url(object_key: str):
+    """Permanent public URL for an R2 object key — same value used for in-app
+    preview AND for PDF reports, since the bucket is public and the link
+    never expires or needs re-signing."""
+    if not R2_ENABLED or not object_key:
+        return None
+    encoded_key = urllib.parse.quote(object_key, safe="/")
+    return f"{R2_PUBLIC_BASE_URL}/{encoded_key}"
+
+
+def resolve_evidence_links(raw_value: str):
+    """Given one raw evidence-column value, return a list of dicts, one per file.
+    'url' is the single permanent/public link, used both for in-app preview and
+    for anything written into a PDF report."""
+    resolved = []
+    for single_val in split_evidence_raw_value(raw_value):
+        if _is_legacy_http_url(single_val):
+            # Pre-migration record: already a full, working, permanent URL.
+            resolved.append({
+                "source": "legacy_url",
+                "object_key": None,
+                "url": single_val,
+                "file_type": detect_evidence_file_type(single_val),
+            })
+        else:
+            # Post-migration record: value is an R2 object key.
+            object_key = single_val.lstrip("/")
+            resolved.append({
+                "source": "r2_key",
+                "object_key": object_key,
+                "url": get_public_evidence_url(object_key) or "",
+                "file_type": detect_evidence_file_type(object_key),
+            })
+    return resolved
+
+
+def render_evidence_media_preview(item: dict, widget_key: str):
+    """Inline audio/video/image/PDF playback inside the Admin App (Requirement:
+    display/play teacher-uploaded evidence, not just link to it)."""
+    display_url = item.get("url")
+    file_type = item.get("file_type", "other")
+    if not display_url:
+        st.caption("⚠️ Evidence file could not be loaded from R2 (missing key or public base URL).")
+        return
+    try:
+        if file_type == "audio":
+            st.audio(display_url)
+        elif file_type == "video":
+            st.video(display_url)
+        elif file_type == "image":
+            st.image(display_url, use_container_width=True)
+        elif file_type == "pdf":
+            st.markdown(
+                f'<iframe src="{display_url}" width="100%" height="480" '
+                f'style="border:1px solid #E2E8F0;border-radius:6px;"></iframe>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(f"[⬇️ Open / Download File]({display_url})")
+    except Exception:
+        st.caption("⚠️ Unable to render an inline preview for this file. Use the link to open it directly.")
+# --- END R2 EVIDENCE RESOLUTION HELPERS --------------------------------------------
+
+
 def extract_evidence_items_vectorized(df_src, col_name):
     if col_name not in df_src.columns or df_src.empty:
         return []
-    
+
     col_str = df_src[col_name].fillna('').astype(str).str.strip()
-    valid_mask = col_str.str.contains('http://', regex=False) | col_str.str.contains('https://', regex=False)
+    # NOTE (R2 migration): evidence columns now hold either a legacy Supabase
+    # Storage http(s) URL OR a Cloudflare R2 object key (no scheme). A non-empty
+    # cell is a candidate either way, so we no longer require an 'http' substring.
+    valid_mask = col_str.str.len() > 0
     valid_rows = df_src[valid_mask]
-    
+
     if valid_rows.empty:
         return []
-        
+
     items = []
     for _, r in valid_rows.iterrows():
         raw_val = str(r[col_name]).strip()
-        urls = [u.strip() for u in raw_val.split(',') if u.strip().lower().startswith(('http://', 'https://'))]
-        if not urls:
+        resolved_files = resolve_evidence_links(raw_val)
+        if not resolved_files:
             continue
         d_str = str(r['Date']) if 'Date' in r and pd.notna(r['Date']) else "Recent"
         g_str = f"Grade {r['Grade']}" if 'Grade' in r and str(r['Grade']).strip() else "Grade N/A"
         s_str = str(r['Subject']).strip() if 'Subject' in r and str(r['Subject']).strip() else "General Subject"
         b_str = str(r['Book']).strip() if 'Book' in r and str(r['Book']).strip() else "Lesson Plan"
-        for u in urls:
-            items.append({'url': u, 'date': d_str, 'grade': g_str, 'subject': s_str, 'lesson': b_str})
-        
+        for f in resolved_files:
+            items.append({
+                # 'url' is the single public, permanent link so every existing
+                # PDF/markdown call site keeps working unchanged.
+                'url': f['url'],
+                'file_type': f['file_type'],
+                'object_key': f['object_key'],
+                'source': f['source'],
+                'date': d_str, 'grade': g_str, 'subject': s_str, 'lesson': b_str,
+            })
+
     seen = set()
     deduped = []
     for item in items:
-        if item['url'] not in seen:
-            seen.add(item['url'])
+        dedup_key = item.get('object_key') or item['url']
+        if dedup_key not in seen:
+            seen.add(dedup_key)
             deduped.append(item)
     return deduped
 
@@ -2760,6 +2894,9 @@ else:
                     combined_lp_items.append(f"🖼️ [LP Picture]({item['url']}) - **{item['grade']}** | *{item['subject']}* ({item['lesson']}, {item['date']})")
                 if combined_lp_items:
                     for line in combined_lp_items: st.markdown(f"• {line}")
+                    with st.expander("👁️ Play / view these files"):
+                        for i_idx, item in enumerate(v_voice + v_pic):
+                            render_evidence_media_preview(item, widget_key=f"q1_{i_idx}")
                 else:
                     st.caption("No lesson plans or voice reflections submitted.")
 
@@ -2769,7 +2906,11 @@ else:
                     st.markdown(f"• 🎥 [Watch Video]({item['url']}) - **{item['grade']}** | *{item['subject']}* ({item['lesson']}, {item['date']})")
                 for item in v_writing:
                     st.markdown(f"• 📝 [View Writing]({item['url']}) - **{item['grade']}** | *{item['subject']}* ({item['lesson']}, {item['date']})")
-                if not v_vid and not v_writing:
+                if v_vid or v_writing:
+                    with st.expander("👁️ Play / view these files"):
+                        for i_idx, item in enumerate(v_vid + v_writing):
+                            render_evidence_media_preview(item, widget_key=f"q2_{i_idx}")
+                else:
                     st.caption("No activity videos or writing samples uploaded.")
 
             with q_cols3:
@@ -2778,7 +2919,11 @@ else:
                     st.markdown(f"• 🔤 [Phonics Evidence]({item['url']}) - **{item['grade']}** | *{item['subject']}* ({item['lesson']}, {item['date']})")
                 for item in v_portfolio:
                     st.markdown(f"• 📁 [Portfolio Artifact]({item['url']}) - **{item['grade']}** | *{item['subject']}* ({item['lesson']}, {item['date']})")
-                if not v_phonics and not v_portfolio:
+                if v_phonics or v_portfolio:
+                    with st.expander("👁️ Play / view these files"):
+                        for i_idx, item in enumerate(v_phonics + v_portfolio):
+                            render_evidence_media_preview(item, widget_key=f"q3_{i_idx}")
+                else:
                     st.caption("No phonics implementation or portfolio files uploaded.")
 
             st.markdown("---")
@@ -3126,8 +3271,10 @@ else:
         avail_ev_cols = [c for c in evidence_cols if c in filtered_df.columns]
 
         if not filtered_df.empty and avail_ev_cols:
+            # R2 migration: a populated cell may be a legacy http(s) URL or a
+            # raw R2 object key, so any non-empty value counts as a submission.
             url_mask = pd.concat([
-                filtered_df[c].fillna('').astype(str).str.strip().str.startswith(('http://', 'https://'))
+                filtered_df[c].fillna('').astype(str).str.strip().str.len() > 0
                 for c in avail_ev_cols
             ], axis=1).any(axis=1)
             all_submissions_df = filtered_df[url_mask].copy()
@@ -3167,6 +3314,30 @@ else:
             
             t7_table = t7_filtered[t7_avail].sort_values(by='StartTime', ascending=False)
             st.dataframe(t7_table, use_container_width=True)
+
+            st.markdown("---")
+            st.markdown("##### 🎬 Play / View Evidence Files")
+            st.caption("Files are streamed directly from the public R2 bucket.")
+
+            t7_preview_rows = t7_filtered.sort_values(by='StartTime', ascending=False).head(25)
+            if t7_preview_rows.empty:
+                st.caption("No submissions to preview.")
+            else:
+                for row_idx, r7 in t7_preview_rows.iterrows():
+                    row_label = f"{r7.get('StartTime', '')} — {r7.get('FullName', 'Unknown Teacher')} ({r7.get('Institution', 'Unknown School')})"
+                    with st.expander(f"📁 {row_label}"):
+                        any_file_for_row = False
+                        for ev_col in avail_ev_cols:
+                            raw_cell_val = r7.get(ev_col, "")
+                            files_in_cell = resolve_evidence_links(raw_cell_val)
+                            if not files_in_cell:
+                                continue
+                            any_file_for_row = True
+                            st.markdown(f"**{ev_col.replace('_', ' ')}**")
+                            for f_idx, f_item in enumerate(files_in_cell):
+                                render_evidence_media_preview(f_item, widget_key=f"t7_{row_idx}_{ev_col}_{f_idx}")
+                        if not any_file_for_row:
+                            st.caption("No evidence files found in this submission.")
 
     # --- TAB 8: PHYSICAL CLASSROOM VISIT OBSERVATION FORM & LONGITUDINAL AUDIT TRAIL ---
     with tab8:
