@@ -798,11 +798,11 @@ for group_number in range(
 
 
         # ----------------------------------------------------
-        # STUDENT WORK
+        # STUDENT WRITTEN WORK
         # ----------------------------------------------------
 
         st.file_uploader(
-            "📝 Student Work",
+            "📝 Student Written Work",
             type=[
                 "pdf",
                 "png",
@@ -811,6 +811,24 @@ for group_number in range(
             ],
             accept_multiple_files=True,
             key=f"group_{group_number}_writing"
+        )
+
+
+        # ----------------------------------------------------
+        # STUDENT ASSESSMENT
+        # ----------------------------------------------------
+
+        st.file_uploader(
+            "📊 Student Assessment",
+            type=[
+                "pdf",
+                "png",
+                "jpg",
+                "jpeg",
+                "mp4"
+            ],
+            accept_multiple_files=True,
+            key=f"group_{group_number}_assessment"
         )
 
 
@@ -1034,6 +1052,11 @@ if submit_button:
             []
         )
 
+        group_assessment = st.session_state.get(
+            f"group_{group_number}_assessment",
+            []
+        )
+
         group_phonics = st.session_state.get(
             f"group_{group_number}_phonics",
             []
@@ -1074,6 +1097,7 @@ if submit_button:
                 "picture": group_picture,
                 "video": group_video,
                 "writing": group_writing,
+                "assessment": group_assessment,
                 "phonics": group_phonics,
                 "portfolio": group_portfolio
             }
@@ -1146,7 +1170,7 @@ if submit_button:
 
 
         # ----------------------------------------------------
-        # STUDENT WORK
+        # STUDENT WRITTEN WORK
         # ----------------------------------------------------
 
         for file in group["writing"]:
@@ -1156,6 +1180,22 @@ if submit_button:
                     file,
                     f"{group_base}/student_work",
                     "writing",
+                    group_number
+                )
+            )
+
+
+        # ----------------------------------------------------
+        # STUDENT ASSESSMENT
+        # ----------------------------------------------------
+
+        for file in group["assessment"]:
+
+            upload_jobs.append(
+                (
+                    file,
+                    f"{group_base}/student_assessments",
+                    "assessment",
                     group_number
                 )
             )
@@ -1392,6 +1432,12 @@ if submit_button:
         )
 
 
+        assessment_paths = get_paths(
+            group_number,
+            "assessment"
+        )
+
+
         phonics_paths = get_paths(
             group_number,
             "phonics"
@@ -1425,6 +1471,13 @@ if submit_button:
         writing_link = (
             ", ".join(writing_paths)
             if writing_paths
+            else None
+        )
+
+
+        assessment_link = (
+            ", ".join(assessment_paths)
+            if assessment_paths
             else None
         )
 
@@ -1473,6 +1526,9 @@ if submit_button:
         # No teacher_submissions table.
         # No Activity_Video_Links column.
         # No Implementation_Type column.
+        #
+        # NEW:
+        # Student_Assessment_Link
         # ----------------------------------------------------
 
         entry_dict = {
@@ -1526,6 +1582,8 @@ if submit_button:
             "Video_Evidence_3": video_3,
 
             "Writing_Sample_Link": writing_link,
+
+            "Student_Assessment_Link": assessment_link,
 
             "Phonics_Evidence_Link": phonics_link,
 
