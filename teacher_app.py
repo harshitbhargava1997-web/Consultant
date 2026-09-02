@@ -10,7 +10,7 @@ from boto3.s3.transfer import TransferConfig
 # STREAMLIT CONFIGURATION
 # ============================================================
 st.set_page_config(
-    page_title="Teacher Daily Evidence Portal",
+    page_title="Teacher Daily Implementation Portal",
     page_icon="📝",
     layout="centered"
 )
@@ -22,7 +22,7 @@ MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 MAX_PARALLEL_UPLOADS = 5
 R2_MULTIPART_THRESHOLD = 8 * 1024 * 1024
 R2_MULTIPART_CHUNK_SIZE = 8 * 1024 * 1024
-MAX_EVIDENCE_GROUPS = 10
+MAX_IMPLEMENTATION_GROUPS = 10
 # ============================================================
 # SUPABASE SETUP
 # ============================================================
@@ -113,9 +113,9 @@ SUBJECT_OPTIONS = [
     "Play Based"
 ]
 # ============================================================
-# EVIDENCE TYPE OPTIONS
+# IMPLEMENTATION TYPE OPTIONS
 # ============================================================
-EVIDENCE_TYPE_OPTIONS = [
+IMPLEMENTATION_TYPE_OPTIONS = [
     "Lesson Plan",
     "Classroom Activity",
     "Phonics / Phonetics",
@@ -211,7 +211,7 @@ def upload_single_file_worker(args):
     uploaded_file, folder_name, category, group_number = args
     try:
         # ----------------------------------------------------
-        # FILE SIZE CHECK
+        # INDIVIDUAL FILE SIZE LIMIT
         # ----------------------------------------------------
         if uploaded_file.size > MAX_FILE_SIZE_BYTES:
             return {
@@ -301,7 +301,7 @@ def upload_all_files_parallel(upload_jobs):
 # ============================================================
 # SUPABASE INSERT
 # ============================================================
-def insert_submission_to_db(entry_dict):
+def insert_implementation_to_db(entry_dict):
     return (
         supabase
         .table(TEACHER_RECORDS_TABLE)
@@ -311,8 +311,8 @@ def insert_submission_to_db(entry_dict):
 # ============================================================
 # SESSION STATE
 # ============================================================
-if "evidence_group_count" not in st.session_state:
-    st.session_state.evidence_group_count = 1
+if "implementation_group_count" not in st.session_state:
+    st.session_state.implementation_group_count = 1
 # ============================================================
 # LOAD MASTER DATABASE
 # ============================================================
@@ -321,18 +321,18 @@ master_df = fetch_master_db_from_supabase()
 # PAGE HEADER
 # ============================================================
 st.title(
-    "📝 Teacher Daily Evidence Portal"
+    "📝 Teacher Daily Implementation Portal"
 )
 st.markdown(
-    "Submit lesson plans, classroom activities, "
-    "student work, phonics evidence and other "
-    "teaching evidence."
+    "Record your lesson implementation and share "
+    "the resources or classroom material associated "
+    "with it."
 )
 st.info(
     f"📦 **Maximum file size: {MAX_FILE_SIZE_MB} MB per file**\n\n"
-    "You can add multiple lesson or evidence groups "
-    "in one submission. The 50 MB limit applies to "
-    "each individual file, not the complete submission."
+    "The limit applies to each individual file, "
+    "not to the complete submission. You can add "
+    "multiple lesson implementations in one submission."
 )
 # ============================================================
 # STATE / ZONE
@@ -467,7 +467,7 @@ if (
         )
     ]
     # --------------------------------------------------------
-    # FILTER TO TEACHERS WHEN ROLE DATA EXISTS
+    # FILTER TEACHERS
     # --------------------------------------------------------
     if "Role" in t_subset.columns:
         role_lower = (
@@ -514,36 +514,36 @@ sub_teacher_name = st.selectbox(
     key="teacher_selection"
 )
 # ============================================================
-# SUBMISSION DATE
+# IMPLEMENTATION DATE
 # ============================================================
 sub_date = st.date_input(
-    "Submission Date *",
-    key="submission_date"
+    "Implementation Date *",
+    key="implementation_date"
 )
 # ============================================================
-# EVIDENCE SECTION
+# IMPLEMENTATION SECTION
 # ============================================================
 st.divider()
 st.header(
-    "📚 Lesson & Evidence Submission"
+    "📚 Lesson Implementation"
 )
 st.caption(
-    "Create one Evidence Group for each lesson, "
-    "activity or classroom evidence."
+    "Create one Implementation for each lesson, "
+    "activity or classroom practice you want to record."
 )
 # ============================================================
-# EVIDENCE GROUP UI
+# IMPLEMENTATION GROUP UI
 # ============================================================
 for group_number in range(
     1,
-    st.session_state.evidence_group_count + 1
+    st.session_state.implementation_group_count + 1
 ):
     st.markdown(
-        f"### Evidence Group {group_number}"
+        f"### 📚 Implementation {group_number}"
     )
     with st.container(border=True):
         # ----------------------------------------------------
-        # GRADE AND SUBJECT
+        # GRADE + SUBJECT
         # ----------------------------------------------------
         col1, col2 = st.columns(2)
         with col1:
@@ -559,27 +559,26 @@ for group_number in range(
                 key=f"group_{group_number}_subject"
             )
         # ----------------------------------------------------
-        # EVIDENCE TYPE
+        # IMPLEMENTATION TYPE
         # ----------------------------------------------------
         st.selectbox(
-            "Evidence Type *",
-            options=EVIDENCE_TYPE_OPTIONS,
+            "Implementation Type *",
+            options=IMPLEMENTATION_TYPE_OPTIONS,
             key=f"group_{group_number}_type"
         )
         # ----------------------------------------------------
-        # LESSON / ACTIVITY
+        # CHAPTER / LESSON
         # ----------------------------------------------------
         st.text_input(
             "Chapter / Lesson / Activity Name *",
             placeholder=(
-                "Example: Chapter 2 - Plants / "
-                "Lesson Plan #4"
+                "Example: Plants - Lesson Plan #4"
             ),
             key=f"group_{group_number}_lesson"
         )
         st.caption(
-            "Upload only the evidence related to this "
-            "lesson or activity."
+            "Add the material associated with this "
+            "particular lesson implementation."
         )
         # ----------------------------------------------------
         # VOICE NOTE
@@ -599,7 +598,7 @@ for group_number in range(
         # LESSON PLAN
         # ----------------------------------------------------
         st.file_uploader(
-            "📄 Lesson Plan Picture(s) / Document(s)",
+            "📄 Lesson Plan",
             type=[
                 "png",
                 "jpg",
@@ -610,10 +609,10 @@ for group_number in range(
             key=f"group_{group_number}_picture"
         )
         # ----------------------------------------------------
-        # CLASSROOM ACTIVITY VIDEO
+        # ACTIVITY VIDEO
         # ----------------------------------------------------
         st.file_uploader(
-            "🎥 Classroom Activity Video(s)",
+            "🎥 Activity Video",
             type=[
                 "mp4",
                 "mov",
@@ -623,10 +622,10 @@ for group_number in range(
             key=f"group_{group_number}_video"
         )
         # ----------------------------------------------------
-        # STUDENT WRITING
+        # STUDENT WORK
         # ----------------------------------------------------
         st.file_uploader(
-            "📝 Student Writing Sample(s)",
+            "📝 Student Work",
             type=[
                 "pdf",
                 "png",
@@ -640,7 +639,7 @@ for group_number in range(
         # PHONICS
         # ----------------------------------------------------
         st.file_uploader(
-            "🔤 Phonics / Phonetics Evidence(s)",
+            "🔤 Phonics / Phonetics",
             type=[
                 "mp4",
                 "mov",
@@ -658,7 +657,7 @@ for group_number in range(
         # TEACHER PORTFOLIO
         # ----------------------------------------------------
         st.file_uploader(
-            "📁 Teacher Portfolio Evidence(s)",
+            "📁 Teacher Portfolio",
             type=[
                 "pdf",
                 "png",
@@ -670,38 +669,38 @@ for group_number in range(
             key=f"group_{group_number}_portfolio"
         )
 # ============================================================
-# ADD / REMOVE EVIDENCE GROUPS
+# ADD / REMOVE IMPLEMENTATIONS
 # ============================================================
 st.divider()
 button_col1, button_col2 = st.columns(2)
 with button_col1:
     if (
-        st.session_state.evidence_group_count
-        < MAX_EVIDENCE_GROUPS
+        st.session_state.implementation_group_count
+        < MAX_IMPLEMENTATION_GROUPS
     ):
         if st.button(
-            "➕ Add Another Lesson / Evidence",
+            "➕ Add Another Lesson / Implementation",
             use_container_width=True
         ):
-            st.session_state.evidence_group_count += 1
+            st.session_state.implementation_group_count += 1
             st.rerun()
 with button_col2:
     if (
-        st.session_state.evidence_group_count
+        st.session_state.implementation_group_count
         > 1
     ):
         if st.button(
-            "➖ Remove Last Evidence Group",
+            "➖ Remove Last Implementation",
             use_container_width=True
         ):
-            st.session_state.evidence_group_count -= 1
+            st.session_state.implementation_group_count -= 1
             st.rerun()
 # ============================================================
-# SUBMIT BUTTON
+# SUBMIT
 # ============================================================
 st.divider()
 submit_button = st.button(
-    "🚀 Upload All Evidence & Submit",
+    "🚀 Submit Implementation",
     type="primary",
     use_container_width=True
 )
@@ -710,7 +709,7 @@ submit_button = st.button(
 # ============================================================
 if submit_button:
     # ========================================================
-    # REQUIRED FIELD VALIDATION
+    # BASIC VALIDATION
     # ========================================================
     if sub_state == "-- Select State / Zone --":
         st.error(
@@ -745,7 +744,7 @@ if submit_button:
     clean_teacher = sanitize_path_component(
         sub_teacher_name
     )
-    submission_date_folder = (
+    implementation_date_folder = (
         sub_date.strftime("%Y-%m-%d")
     )
     submission_base = (
@@ -753,16 +752,16 @@ if submit_button:
         f"{clean_school}/"
         f"teachers/"
         f"{clean_teacher}/"
-        f"{submission_date_folder}/"
+        f"{implementation_date_folder}/"
         f"submission_{submission_id}"
     )
     # ========================================================
-    # COLLECT EVIDENCE GROUPS
+    # COLLECT IMPLEMENTATION GROUPS
     # ========================================================
-    evidence_groups = []
+    implementation_groups = []
     for group_number in range(
         1,
-        st.session_state.evidence_group_count + 1
+        st.session_state.implementation_group_count + 1
     ):
         group_grade = st.session_state[
             f"group_{group_number}_grade"
@@ -770,7 +769,7 @@ if submit_button:
         group_subject = st.session_state[
             f"group_{group_number}_subject"
         ]
-        group_evidence_type = st.session_state[
+        group_type = st.session_state[
             f"group_{group_number}_type"
         ]
         group_lesson = st.session_state[
@@ -806,19 +805,19 @@ if submit_button:
         if not group_lesson.strip():
             st.error(
                 f"Please enter the Chapter / Lesson / "
-                f"Activity name for Evidence Group "
+                f"Activity name for Implementation "
                 f"{group_number}."
             )
             st.stop()
         # ----------------------------------------------------
         # STORE GROUP
         # ----------------------------------------------------
-        evidence_groups.append(
+        implementation_groups.append(
             {
                 "group_number": group_number,
                 "grade": group_grade,
                 "subject": group_subject,
-                "evidence_type": group_evidence_type,
+                "implementation_type": group_type,
                 "lesson": group_lesson.strip(),
                 "voice": group_voice,
                 "picture": group_picture,
@@ -829,14 +828,14 @@ if submit_button:
             }
         )
     # ========================================================
-    # BUILD ALL R2 UPLOAD JOBS
+    # BUILD R2 UPLOAD JOBS
     # ========================================================
     upload_jobs = []
-    for group in evidence_groups:
+    for group in implementation_groups:
         group_number = group["group_number"]
         group_base = (
             f"{submission_base}/"
-            f"evidence_{group_number}"
+            f"implementation_{group_number}"
         )
         # ----------------------------------------------------
         # VOICE NOTES
@@ -851,7 +850,7 @@ if submit_button:
                 )
             )
         # ----------------------------------------------------
-        # LESSON PLAN DOCUMENTS
+        # LESSON PLANS
         # ----------------------------------------------------
         for file in group["picture"]:
             upload_jobs.append(
@@ -863,25 +862,25 @@ if submit_button:
                 )
             )
         # ----------------------------------------------------
-        # CLASSROOM VIDEOS
+        # ACTIVITY VIDEOS
         # ----------------------------------------------------
         for file in group["video"]:
             upload_jobs.append(
                 (
                     file,
-                    f"{group_base}/videos",
+                    f"{group_base}/activity_videos",
                     "video",
                     group_number
                 )
             )
         # ----------------------------------------------------
-        # WRITING SAMPLES
+        # STUDENT WORK
         # ----------------------------------------------------
         for file in group["writing"]:
             upload_jobs.append(
                 (
                     file,
-                    f"{group_base}/writing_samples",
+                    f"{group_base}/student_work",
                     "writing",
                     group_number
                 )
@@ -893,7 +892,7 @@ if submit_button:
             upload_jobs.append(
                 (
                     file,
-                    f"{group_base}/phonics_evidences",
+                    f"{group_base}/phonics",
                     "phonics",
                     group_number
                 )
@@ -905,7 +904,7 @@ if submit_button:
             upload_jobs.append(
                 (
                     file,
-                    f"{group_base}/portfolio_evidences",
+                    f"{group_base}/teacher_portfolio",
                     "portfolio",
                     group_number
                 )
@@ -930,12 +929,13 @@ if submit_button:
             )
     if oversized_files:
         st.error(
-            f"❌ One or more files exceed the "
-            f"{MAX_FILE_SIZE_MB} MB individual file limit."
+            f"❌ One or more files exceed "
+            f"the {MAX_FILE_SIZE_MB} MB individual "
+            f"file limit."
         )
         for item in oversized_files:
             st.write(
-                f"• Evidence Group {item['group']}: "
+                f"• Implementation {item['group']}: "
                 f"{item['name']} — "
                 f"{item['size']:.1f} MB"
             )
@@ -945,7 +945,7 @@ if submit_button:
         )
         st.stop()
     # ========================================================
-    # UPLOAD FILES TO R2
+    # UPLOAD TO R2
     # ========================================================
     upload_results = []
     if upload_jobs:
@@ -970,17 +970,17 @@ if submit_button:
         ]
         if failed_uploads:
             st.error(
-                "❌ Some files failed to upload."
+                "❌ Some files could not be uploaded."
             )
             for result in failed_uploads:
                 st.write(
-                    f"• Evidence Group "
+                    f"• Implementation "
                     f"{result['group_number']} — "
                     f"{result['file_name']}: "
                     f"{result['error']}"
                 )
             st.warning(
-                "The database records were NOT created. "
+                "The database records were not created. "
                 "Please correct the failed files and "
                 "submit again."
             )
@@ -990,7 +990,7 @@ if submit_button:
             f"uploaded successfully."
         )
     # ========================================================
-    # CREATE PATH LOOKUP FUNCTION
+    # PATH LOOKUP
     # ========================================================
     def get_paths(
         group_number,
@@ -1019,10 +1019,10 @@ if submit_button:
         else ""
     )
     # ========================================================
-    # CREATE ONE DATABASE ROW PER EVIDENCE GROUP
+    # CREATE ONE DATABASE ROW PER IMPLEMENTATION
     # ========================================================
     database_entries = []
-    for group in evidence_groups:
+    for group in implementation_groups:
         group_number = group["group_number"]
         voice_paths = get_paths(
             group_number,
@@ -1077,7 +1077,7 @@ if submit_button:
             else None
         )
         # ----------------------------------------------------
-        # MAXIMUM 3 VIDEO COLUMNS
+        # EXISTING THREE VIDEO COLUMNS
         # ----------------------------------------------------
         video_1 = (
             video_paths[0]
@@ -1095,7 +1095,12 @@ if submit_button:
             else None
         )
         # ----------------------------------------------------
-        # DATABASE ENTRY
+        # DATABASE ROW
+        #
+        # IMPORTANT:
+        # Only existing teacher_records columns are used.
+        # No Activity_Video_Links column.
+        # No teacher_submissions table.
         # ----------------------------------------------------
         entry_dict = {
             "State_Zone": sub_state,
@@ -1135,41 +1140,44 @@ if submit_button:
             entry_dict
         )
     # ========================================================
-    # SAVE DATABASE RECORDS
+    # SAVE IMPLEMENTATIONS TO SUPABASE
     # ========================================================
     try:
         with st.spinner(
             f"Saving {len(database_entries)} "
-            f"evidence group(s) to database..."
+            f"implementation(s)..."
         ):
             for entry in database_entries:
-                insert_submission_to_db(
+                insert_implementation_to_db(
                     entry
                 )
     except Exception as e:
         st.error(
-            "❌ Files were uploaded successfully, "
-            "but database saving failed."
+            "❌ The files were uploaded successfully, "
+            "but saving the implementation to the "
+            "database failed."
         )
         st.code(
             str(e)
         )
         st.warning(
             "Please contact the administrator before "
-            "submitting the same evidence again."
+            "submitting the same implementation again."
         )
         st.stop()
     # ========================================================
-    # SUCCESS MESSAGE
+    # SUCCESS
     # ========================================================
     st.success(
-        f"🎉 Submission successful! "
-        f"{len(database_entries)} evidence group(s) "
-        f"submitted for {sub_teacher_name}."
+        f"🎉 Implementation submitted successfully!"
     )
     st.info(
-        f"📁 Submission ID: "
-        f"submission_{submission_id}"
+        f"📚 {len(database_entries)} "
+        f"lesson implementation(s) recorded "
+        f"for {sub_teacher_name}."
+    )
+    st.caption(
+        f"Submission ID: submission_{submission_id}"
     )
     if upload_results:
         successful_count = len(
@@ -1181,5 +1189,5 @@ if submit_button:
         )
         st.caption(
             f"☁️ {successful_count} file(s) "
-            f"uploaded successfully to Cloudflare R2."
+            f"uploaded successfully."
         )
