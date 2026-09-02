@@ -1391,7 +1391,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
 
     if include_library:
         sec_num = "3" if include_content else "2"
-        story.append(Paragraph(f"<b>{sec_num}. Library Usage Overview (Digital Resources)</b>", sec_head_style))
+        story.append(Paragraph(f"<b>{sec_num}. Library Usage Overview </b>", sec_head_style))
         lib_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Status"]]
         for t_name in teachers_list:
             t_lib_mins = lib_usage.get(t_name, 0.0)
@@ -1548,7 +1548,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         if include_content:
             sec1_items.append(f"Content Usage (Textbooks/Chapters) Duration: {t_day_content:.1f} Minutes" + (f" ({content_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else "") + f" across {teacher_books['Book'].nunique() if not teacher_books.empty else 0} unique textbook(s)/chapter(s).")
         if include_library:
-            sec1_items.append(f"Library & Digital Resources Duration: {t_day_lib:.1f} Minutes" + (f" ({lib_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""))
+            sec1_items.append(f"Library Usage Duration: {t_day_lib:.1f} Minutes" + (f" ({lib_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""))
 
         sec1_items.append(f"Consultant Assessment: {ld_advice} in lesson preparation, " + (f"{content_advice} in textbook content delivery." if include_content else f"{lib_advice} in library integration."))
 
