@@ -13,7 +13,7 @@ from io import BytesIO
 from sqlalchemy import text
 from supabase import create_client
 from pydantic import BaseModel, Field
-from typing import Dict, Literal
+from typing import List, Literal
 
 # Google GenAI SDK (Requires package 'google-genai')
 from google import genai
@@ -610,8 +610,9 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
         return f"AI Generation Notice: {e}"
 
 
-# --- STRUCTURED OBSERVATION AI HELPER ---
-class RubricItemOutput(BaseModel):
+# --- STRUCTURED OBSERVATION AI HELPER (COMPLIANT WITH DEVELOPER API) ---
+class RubricEvaluationItem(BaseModel):
+    category: str = Field(description="The exact category name from the 12 rubric parameters.")
     grade: Literal["A", "B", "C", "NA"] = Field(description="Assigned grade based on OneLern rubric: A, B, C, or NA.")
     remarks: str = Field(description="Specific, constructive remark explaining this grade.")
 
@@ -619,11 +620,11 @@ class ClassroomObservationAIOutput(BaseModel):
     flow_of_class: str = Field(description="Numbered step-by-step chronology of how the teacher conducted the class.")
     high_points: str = Field(description="Numbered bullet points highlighting strong pedagogical moments.")
     recommendations: str = Field(description="Actionable, prioritized recommendations for the teacher.")
-    rubrics: Dict[str, RubricItemOutput] = Field(description="Evaluations for each of the 12 rubric categories.")
+    rubrics: List[RubricEvaluationItem] = Field(description="Evaluations for each of the 12 rubric categories.")
 
 
 def generate_structured_observation_ai(audio_file_obj=None, text_transcript=""):
-    """Uses Gemini to extract narratives, grades, and remarks into a structured JSON schema."""
+    """Uses Gemini to extract narratives, grades, and remarks into a schema compatible with Developer API."""
     if not ai_client:
         return None, "Gemini API client is not initialized in Streamlit secrets."
 
@@ -643,7 +644,7 @@ def generate_structured_observation_ai(audio_file_obj=None, text_transcript=""):
     1. Chronologically reconstruct 'flow_of_class' as numbered steps.
     2. Extract key positive practices into 'high_points' as numbered points.
     3. Formulate actionable, constructive 'recommendations' as numbered points.
-    4. For all 12 rubric categories, assign the most appropriate grade ('A', 'B', 'C', or 'NA') and supply a 1-sentence specific observation remark explaining the rating. If a category was not observed or mentioned, assign 'B' or 'NA' with a neutral remark. Ensure dictionary keys strictly match the 12 category names.
+    4. For all 12 rubric categories, include an entry in 'rubrics' with the exact category name, assigned grade ('A', 'B', 'C', or 'NA'), and a 1-sentence specific observation remark. If a category was not observed, assign 'B' or 'NA' with a neutral remark.
     """
 
     contents_payload = [prompt]
@@ -3402,12 +3403,15 @@ else:
                             st.session_state["obs_narr_high"] = ai_data.get("high_points", "")
                             st.session_state["obs_narr_recom"] = ai_data.get("recommendations", "")
 
-                            # 2. Update All 12 Rubrics in Session State
-                            rubric_res = ai_data.get("rubrics", {})
-                            for cat_k in OBSERVATION_RUBRIC_CONFIG.keys():
-                                if cat_k in rubric_res:
-                                    st.session_state[f"rubric_opt_{cat_k}"] = rubric_res[cat_k].get("grade", "B")
-                                    st.session_state[f"rubric_rem_{cat_k}"] = rubric_res[cat_k].get("remarks", "")
+                            # 2. Update All 12 Rubrics in Session State from List
+                            rubric_list = ai_data.get("rubrics", [])
+                            for item in rubric_list:
+                                cat_k = item.get("category", "").strip()
+                                for valid_cat in OBSERVATION_RUBRIC_CONFIG.keys():
+                                    if cat_k.lower() == valid_cat.lower():
+                                        st.session_state[f"rubric_opt_{valid_cat}"] = item.get("grade", "B")
+                                        st.session_state[f"rubric_rem_{valid_cat}"] = item.get("remarks", "")
+                                        break
 
                             st.success("✅ Audit form populated successfully! Review the ratings and narratives below before saving.")
                             st.rerun()
