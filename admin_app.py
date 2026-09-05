@@ -606,7 +606,7 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
         except Exception:
             pass
 
-    models_to_try = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash']
+    models_to_try = ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-3.5-flash"]
     for m in models_to_try:
         try:
             response = ai_client.models.generate_content(
@@ -668,7 +668,8 @@ def generate_structured_observation_ai(audio_file_obj=None, text_transcript="", 
         except Exception as e:
             return None, f"Could not read audio bytes: {e}"
 
-    candidate_models = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"]
+    # Updated to strictly use current, non-deprecated models
+    candidate_models = ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-3.5-flash"]
     last_exception = None
 
     for model_name in candidate_models:
