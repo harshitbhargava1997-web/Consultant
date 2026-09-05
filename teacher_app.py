@@ -706,7 +706,7 @@ teacher_names = sorted(
 
 
 # ============================================================
-# BUILD ONE SINGLE TEACHER DROPDOWN
+# BUILD SINGLE TEACHER DROPDOWN
 # ============================================================
 
 teacher_dropdown_options = list(
@@ -714,34 +714,47 @@ teacher_dropdown_options = list(
 )
 
 
-# Add consultant's own name to the same dropdown.
-# No separate section is created.
-if selected_consultant.strip():
+# ------------------------------------------------------------
+# ADD CONSULTANT TO SAME DROPDOWN
+# ------------------------------------------------------------
 
-    consultant_exists = any(
-        str(name).strip().lower()
-        == selected_consultant.strip().lower()
-        for name in teacher_dropdown_options
+consultant_display_name = selected_consultant
+
+consultant_already_exists = any(
+    str(name).strip().lower()
+    == selected_consultant.strip().lower()
+    for name in teacher_dropdown_options
+)
+
+
+if consultant_already_exists:
+
+    teacher_dropdown_options.append(
+        f"{selected_consultant} (Consultant)"
     )
 
-    if consultant_exists:
+else:
 
-        # If the consultant's name already exists as a
-        # teacher, keep both selections distinguishable.
-        teacher_dropdown_options.append(
-            f"{selected_consultant} (Consultant)"
-        )
-
-    else:
-
-        teacher_dropdown_options.append(
-            selected_consultant
-        )
+    teacher_dropdown_options.append(
+        selected_consultant
+    )
 
 
-# Add manual-entry option to the same dropdown.
+# ------------------------------------------------------------
+# ADD OTHER TEACHER OPTION TO SAME DROPDOWN
+# ------------------------------------------------------------
+
 teacher_dropdown_options.append(
     OTHER_TEACHER_OPTION
+)
+
+
+# Remove accidental duplicate dropdown entries
+# while preserving order.
+teacher_dropdown_options = list(
+    dict.fromkeys(
+        teacher_dropdown_options
+    )
 )
 
 
@@ -766,10 +779,6 @@ selected_person_role = "Teacher"
 
 
 if selected_teacher_option == OTHER_TEACHER_OPTION:
-
-    # --------------------------------------------------------
-    # MANUAL TEACHER NAME
-    # --------------------------------------------------------
 
     manually_entered_teacher = st.text_input(
         "Enter Teacher Name",
@@ -806,9 +815,9 @@ else:
 
     selected_teacher = selected_teacher_option
 
-    # If the selected name is exactly the consultant's
-    # name and that name was added to the dropdown,
-    # treat the selection as a consultant observation.
+    # If consultant is displayed directly because the
+    # consultant name was not already present in the
+    # teacher list, selecting it means consultant observation.
     if (
         selected_teacher.strip().lower()
         == selected_consultant.strip().lower()
@@ -1656,551 +1665,4 @@ if submit_button:
 
         # ----------------------------------------------------
         # CLASSROOM MATERIALS
-        # ----------------------------------------------------
-
-        for material in group[
-            "uploaded_materials"
-        ]:
-
-            category = material[
-                "category"
-            ]
-
-            file = material[
-                "file"
-            ]
-
-
-            category_folder_map = {
-
-                "lesson_plan":
-                    "lesson_plans",
-
-                "activity":
-                    "activity_videos",
-
-                "writing":
-                    "student_work",
-
-                "phonics":
-                    "phonics",
-
-                "assessment":
-                    "student_assessments",
-
-                "portfolio":
-                    "teacher_portfolio"
-            }
-
-
-            folder = category_folder_map[
-                category
-            ]
-
-
-            upload_jobs.append(
-                (
-                    file,
-                    f"{group_base}/{folder}",
-                    category,
-                    group_number
-                )
-            )
-
-
-    # ========================================================
-    # CHECK FILE SIZES
-    # ========================================================
-
-    oversized_files = []
-
-
-    for (
-        uploaded_file,
-        folder_name,
-        category,
-        group_number
-    ) in upload_jobs:
-
-        size_mb = get_file_size_mb(
-            uploaded_file
-        )
-
-
-        if size_mb > MAX_FILE_SIZE_MB:
-
-            oversized_files.append(
-                (
-                    uploaded_file.name,
-                    size_mb
-                )
-            )
-
-
-    if oversized_files:
-
-        st.error(
-            "The following files exceed the "
-            f"{MAX_FILE_SIZE_MB} MB limit:"
-        )
-
-
-        for file_name, size_mb in oversized_files:
-
-            st.write(
-                f"• {file_name} — "
-                f"{size_mb:.1f} MB"
-            )
-
-
-        st.stop()
-
-
-    # ========================================================
-    # UPLOAD FILES
-    # ========================================================
-
-    progress = st.progress(
-        0,
-        text="Preparing uploads..."
-    )
-
-
-    if upload_jobs:
-
-        progress.progress(
-            10,
-            text=(
-                f"Uploading {len(upload_jobs)} "
-                "file(s)..."
-            )
-        )
-
-
-        upload_results = upload_all_files_parallel(
-            upload_jobs
-        )
-
-    else:
-
-        upload_results = []
-
-
-    progress.progress(
-        70,
-        text="Checking uploaded files..."
-    )
-
-
-    # ========================================================
-    # UPLOAD FAILURE
-    # ========================================================
-
-    failed_uploads = [
-        result
-        for result in upload_results
-        if not result["success"]
-    ]
-
-
-    if failed_uploads:
-
-        st.error(
-            "Some files could not be uploaded. "
-            "No database records were created."
-        )
-
-
-        for result in failed_uploads:
-
-            st.write(
-                f"• {result['file_name']} — "
-                f"{result['error']}"
-            )
-
-
-        st.stop()
-
-
-    # ========================================================
-    # GET PATHS
-    # ========================================================
-
-    def get_paths(
-        group_number,
-        category
-    ):
-
-        return [
-            result["path"]
-            for result in upload_results
-            if (
-                result["group_number"]
-                == group_number
-                and result["category"]
-                == category
-                and result["success"]
-            )
-        ]
-
-
-    # ========================================================
-    # DATABASE ENTRIES
-    # ========================================================
-
-    database_entries = []
-
-
-    for group in all_groups:
-
-        group_number = group[
-            "group_number"
-        ]
-
-
-        voice_paths = get_paths(
-            group_number,
-            "voice"
-        )
-
-
-        lesson_plan_paths = get_paths(
-            group_number,
-            "lesson_plan"
-        )
-
-
-        activity_paths = get_paths(
-            group_number,
-            "activity"
-        )
-
-
-        writing_paths = get_paths(
-            group_number,
-            "writing"
-        )
-
-
-        assessment_paths = get_paths(
-            group_number,
-            "assessment"
-        )
-
-
-        phonics_paths = get_paths(
-            group_number,
-            "phonics"
-        )
-
-
-        portfolio_paths = get_paths(
-            group_number,
-            "portfolio"
-        )
-
-
-        first_name, last_name = (
-            split_teacher_name(
-                selected_teacher
-            )
-        )
-
-
-        # ====================================================
-        # EXISTING THREE ACTIVITY COLUMNS
-        # ====================================================
-
-        video_1 = (
-            activity_paths[0]
-            if len(activity_paths) > 0
-            else None
-        )
-
-
-        video_2 = (
-            activity_paths[1]
-            if len(activity_paths) > 1
-            else None
-        )
-
-
-        video_3 = (
-            activity_paths[2]
-            if len(activity_paths) > 2
-            else None
-        )
-
-
-        # ====================================================
-        # EXISTING teacher_records SCHEMA
-        # ====================================================
-
-        entry = {
-
-            "State_Zone":
-                selected_state,
-
-            "Uploaded_By":
-                selected_consultant,
-
-            "Institution":
-                selected_school,
-
-            "Center":
-                selected_school,
-
-            "FirstName":
-                first_name,
-
-            "LastName":
-                last_name,
-
-            "FullName":
-                selected_teacher,
-
-            "Role":
-                selected_person_role,
-
-            "Type":
-                "Classroom Reflection",
-
-            "Grade":
-                group["grade"],
-
-            "Subject":
-                group["subject"],
-
-            "Book":
-                group["lesson_name"],
-
-            "StartTime":
-                "09:00",
-
-            "EndTime":
-                "09:45",
-
-            "Duration_Min":
-                0.0,
-
-            # ------------------------------------------------
-            # VOICE
-            # ------------------------------------------------
-
-            "Voice_Note_Link":
-                ",".join(
-                    voice_paths
-                )
-                if voice_paths
-                else None,
-
-            # ------------------------------------------------
-            # LESSON PLAN
-            # ------------------------------------------------
-
-            "Lesson_Plan_Picture":
-                ",".join(
-                    lesson_plan_paths
-                )
-                if lesson_plan_paths
-                else None,
-
-            # ------------------------------------------------
-            # CLASSROOM ACTIVITY
-            # ------------------------------------------------
-
-            "Video_Evidence_1":
-                video_1,
-
-            "Video_Evidence_2":
-                video_2,
-
-            "Video_Evidence_3":
-                video_3,
-
-            # ------------------------------------------------
-            # STUDENT WRITTEN WORK
-            # ------------------------------------------------
-
-            "Writing_Sample_Link":
-                ",".join(
-                    writing_paths
-                )
-                if writing_paths
-                else None,
-
-            # ------------------------------------------------
-            # STUDENT ASSESSMENT
-            # ------------------------------------------------
-
-            "Student_Assessment_Link":
-                ",".join(
-                    assessment_paths
-                )
-                if assessment_paths
-                else None,
-
-            # ------------------------------------------------
-            # PHONICS
-            # ------------------------------------------------
-
-            "Phonics_Evidence_Link":
-                ",".join(
-                    phonics_paths
-                )
-                if phonics_paths
-                else None,
-
-            # ------------------------------------------------
-            # PORTFOLIO
-            # ------------------------------------------------
-
-            "Portfolio_Evidence_Link":
-                ",".join(
-                    portfolio_paths
-                )
-                if portfolio_paths
-                else None,
-
-            "Assessment_Score_Pct":
-                None
-        }
-
-
-        database_entries.append(
-            entry
-        )
-
-
-    # ========================================================
-    # SAVE TO SUPABASE
-    # ========================================================
-
-    progress.progress(
-        85,
-        text="Saving implementation details..."
-    )
-
-
-    inserted_count = 0
-
-    database_errors = []
-
-
-    for entry in database_entries:
-
-        try:
-
-            insert_implementation_to_db(
-                entry
-            )
-
-            inserted_count += 1
-
-        except Exception as e:
-
-            database_errors.append(
-                str(e)
-            )
-
-
-    # ========================================================
-    # DATABASE FAILURE
-    # ========================================================
-
-    if database_errors:
-
-        st.error(
-            "Implementation files were uploaded, "
-            "but some database records could not be saved."
-        )
-
-
-        for error in database_errors:
-
-            st.code(error)
-
-
-        st.stop()
-
-
-    # ========================================================
-    # SUCCESS
-    # ========================================================
-
-    progress.progress(
-        100,
-        text="Submission completed successfully."
-    )
-
-
-    if selected_person_role == "Consultant":
-
-        st.success(
-            f"✅ {inserted_count} classroom observation(s) "
-            "submitted successfully."
-        )
-
-        st.info(
-            "The consultant observation, voice reflection "
-            "and selected classroom implementation materials "
-            "have been saved successfully."
-        )
-
-    else:
-
-        st.success(
-            f"✅ {inserted_count} class implementation(s) "
-            "submitted successfully."
-        )
-
-        st.info(
-            "Your voice reflection and selected "
-            "classroom implementation materials "
-            "have been saved successfully."
-        )
-
-
-    # ========================================================
-    # RESET FORM
-    # ========================================================
-
-    st.session_state.implementation_group_count = 1
-
-
-    keys_to_remove = []
-
-
-    for key in list(
-        st.session_state.keys()
-    ):
-
-        if (
-            key.startswith(
-                "implementation_group_"
-            )
-            or key.startswith("grade_")
-            or key.startswith("subject_")
-            or key.startswith("lesson_name_")
-            or key.startswith("record_voice_")
-            or key.startswith("voice_upload_")
-            or key.startswith("material_area_")
-            or key.startswith("lesson_plan_files_")
-            or key.startswith("classroom_activity_files_")
-            or key.startswith("student_written_work_files_")
-            or key.startswith("phonics_files_")
-            or key.startswith("student_assessment_files_")
-            or key.startswith("teacher_portfolio_files_")
-        ):
-
-            keys_to_remove.append(
-                key
-            )
-
-
-    for key in keys_to_remove:
-
-        del st.session_state[key]
-
-
-    st.rerun()
+        #
