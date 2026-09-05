@@ -24,7 +24,7 @@ st.set_page_config(
 # ============================================================
 
 MAX_FILE_SIZE_MB = 50
-MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
 
 MAX_PARALLEL_UPLOADS = 5
 
@@ -76,6 +76,9 @@ IMPLEMENTATION_MATERIAL_OPTIONS = [
 ]
 
 
+OTHER_TEACHER_OPTION = "Other Teacher / Not Listed"
+
+
 # ============================================================
 # SESSION STATE
 # ============================================================
@@ -90,6 +93,7 @@ if "implementation_group_count" not in st.session_state:
 
 @st.cache_resource
 def get_supabase_client():
+
     supabase_url = st.secrets["supabase"]["url"]
     supabase_key = st.secrets["supabase"]["key"]
 
@@ -140,13 +144,10 @@ R2_TRANSFER_CONFIG = TransferConfig(
 
 
 # ============================================================
-# HELPERS
+# HELPER FUNCTIONS
 # ============================================================
 
 def sanitize_path_component(value):
-    """
-    Makes school / teacher / filename safe for R2 object paths.
-    """
 
     if value is None:
         return "unknown"
@@ -175,6 +176,7 @@ def get_file_size_mb(uploaded_file):
 
     try:
         return uploaded_file.size / (1024 * 1024)
+
     except Exception:
         return 0
 
@@ -190,15 +192,6 @@ def split_teacher_name(full_name):
         return parts[0], ""
 
     return parts[0], " ".join(parts[1:])
-
-
-def safe_widget_key(prefix, group_number, unique_id=""):
-
-    return (
-        f"{prefix}_"
-        f"{group_number}_"
-        f"{unique_id}"
-    )
 
 
 # ============================================================
@@ -227,7 +220,10 @@ def fetch_master_db_from_supabase():
             supabase
             .table(TEACHER_RECORDS_TABLE)
             .select(select_columns)
-            .range(start, start + page_size - 1)
+            .range(
+                start,
+                start + page_size - 1
+            )
             .execute()
         )
 
@@ -244,6 +240,7 @@ def fetch_master_db_from_supabase():
         start += page_size
 
     if not rows:
+
         return pd.DataFrame(
             columns=[
                 "State_Zone",
@@ -263,7 +260,9 @@ def fetch_master_db_from_supabase():
         "FullName",
         "Role"
     ]:
+
         if column in df.columns:
+
             df[column] = (
                 df[column]
                 .fillna("")
@@ -288,6 +287,7 @@ def upload_file_to_r2(
 ):
 
     if uploaded_file is None:
+
         return {
             "success": False,
             "file_name": "",
@@ -299,7 +299,9 @@ def upload_file_to_r2(
 
     try:
 
-        file_size = get_file_size_mb(uploaded_file)
+        file_size = get_file_size_mb(
+            uploaded_file
+        )
 
         if file_size > MAX_FILE_SIZE_MB:
 
@@ -337,7 +339,11 @@ def upload_file_to_r2(
         uploaded_file.seek(0)
 
         content_type = (
-            getattr(uploaded_file, "type", None)
+            getattr(
+                uploaded_file,
+                "type",
+                None
+            )
             or "application/octet-stream"
         )
 
@@ -377,7 +383,7 @@ def upload_file_to_r2(
 
 
 # ============================================================
-# PARALLEL UPLOADS
+# PARALLEL UPLOAD
 # ============================================================
 
 def upload_all_files_parallel(upload_jobs):
@@ -410,6 +416,7 @@ def upload_all_files_parallel(upload_jobs):
         for future in concurrent.futures.as_completed(
             futures
         ):
+
             results.append(
                 future.result()
             )
@@ -434,7 +441,85 @@ def insert_implementation_to_db(entry):
 
 
 # ============================================================
-# TOP HEADER
+# CLASS IMPLEMENTATION STATE
+# ============================================================
+
+def initialize_group_state(
+    group_number
+):
+
+    state_key = (
+        f"implementation_group_{group_number}"
+    )
+
+    if state_key not in st.session_state:
+
+        st.session_state[state_key] = {
+
+            "areas": [
+                {
+                    "id": uuid.uuid4().hex[:8],
+                    "type": None
+                }
+            ]
+        }
+
+
+def add_material_area(
+    group_number
+):
+
+    initialize_group_state(
+        group_number
+    )
+
+    st.session_state[
+        f"implementation_group_{group_number}"
+    ]["areas"].append(
+        {
+            "id": uuid.uuid4().hex[:8],
+            "type": None
+        }
+    )
+
+
+def remove_material_area(
+    group_number,
+    area_id
+):
+
+    initialize_group_state(
+        group_number
+    )
+
+    areas = st.session_state[
+        f"implementation_group_{group_number}"
+    ]["areas"]
+
+    if len(areas) <= 1:
+        return
+
+    st.session_state[
+        f"implementation_group_{group_number}"
+    ]["areas"] = [
+        area
+        for area in areas
+        if area["id"] != area_id
+    ]
+
+
+def add_another_class():
+
+    if (
+        st.session_state.implementation_group_count
+        < MAX_IMPLEMENTATION_GROUPS
+    ):
+
+        st.session_state.implementation_group_count += 1
+
+
+# ============================================================
+# INITIAL HEADER
 # ============================================================
 
 st.title(
@@ -446,27 +531,6 @@ st.markdown(
 Use this space to share your daily lesson implementation
 through a short voice reflection and relevant classroom
 implementation materials.
-"""
-)
-
-
-st.info(
-    """
-🎙️ **How to share your reflection**
-
-Record a short voice note before or after your lesson.
-Use the voice note to briefly think through:
-
-• **What** — Grade, Subject, Lesson Plan No. & Topic/Chapter  
-• **Why** — Skill / Learning Objective  
-• **Teacher Activity** — How will I teach and which resources will I use?  
-• **Student Activity** — What will students do or participate in?  
-• **Practice & Apply** — Course Book / Workbook practice and application  
-• **Review** — How will I check students' learning?
-
-The purpose is not only to tell what you are going to do,
-but also to think about why you are doing it and how it will
-support student learning.
 """
 )
 
@@ -500,16 +564,25 @@ if master_df.empty:
 
 
 # ============================================================
-# SCHOOL / TEACHER SELECTION
+# TEACHER DETAILS
 # ============================================================
 
-st.subheader("👤 Teacher Details")
+st.subheader(
+    "👤 Teacher Details"
+)
 
+
+# ============================================================
+# STATE / ZONE
+# ============================================================
 
 state_options = sorted(
     [
-        x for x in
-        master_df["State_Zone"].dropna().unique()
+        x
+        for x in
+        master_df["State_Zone"]
+        .dropna()
+        .unique()
         if str(x).strip()
     ]
 )
@@ -517,25 +590,34 @@ state_options = sorted(
 
 selected_state = st.selectbox(
     "State / Zone",
-    options=["Select State / Zone"] + state_options,
+    options=[
+        "Select State / Zone"
+    ] + state_options,
     key="selected_state"
 )
 
 
 if selected_state == "Select State / Zone":
-
     st.stop()
 
 
 state_df = master_df[
-    master_df["State_Zone"] == selected_state
+    master_df["State_Zone"]
+    == selected_state
 ].copy()
 
 
+# ============================================================
+# CONSULTANT
+# ============================================================
+
 consultant_options = sorted(
     [
-        x for x in
-        state_df["Uploaded_By"].dropna().unique()
+        x
+        for x in
+        state_df["Uploaded_By"]
+        .dropna()
+        .unique()
         if str(x).strip()
     ]
 )
@@ -543,25 +625,34 @@ consultant_options = sorted(
 
 selected_consultant = st.selectbox(
     "Consultant",
-    options=["Select Consultant"] + consultant_options,
+    options=[
+        "Select Consultant"
+    ] + consultant_options,
     key="selected_consultant"
 )
 
 
 if selected_consultant == "Select Consultant":
-
     st.stop()
 
 
 consultant_df = state_df[
-    state_df["Uploaded_By"] == selected_consultant
+    state_df["Uploaded_By"]
+    == selected_consultant
 ].copy()
 
 
+# ============================================================
+# SCHOOL
+# ============================================================
+
 school_options = sorted(
     [
-        x for x in
-        consultant_df["Institution"].dropna().unique()
+        x
+        for x in
+        consultant_df["Institution"]
+        .dropna()
+        .unique()
         if str(x).strip()
     ]
 )
@@ -569,48 +660,170 @@ school_options = sorted(
 
 selected_school = st.selectbox(
     "School",
-    options=["Select School"] + school_options,
+    options=[
+        "Select School"
+    ] + school_options,
     key="selected_school"
 )
 
 
 if selected_school == "Select School":
-
     st.stop()
 
 
 school_df = consultant_df[
-    consultant_df["Institution"] == selected_school
+    consultant_df["Institution"]
+    == selected_school
 ].copy()
 
+
+# ============================================================
+# TEACHER LIST
+# ============================================================
 
 teacher_df = school_df[
     school_df["Role"]
     .str.lower()
-    .isin(["teacher", "teachers"])
+    .isin(
+        [
+            "teacher",
+            "teachers"
+        ]
+    )
 ].copy()
 
 
-teacher_options = sorted(
+teacher_names = sorted(
     [
-        x for x in
-        teacher_df["FullName"].dropna().unique()
+        x
+        for x in
+        teacher_df["FullName"]
+        .dropna()
+        .unique()
         if str(x).strip()
     ]
 )
 
 
-selected_teacher = st.selectbox(
-    "Teacher",
-    options=["Select Teacher"] + teacher_options,
-    key="selected_teacher"
+# ============================================================
+# BUILD ONE SINGLE TEACHER DROPDOWN
+# ============================================================
+
+teacher_dropdown_options = list(
+    teacher_names
 )
 
 
-if selected_teacher == "Select Teacher":
+# Add consultant's own name to the same dropdown.
+# No separate section is created.
+if selected_consultant.strip():
 
+    consultant_exists = any(
+        str(name).strip().lower()
+        == selected_consultant.strip().lower()
+        for name in teacher_dropdown_options
+    )
+
+    if consultant_exists:
+
+        # If the consultant's name already exists as a
+        # teacher, keep both selections distinguishable.
+        teacher_dropdown_options.append(
+            f"{selected_consultant} (Consultant)"
+        )
+
+    else:
+
+        teacher_dropdown_options.append(
+            selected_consultant
+        )
+
+
+# Add manual-entry option to the same dropdown.
+teacher_dropdown_options.append(
+    OTHER_TEACHER_OPTION
+)
+
+
+selected_teacher_option = st.selectbox(
+    "Teacher",
+    options=[
+        "Select Teacher"
+    ] + teacher_dropdown_options,
+    key="selected_teacher_option"
+)
+
+
+if selected_teacher_option == "Select Teacher":
     st.stop()
 
+
+# ============================================================
+# DETERMINE SELECTED PERSON
+# ============================================================
+
+selected_person_role = "Teacher"
+
+
+if selected_teacher_option == OTHER_TEACHER_OPTION:
+
+    # --------------------------------------------------------
+    # MANUAL TEACHER NAME
+    # --------------------------------------------------------
+
+    manually_entered_teacher = st.text_input(
+        "Enter Teacher Name",
+        placeholder="Enter the teacher's full name",
+        key="manually_entered_teacher"
+    ).strip()
+
+
+    if not manually_entered_teacher:
+
+        st.info(
+            "Please enter the teacher's name to continue."
+        )
+
+        st.stop()
+
+
+    selected_teacher = manually_entered_teacher
+
+    selected_person_role = "Teacher"
+
+
+elif (
+    selected_teacher_option
+    == f"{selected_consultant} (Consultant)"
+):
+
+    selected_teacher = selected_consultant
+
+    selected_person_role = "Consultant"
+
+
+else:
+
+    selected_teacher = selected_teacher_option
+
+    # If the selected name is exactly the consultant's
+    # name and that name was added to the dropdown,
+    # treat the selection as a consultant observation.
+    if (
+        selected_teacher.strip().lower()
+        == selected_consultant.strip().lower()
+    ):
+
+        selected_person_role = "Consultant"
+
+    else:
+
+        selected_person_role = "Teacher"
+
+
+# ============================================================
+# DATE
+# ============================================================
 
 selected_date = st.date_input(
     "Implementation Date",
@@ -619,68 +832,16 @@ selected_date = st.date_input(
 
 
 # ============================================================
-# IMPLEMENTATION GROUP STATE
+# RENDER ONE CLASS IMPLEMENTATION
 # ============================================================
 
-def initialize_group_state(group_number):
-
-    state_key = f"implementation_group_{group_number}"
-
-    if state_key not in st.session_state:
-
-        st.session_state[state_key] = {
-            "areas": [
-                {
-                    "id": uuid.uuid4().hex[:8],
-                    "type": None
-                }
-            ]
-        }
-
-
-def add_material_area(group_number):
-
-    initialize_group_state(group_number)
-
-    st.session_state[
-        f"implementation_group_{group_number}"
-    ]["areas"].append(
-        {
-            "id": uuid.uuid4().hex[:8],
-            "type": None
-        }
-    )
-
-
-def remove_material_area(
-    group_number,
-    area_id
+def render_implementation_group(
+    group_number
 ):
 
-    initialize_group_state(group_number)
-
-    areas = st.session_state[
-        f"implementation_group_{group_number}"
-    ]["areas"]
-
-    if len(areas) <= 1:
-        return
-
-    st.session_state[
-        f"implementation_group_{group_number}"
-    ]["areas"] = [
-        area for area in areas
-        if area["id"] != area_id
-    ]
-
-
-# ============================================================
-# RENDER IMPLEMENTATION GROUP
-# ============================================================
-
-def render_implementation_group(group_number):
-
-    initialize_group_state(group_number)
+    initialize_group_state(
+        group_number
+    )
 
     group_state_key = (
         f"implementation_group_{group_number}"
@@ -690,18 +851,24 @@ def render_implementation_group(group_number):
         group_state_key
     ]
 
+
+    # ========================================================
+    # CLASS IMPLEMENTATION HEADING
+    # ========================================================
+
     st.markdown("---")
 
     st.subheader(
-        f"Class / Implementation {group_number}"
+        f"Class Implementation {group_number}"
     )
 
 
-    # --------------------------------------------------------
-    # BASIC LESSON INFORMATION
-    # --------------------------------------------------------
+    # ========================================================
+    # GRADE + SUBJECT
+    # ========================================================
 
     col1, col2 = st.columns(2)
+
 
     with col1:
 
@@ -710,6 +877,7 @@ def render_implementation_group(group_number):
             GRADE_OPTIONS,
             key=f"grade_{group_number}"
         )
+
 
     with col2:
 
@@ -720,6 +888,10 @@ def render_implementation_group(group_number):
         )
 
 
+    # ========================================================
+    # LESSON / TOPIC
+    # ========================================================
+
     lesson_name = st.text_input(
         "Lesson Plan No. & Topic / Chapter",
         placeholder=(
@@ -729,13 +901,75 @@ def render_implementation_group(group_number):
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # VOICE REFLECTION
-    # --------------------------------------------------------
+    # ========================================================
 
     st.markdown(
         "### 🎙️ Voice Reflection"
     )
+
+
+    with st.expander(
+        "📌 Before You Record Your Reflection"
+    ):
+
+        st.markdown(
+            """
+            **What**
+
+            Grade, Subject, Lesson Plan No. &
+            Topic/Chapter
+
+
+            **Why — Skill / Learning Objective**
+
+            What do I want students to learn or be able
+            to do through this lesson?
+
+            Think about Bloom's Taxonomy:
+
+            Remembering • Understanding • Applying •
+            Analysing • Evaluating • Creating
+
+
+            **Teacher Activity — How**
+
+            How will I teach?
+
+            Which digital or physical resources will I use?
+
+
+            **Student Activity**
+
+            What will students do or participate in?
+
+
+            **Practice & Apply**
+
+            What will students do in the Course Book /
+            Workbook?
+
+            Mention the specific topic, section or page
+            number where relevant.
+
+            Include any classwork or homework activity.
+
+
+            **Review**
+
+            How will I check students' learning?
+
+
+            **Remember**
+
+            The purpose is not just to tell what we are
+            going to do, but to think about why we are
+            doing it and how it will support student
+            learning.
+            """
+        )
+
 
     st.caption(
         "Record your reflection or upload an existing voice note."
@@ -764,13 +998,14 @@ def render_implementation_group(group_number):
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # CLASSROOM IMPLEMENTATION MATERIALS
-    # --------------------------------------------------------
+    # ========================================================
 
     st.markdown(
         "### 📚 Classroom Implementation & Learning Reflections"
     )
+
 
     st.caption(
         "Share materials such as lesson plans, classroom "
@@ -784,6 +1019,7 @@ def render_implementation_group(group_number):
         "#### Classroom Implementation Materials"
     )
 
+
     st.caption(
         "You can upload the relevant material completed "
         "for your classroom implementation."
@@ -793,9 +1029,9 @@ def render_implementation_group(group_number):
     uploaded_materials = []
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # MATERIAL AREAS
-    # --------------------------------------------------------
+    # ========================================================
 
     for area_index, area in enumerate(
         group_state["areas"]
@@ -803,21 +1039,29 @@ def render_implementation_group(group_number):
 
         area_id = area["id"]
 
+
         selected_types = [
             a["type"]
             for a in group_state["areas"]
-            if a["id"] != area_id
-            and a["type"] is not None
+            if (
+                a["id"] != area_id
+                and a["type"] is not None
+            )
         ]
+
 
         available_options = [
             option
-            for option in IMPLEMENTATION_MATERIAL_OPTIONS
+            for option in
+            IMPLEMENTATION_MATERIAL_OPTIONS
             if option not in selected_types
         ]
 
 
-        current_type = area.get("type")
+        current_type = area.get(
+            "type"
+        )
+
 
         select_options = [
             "Select an area"
@@ -828,12 +1072,14 @@ def render_implementation_group(group_number):
             current_type is not None
             and current_type not in select_options
         ):
+
             select_options.append(
                 current_type
             )
 
 
         current_index = 0
+
 
         if current_type in select_options:
 
@@ -866,9 +1112,9 @@ def render_implementation_group(group_number):
         area["type"] = selected_area
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # LESSON PLAN
-        # ----------------------------------------------------
+        # ====================================================
 
         if selected_area == "Lesson Plan":
 
@@ -889,6 +1135,7 @@ def render_implementation_group(group_number):
                 )
             )
 
+
             for file in files or []:
 
                 uploaded_materials.append(
@@ -899,9 +1146,9 @@ def render_implementation_group(group_number):
                 )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # CLASSROOM ACTIVITY
-        # ----------------------------------------------------
+        # ====================================================
 
         elif selected_area == (
             "Classroom Activity Conducted"
@@ -927,6 +1174,7 @@ def render_implementation_group(group_number):
                 )
             )
 
+
             for file in files or []:
 
                 uploaded_materials.append(
@@ -937,9 +1185,9 @@ def render_implementation_group(group_number):
                 )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # STUDENT WRITTEN WORK
-        # ----------------------------------------------------
+        # ====================================================
 
         elif selected_area == (
             "Student Written Work / Writing Practice"
@@ -962,6 +1210,7 @@ def render_implementation_group(group_number):
                 )
             )
 
+
             for file in files or []:
 
                 uploaded_materials.append(
@@ -972,9 +1221,9 @@ def render_implementation_group(group_number):
                 )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # PHONICS / PHONETICS
-        # ----------------------------------------------------
+        # ====================================================
 
         elif selected_area == (
             "Phonics / Phonetics Implementation"
@@ -1001,6 +1250,7 @@ def render_implementation_group(group_number):
                 )
             )
 
+
             for file in files or []:
 
                 uploaded_materials.append(
@@ -1011,9 +1261,9 @@ def render_implementation_group(group_number):
                 )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # STUDENT ASSESSMENT
-        # ----------------------------------------------------
+        # ====================================================
 
         elif selected_area == (
             "Student Assessment"
@@ -1036,6 +1286,7 @@ def render_implementation_group(group_number):
                 )
             )
 
+
             for file in files or []:
 
                 uploaded_materials.append(
@@ -1046,9 +1297,9 @@ def render_implementation_group(group_number):
                 )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # TEACHER PORTFOLIO
-        # ----------------------------------------------------
+        # ====================================================
 
         elif selected_area == (
             "Teacher Portfolio"
@@ -1074,6 +1325,7 @@ def render_implementation_group(group_number):
                 )
             )
 
+
             for file in files or []:
 
                 uploaded_materials.append(
@@ -1084,9 +1336,9 @@ def render_implementation_group(group_number):
                 )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # REMOVE AREA
-        # ----------------------------------------------------
+        # ====================================================
 
         if len(group_state["areas"]) > 1:
 
@@ -1107,12 +1359,12 @@ def render_implementation_group(group_number):
                 st.rerun()
 
 
-    # --------------------------------------------------------
-    # ADD ANOTHER MATERIAL AREA
-    # --------------------------------------------------------
+    # ========================================================
+    # ADD ANOTHER REFLECTION / EVIDENCE
+    # ========================================================
 
     st.button(
-        "＋ Add Another Area",
+        "＋ Add Another Reflection / Evidence",
         key=f"add_area_{group_number}",
         on_click=add_material_area,
         args=(group_number,)
@@ -1120,18 +1372,32 @@ def render_implementation_group(group_number):
 
 
     return {
-        "group_number": group_number,
-        "grade": grade,
-        "subject": subject,
-        "lesson_name": lesson_name,
-        "recorded_voice": recorded_voice,
-        "uploaded_voice": uploaded_voice or [],
-        "uploaded_materials": uploaded_materials
+
+        "group_number":
+            group_number,
+
+        "grade":
+            grade,
+
+        "subject":
+            subject,
+
+        "lesson_name":
+            lesson_name,
+
+        "recorded_voice":
+            recorded_voice,
+
+        "uploaded_voice":
+            uploaded_voice or [],
+
+        "uploaded_materials":
+            uploaded_materials
     }
 
 
 # ============================================================
-# IMPLEMENTATION GROUPS
+# DAILY CLASSROOM IMPLEMENTATIONS
 # ============================================================
 
 st.markdown("---")
@@ -1167,21 +1433,19 @@ if (
     < MAX_IMPLEMENTATION_GROUPS
 ):
 
-    if st.button(
-        "＋ Add Another Class / Implementation",
-        key="add_another_class"
-    ):
+    st.markdown("---")
 
-        st.session_state.implementation_group_count += 1
-
-        st.rerun()
-
+    st.button(
+        "＋ Add Another Class",
+        key="add_another_class",
+        on_click=add_another_class
+    )
 
 else:
 
     st.caption(
         f"Maximum of {MAX_IMPLEMENTATION_GROUPS} "
-        "classes / implementations can be added at one time."
+        "classes can be added at one time."
     )
 
 
@@ -1214,35 +1478,65 @@ submit_button = st.button(
 
 if submit_button:
 
-    # --------------------------------------------------------
+    # ========================================================
     # BASIC VALIDATION
-    # --------------------------------------------------------
+    # ========================================================
 
-    if not selected_state:
-        st.error("Please select State / Zone.")
+    if selected_state == "Select State / Zone":
+
+        st.error(
+            "Please select State / Zone."
+        )
+
         st.stop()
 
 
-    if not selected_consultant:
-        st.error("Please select Consultant.")
+    if selected_consultant == "Select Consultant":
+
+        st.error(
+            "Please select Consultant."
+        )
+
         st.stop()
 
 
-    if not selected_school:
-        st.error("Please select School.")
+    if selected_school == "Select School":
+
+        st.error(
+            "Please select School."
+        )
+
         st.stop()
 
 
-    if not selected_teacher:
-        st.error("Please select Teacher.")
+    if selected_teacher_option == "Select Teacher":
+
+        st.error(
+            "Please select Teacher."
+        )
+
         st.stop()
 
 
-    # --------------------------------------------------------
+    if (
+        selected_teacher_option
+        == OTHER_TEACHER_OPTION
+        and not selected_teacher.strip()
+    ):
+
+        st.error(
+            "Please enter the teacher's name."
+        )
+
+        st.stop()
+
+
+    # ========================================================
     # VALIDATE LESSON NAMES
-    # --------------------------------------------------------
+    # ========================================================
 
     invalid_groups = []
+
 
     for group in all_groups:
 
@@ -1259,16 +1553,16 @@ if submit_button:
 
         st.error(
             "Please enter Lesson Plan No. & "
-            "Topic / Chapter for implementation "
-            f"group(s): {', '.join(map(str, invalid_groups))}"
+            "Topic / Chapter for Class Implementation "
+            f"{', '.join(map(str, invalid_groups))}."
         )
 
         st.stop()
 
 
-    # --------------------------------------------------------
-    # CREATE SUBMISSION ID
-    # --------------------------------------------------------
+    # ========================================================
+    # SUBMISSION ID
+    # ========================================================
 
     submission_id = (
         uuid.uuid4()
@@ -1280,9 +1574,11 @@ if submit_button:
         selected_school
     )
 
+
     teacher_path = sanitize_path_component(
         selected_teacher
     )
+
 
     date_string = selected_date.strftime(
         "%Y-%m-%d"
@@ -1299,16 +1595,19 @@ if submit_button:
     )
 
 
-    # --------------------------------------------------------
-    # COLLECT ALL UPLOAD JOBS
-    # --------------------------------------------------------
+    # ========================================================
+    # COLLECT UPLOAD JOBS
+    # ========================================================
 
     upload_jobs = []
 
 
     for group in all_groups:
 
-        group_number = group["group_number"]
+        group_number = group[
+            "group_number"
+        ]
+
 
         group_base = (
             f"{submission_base}/"
@@ -1317,12 +1616,13 @@ if submit_button:
 
 
         # ----------------------------------------------------
-        # RECORDED VOICE NOTE
+        # RECORDED VOICE
         # ----------------------------------------------------
 
         recorded_voice = group[
             "recorded_voice"
         ]
+
 
         if recorded_voice is not None:
 
@@ -1337,7 +1637,7 @@ if submit_button:
 
 
         # ----------------------------------------------------
-        # UPLOADED VOICE NOTES
+        # UPLOADED VOICE
         # ----------------------------------------------------
 
         for voice_file in group[
@@ -1408,9 +1708,9 @@ if submit_button:
             )
 
 
-    # --------------------------------------------------------
-    # CHECK FILE SIZES BEFORE UPLOAD
-    # --------------------------------------------------------
+    # ========================================================
+    # CHECK FILE SIZES
+    # ========================================================
 
     oversized_files = []
 
@@ -1425,6 +1725,7 @@ if submit_button:
         size_mb = get_file_size_mb(
             uploaded_file
         )
+
 
         if size_mb > MAX_FILE_SIZE_MB:
 
@@ -1443,6 +1744,7 @@ if submit_button:
             f"{MAX_FILE_SIZE_MB} MB limit:"
         )
 
+
         for file_name, size_mb in oversized_files:
 
             st.write(
@@ -1450,12 +1752,13 @@ if submit_button:
                 f"{size_mb:.1f} MB"
             )
 
+
         st.stop()
 
 
-    # --------------------------------------------------------
-    # UPLOAD
-    # --------------------------------------------------------
+    # ========================================================
+    # UPLOAD FILES
+    # ========================================================
 
     progress = st.progress(
         0,
@@ -1489,9 +1792,9 @@ if submit_button:
     )
 
 
-    # --------------------------------------------------------
-    # UPLOAD FAILURE CHECK
-    # --------------------------------------------------------
+    # ========================================================
+    # UPLOAD FAILURE
+    # ========================================================
 
     failed_uploads = [
         result
@@ -1515,12 +1818,13 @@ if submit_button:
                 f"{result['error']}"
             )
 
+
         st.stop()
 
 
-    # --------------------------------------------------------
-    # GROUP UPLOAD PATHS
-    # --------------------------------------------------------
+    # ========================================================
+    # GET PATHS
+    # ========================================================
 
     def get_paths(
         group_number,
@@ -1540,9 +1844,9 @@ if submit_button:
         ]
 
 
-    # --------------------------------------------------------
-    # CREATE DATABASE ROWS
-    # --------------------------------------------------------
+    # ========================================================
+    # DATABASE ENTRIES
+    # ========================================================
 
     database_entries = []
 
@@ -1603,10 +1907,9 @@ if submit_button:
         )
 
 
-        # ----------------------------------------------------
-        # ACTIVITY PATHS
-        # Existing backend has three separate columns.
-        # ----------------------------------------------------
+        # ====================================================
+        # EXISTING THREE ACTIVITY COLUMNS
+        # ====================================================
 
         video_1 = (
             activity_paths[0]
@@ -1614,11 +1917,13 @@ if submit_button:
             else None
         )
 
+
         video_2 = (
             activity_paths[1]
             if len(activity_paths) > 1
             else None
         )
+
 
         video_3 = (
             activity_paths[2]
@@ -1627,9 +1932,9 @@ if submit_button:
         )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # EXISTING teacher_records SCHEMA
-        # ----------------------------------------------------
+        # ====================================================
 
         entry = {
 
@@ -1655,7 +1960,7 @@ if submit_button:
                 selected_teacher,
 
             "Role":
-                "Teacher",
+                selected_person_role,
 
             "Type":
                 "Classroom Reflection",
@@ -1678,6 +1983,10 @@ if submit_button:
             "Duration_Min":
                 0.0,
 
+            # ------------------------------------------------
+            # VOICE
+            # ------------------------------------------------
+
             "Voice_Note_Link":
                 ",".join(
                     voice_paths
@@ -1685,12 +1994,20 @@ if submit_button:
                 if voice_paths
                 else None,
 
+            # ------------------------------------------------
+            # LESSON PLAN
+            # ------------------------------------------------
+
             "Lesson_Plan_Picture":
                 ",".join(
                     lesson_plan_paths
                 )
                 if lesson_plan_paths
                 else None,
+
+            # ------------------------------------------------
+            # CLASSROOM ACTIVITY
+            # ------------------------------------------------
 
             "Video_Evidence_1":
                 video_1,
@@ -1701,12 +2018,20 @@ if submit_button:
             "Video_Evidence_3":
                 video_3,
 
+            # ------------------------------------------------
+            # STUDENT WRITTEN WORK
+            # ------------------------------------------------
+
             "Writing_Sample_Link":
                 ",".join(
                     writing_paths
                 )
                 if writing_paths
                 else None,
+
+            # ------------------------------------------------
+            # STUDENT ASSESSMENT
+            # ------------------------------------------------
 
             "Student_Assessment_Link":
                 ",".join(
@@ -1715,12 +2040,20 @@ if submit_button:
                 if assessment_paths
                 else None,
 
+            # ------------------------------------------------
+            # PHONICS
+            # ------------------------------------------------
+
             "Phonics_Evidence_Link":
                 ",".join(
                     phonics_paths
                 )
                 if phonics_paths
                 else None,
+
+            # ------------------------------------------------
+            # PORTFOLIO
+            # ------------------------------------------------
 
             "Portfolio_Evidence_Link":
                 ",".join(
@@ -1739,9 +2072,9 @@ if submit_button:
         )
 
 
-    # --------------------------------------------------------
-    # INSERT INTO EXISTING MASTER TABLE
-    # --------------------------------------------------------
+    # ========================================================
+    # SAVE TO SUPABASE
+    # ========================================================
 
     progress.progress(
         85,
@@ -1771,9 +2104,9 @@ if submit_button:
             )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # DATABASE FAILURE
-    # --------------------------------------------------------
+    # ========================================================
 
     if database_errors:
 
@@ -1791,9 +2124,9 @@ if submit_button:
         st.stop()
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # SUCCESS
-    # --------------------------------------------------------
+    # ========================================================
 
     progress.progress(
         100,
@@ -1801,32 +2134,51 @@ if submit_button:
     )
 
 
-    st.success(
-        f"✅ {inserted_count} implementation(s) "
-        "submitted successfully."
-    )
+    if selected_person_role == "Consultant":
+
+        st.success(
+            f"✅ {inserted_count} classroom observation(s) "
+            "submitted successfully."
+        )
+
+        st.info(
+            "The consultant observation, voice reflection "
+            "and selected classroom implementation materials "
+            "have been saved successfully."
+        )
+
+    else:
+
+        st.success(
+            f"✅ {inserted_count} class implementation(s) "
+            "submitted successfully."
+        )
+
+        st.info(
+            "Your voice reflection and selected "
+            "classroom implementation materials "
+            "have been saved successfully."
+        )
 
 
-    st.info(
-        "Your voice reflection and selected "
-        "classroom implementation materials "
-        "have been saved successfully."
-    )
-
-
-    # --------------------------------------------------------
+    # ========================================================
     # RESET FORM
-    # --------------------------------------------------------
+    # ========================================================
 
     st.session_state.implementation_group_count = 1
 
 
     keys_to_remove = []
 
-    for key in st.session_state.keys():
+
+    for key in list(
+        st.session_state.keys()
+    ):
 
         if (
-            key.startswith("implementation_group_")
+            key.startswith(
+                "implementation_group_"
+            )
             or key.startswith("grade_")
             or key.startswith("subject_")
             or key.startswith("lesson_name_")
