@@ -602,7 +602,7 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
             )
 
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=contents_payload
         )
         return response.text
@@ -659,7 +659,7 @@ def generate_structured_observation_ai(audio_file_obj=None, text_transcript=""):
 
     try:
         response = ai_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             contents=contents_payload,
             config={
                 "response_mime_type": "application/json",
