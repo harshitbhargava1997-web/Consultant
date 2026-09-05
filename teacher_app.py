@@ -531,9 +531,9 @@ st.title(
 
 st.markdown(
     """
-Use this space to share your daily lesson implementation
+Use this space to share your next day lesson implementation
 through a short voice reflection and relevant classroom
-implementation materials.
+implementation activity snd observation of todays class.
 """
 )
 
