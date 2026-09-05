@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 import uuid
-import concurrent.futures
-from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from supabase import create_client
 import boto3
@@ -15,9 +14,10 @@ from boto3.s3.transfer import TransferConfig
 # ============================================================
 
 st.set_page_config(
-    page_title="Teacher Daily Implementation Portal",
+    page_title="Teacher Daily Implementation Reflection Portal",
     page_icon="📝",
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
 
@@ -26,7 +26,7 @@ st.set_page_config(
 # ============================================================
 
 MAX_FILE_SIZE_MB = 50
-MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
 MAX_PARALLEL_UPLOADS = 5
 
@@ -38,66 +38,6 @@ MAX_IMPLEMENTATION_GROUPS = 10
 TEACHER_RECORDS_TABLE = "teacher_records"
 
 
-# ============================================================
-# SUPABASE CONFIG
-# ============================================================
-
-SUPABASE_URL = st.secrets["supabase"]["url"]
-SUPABASE_KEY = st.secrets["supabase"]["key"]
-
-supabase = create_client(
-    SUPABASE_URL,
-    SUPABASE_KEY
-)
-
-
-# ============================================================
-# CLOUDFLARE R2 CONFIG
-# ============================================================
-
-r2_secrets = st.secrets["r2"]
-
-R2_ACCOUNT_ID = r2_secrets["R2_ACCOUNT_ID"]
-R2_ACCESS_KEY_ID = r2_secrets["R2_ACCESS_KEY_ID"]
-R2_SECRET_ACCESS_KEY = r2_secrets["R2_SECRET_ACCESS_KEY"]
-R2_BUCKET_NAME = r2_secrets["R2_BUCKET_NAME"]
-R2_ENDPOINT_URL = r2_secrets["R2_ENDPOINT_URL"]
-
-
-r2_client = boto3.client(
-    "s3",
-    endpoint_url=R2_ENDPOINT_URL,
-    aws_access_key_id=R2_ACCESS_KEY_ID,
-    aws_secret_access_key=R2_SECRET_ACCESS_KEY,
-    region_name="auto"
-)
-
-
-R2_TRANSFER_CONFIG = TransferConfig(
-    multipart_threshold=R2_MULTIPART_THRESHOLD,
-    multipart_chunksize=R2_MULTIPART_CHUNK_SIZE,
-    max_concurrency=5,
-    use_threads=True
-)
-
-
-# ============================================================
-# MASTER ROSTER COLUMNS
-# ============================================================
-
-ROSTER_COLUMNS = [
-    "State_Zone",
-    "Uploaded_By",
-    "Institution",
-    "FullName",
-    "Role"
-]
-
-
-# ============================================================
-# OPTIONS
-# ============================================================
-
 GRADE_OPTIONS = [
     "Nursery",
     "LKG",
@@ -106,7 +46,7 @@ GRADE_OPTIONS = [
     "Grade 2",
     "Grade 3",
     "Grade 4",
-    "Grade 5"
+    "Grade 5",
 ]
 
 
@@ -124,17 +64,94 @@ SUBJECT_OPTIONS = [
     "Computer",
     "Play Activity",
     "Play Time",
-    "Play Based"
+    "Play Based",
 ]
 
 
-EVIDENCE_TYPES = [
-    "Classroom Activity",
-    "Student Written Work",
+IMPLEMENTATION_OPTIONS = [
+    "Lesson Plan",
+    "Classroom Activity Conducted",
+    "Student Written Work / Writing Practice",
     "Phonics / Phonetics Implementation",
     "Student Assessment",
-    "Teacher Portfolio"
+    "Teacher Portfolio",
 ]
+
+
+IMPLEMENTATION_DESCRIPTIONS = {
+    "Lesson Plan":
+        "Share a reflection and upload the lesson plan as a PDF or picture.",
+
+    "Classroom Activity Conducted":
+        "Share a reflection and upload pictures or a video of the classroom activity.",
+
+    "Student Written Work / Writing Practice":
+        "Share a reflection and upload pictures of the students' written work or writing practice.",
+
+    "Phonics / Phonetics Implementation":
+        "Share a reflection and upload pictures or videos of the phonics activity or implementation.",
+
+    "Student Assessment":
+        "Share a reflection and upload pictures or files of the assessment.",
+
+    "Teacher Portfolio":
+        "Share a reflection and upload the relevant portfolio material.",
+}
+
+
+# ============================================================
+# SUPABASE
+# ============================================================
+
+@st.cache_resource
+def get_supabase_client():
+    supabase_url = st.secrets["supabase"]["url"]
+    supabase_key = st.secrets["supabase"]["key"]
+
+    return create_client(
+        supabase_url,
+        supabase_key
+    )
+
+
+supabase = get_supabase_client()
+
+
+# ============================================================
+# CLOUDFLARE R2
+# ============================================================
+
+@st.cache_resource
+def get_r2_client():
+
+    r2_secrets = st.secrets["r2"]
+
+    R2_ACCOUNT_ID = r2_secrets["R2_ACCOUNT_ID"]
+    R2_ACCESS_KEY_ID = r2_secrets["R2_ACCESS_KEY_ID"]
+    R2_SECRET_ACCESS_KEY = r2_secrets["R2_SECRET_ACCESS_KEY"]
+    R2_BUCKET_NAME = r2_secrets["R2_BUCKET_NAME"]
+    R2_ENDPOINT_URL = r2_secrets["R2_ENDPOINT_URL"]
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=R2_ENDPOINT_URL,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        region_name="auto"
+    )
+
+    return client, R2_BUCKET_NAME
+
+
+r2_client, R2_BUCKET_NAME = get_r2_client()
+
+
+R2_TRANSFER_CONFIG = TransferConfig(
+    multipart_threshold=R2_MULTIPART_THRESHOLD,
+    multipart_chunksize=R2_MULTIPART_CHUNK_SIZE,
+    max_concurrency=5,
+    use_threads=True
+)
 
 
 # ============================================================
@@ -143,32 +160,59 @@ EVIDENCE_TYPES = [
 
 def sanitize_path_component(value):
     """
-    Convert a value into a safe R2 path component.
+    Makes names safe for use inside R2 paths.
     """
-    value = str(value or "").strip()
+    if value is None:
+        return "unknown"
+
+    value = str(value).strip()
+
+    if not value:
+        return "unknown"
+
     value = re.sub(r"\s+", "_", value)
     value = re.sub(r"[^A-Za-z0-9_\-\.]", "_", value)
+
     return value[:150]
 
 
-def get_file_size_mb(uploaded_file):
+def get_file_size_bytes(uploaded_file):
     """
-    Return uploaded file size in MB.
+    Returns uploaded file size without permanently changing
+    its current file pointer.
     """
     try:
-        return len(uploaded_file.getvalue()) / (1024 * 1024)
+        current_position = uploaded_file.tell()
     except Exception:
+        current_position = 0
+
+    try:
+        uploaded_file.seek(0, 2)
+        size = uploaded_file.tell()
+        uploaded_file.seek(0)
+        return size
+    except Exception:
+        try:
+            uploaded_file.seek(current_position)
+        except Exception:
+            pass
         return 0
+
+
+def get_file_size_mb(uploaded_file):
+    return get_file_size_bytes(uploaded_file) / (1024 * 1024)
 
 
 def split_teacher_name(full_name):
     """
-    Split teacher name into FirstName and LastName.
+    Splits teacher name into FirstName and LastName.
     """
-    parts = str(full_name or "").strip().split()
+    full_name = str(full_name).strip()
 
-    if not parts:
+    if not full_name:
         return "", ""
+
+    parts = full_name.split()
 
     if len(parts) == 1:
         return parts[0], ""
@@ -176,55 +220,74 @@ def split_teacher_name(full_name):
     return parts[0], " ".join(parts[1:])
 
 
+def clean_dataframe(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = df.copy()
+
+    for column in df.columns:
+        if df[column].dtype == "object":
+            df[column] = df[column].fillna("").astype(str).str.strip()
+
+    return df
+
+
 # ============================================================
-# FETCH MASTER DATABASE
+# FETCH MASTER ROSTER
 # ============================================================
 
 @st.cache_data(ttl=300)
 def fetch_master_db_from_supabase():
 
-    rows = []
-
+    all_rows = []
     page_size = 1000
     offset = 0
+
+    columns = (
+        "State_Zone,"
+        "Uploaded_By,"
+        "Institution,"
+        "FullName,"
+        "Role"
+    )
 
     while True:
 
         response = (
             supabase
             .table(TEACHER_RECORDS_TABLE)
-            .select(",".join(ROSTER_COLUMNS))
+            .select(columns)
             .range(offset, offset + page_size - 1)
             .execute()
         )
 
-        batch = response.data or []
+        rows = response.data or []
 
-        if not batch:
+        if not rows:
             break
 
-        rows.extend(batch)
+        all_rows.extend(rows)
 
-        if len(batch) < page_size:
+        if len(rows) < page_size:
             break
 
         offset += page_size
 
-    df = pd.DataFrame(rows)
-
-    if df.empty:
-        return pd.DataFrame(columns=ROSTER_COLUMNS)
-
-    for col in ROSTER_COLUMNS:
-        if col not in df.columns:
-            df[col] = ""
-
-        df[col] = (
-            df[col]
-            .fillna("")
-            .astype(str)
-            .str.strip()
+    if not all_rows:
+        return pd.DataFrame(
+            columns=[
+                "State_Zone",
+                "Uploaded_By",
+                "Institution",
+                "FullName",
+                "Role"
+            ]
         )
+
+    df = pd.DataFrame(all_rows)
+
+    df = clean_dataframe(df)
 
     df = df.drop_duplicates()
 
@@ -232,7 +295,7 @@ def fetch_master_db_from_supabase():
 
 
 # ============================================================
-# R2 UPLOAD WORKER
+# R2 UPLOAD
 # ============================================================
 
 def upload_file_to_r2(
@@ -241,42 +304,42 @@ def upload_file_to_r2(
     category,
     group_number
 ):
-    """
-    Upload one file to Cloudflare R2.
-    """
 
     try:
 
-        file_size = get_file_size_mb(uploaded_file)
-
-        if file_size > MAX_FILE_SIZE_MB:
-
+        if uploaded_file is None:
             return {
                 "success": False,
-                "file_name": getattr(uploaded_file, "name", "unknown"),
+                "error": "No file provided.",
+                "file_name": "",
                 "category": category,
                 "group_number": group_number,
-                "path": None,
-                "error": (
-                    f"File exceeds {MAX_FILE_SIZE_MB} MB "
-                    f"limit."
-                )
+                "path": ""
             }
 
-        original_name = getattr(
-            uploaded_file,
-            "name",
-            "voice_note.wav"
-        )
+        file_size = get_file_size_bytes(uploaded_file)
 
-        safe_name = sanitize_path_component(
-            original_name
-        )
+        if file_size > MAX_FILE_SIZE_BYTES:
+            return {
+                "success": False,
+                "error": (
+                    f"{uploaded_file.name} exceeds the "
+                    f"{MAX_FILE_SIZE_MB} MB limit."
+                ),
+                "file_name": uploaded_file.name,
+                "category": category,
+                "group_number": group_number,
+                "path": ""
+            }
+
+        original_name = uploaded_file.name or "uploaded_file"
+
+        safe_filename = sanitize_path_component(original_name)
 
         unique_prefix = uuid.uuid4().hex[:12]
 
         final_filename = (
-            f"{unique_prefix}_{safe_name}"
+            f"{unique_prefix}_{safe_filename}"
         )
 
         object_key = (
@@ -285,11 +348,10 @@ def upload_file_to_r2(
 
         uploaded_file.seek(0)
 
-        content_type = getattr(
-            uploaded_file,
-            "type",
-            None
-        ) or "application/octet-stream"
+        content_type = (
+            uploaded_file.type
+            or "application/octet-stream"
+        )
 
         r2_client.upload_fileobj(
             uploaded_file,
@@ -303,60 +365,77 @@ def upload_file_to_r2(
 
         return {
             "success": True,
+            "error": "",
             "file_name": original_name,
             "category": category,
             "group_number": group_number,
-            "path": object_key,
-            "error": None
+            "path": object_key
         }
 
     except Exception as e:
 
         return {
             "success": False,
+            "error": str(e),
             "file_name": getattr(
                 uploaded_file,
                 "name",
-                "unknown"
+                ""
             ),
             "category": category,
             "group_number": group_number,
-            "path": None,
-            "error": str(e)
+            "path": ""
         }
 
 
-# ============================================================
-# PARALLEL UPLOAD
-# ============================================================
-
 def upload_all_files_parallel(upload_jobs):
-
-    if not upload_jobs:
-        return []
 
     results = []
 
-    with concurrent.futures.ThreadPoolExecutor(
+    if not upload_jobs:
+        return results
+
+    with ThreadPoolExecutor(
         max_workers=MAX_PARALLEL_UPLOADS
     ) as executor:
 
-        futures = [
-            executor.submit(
+        future_map = {}
+
+        for job in upload_jobs:
+
+            future = executor.submit(
                 upload_file_to_r2,
-                job["file"],
-                job["folder"],
+                job["uploaded_file"],
+                job["folder_name"],
                 job["category"],
                 job["group_number"]
             )
-            for job in upload_jobs
-        ]
 
-        for future in concurrent.futures.as_completed(futures):
+            future_map[future] = job
 
-            results.append(
-                future.result()
-            )
+        for future in as_completed(future_map):
+
+            try:
+                result = future.result()
+
+            except Exception as e:
+
+                job = future_map[future]
+
+                result = {
+                    "success": False,
+                    "error": str(e),
+                    "file_name": getattr(
+                        job["uploaded_file"],
+                        "name",
+                        ""
+                    ),
+                    "category": job["category"],
+                    "group_number": job["group_number"],
+                    "path": ""
+                }
+
+            results.append(result)
 
     return results
 
@@ -365,7 +444,82 @@ def upload_all_files_parallel(upload_jobs):
 # DATABASE INSERT
 # ============================================================
 
-def insert_implementation_to_db(entry):
+def insert_implementation_to_db(
+    state_zone,
+    uploaded_by,
+    institution,
+    teacher_name,
+    group_data,
+    implementation_paths,
+):
+
+    first_name, last_name = split_teacher_name(
+        teacher_name
+    )
+
+    now_date = group_data["date"]
+
+    entry = {
+        "State_Zone": state_zone,
+        "Uploaded_By": uploaded_by,
+        "Institution": institution,
+        "Center": institution,
+
+        "FirstName": first_name,
+        "LastName": last_name,
+        "FullName": teacher_name,
+
+        "Role": "Teacher",
+        "Type": "Classroom Reflection",
+
+        "Grade": group_data["grade"],
+        "Subject": group_data["subject"],
+        "Book": group_data["lesson_name"],
+
+        "StartTime": "09:00",
+        "EndTime": "09:45",
+        "Duration_Min": 0.0,
+
+        "Voice_Note_Link": implementation_paths.get(
+            "voice",
+            ""
+        ),
+
+        "Lesson_Plan_Picture": implementation_paths.get(
+            "lesson_plan",
+            ""
+        ),
+
+        "Video_Evidence_1": implementation_paths.get(
+            "activity",
+            ""
+        ),
+
+        "Video_Evidence_2": "",
+        "Video_Evidence_3": "",
+
+        "Writing_Sample_Link": implementation_paths.get(
+            "writing",
+            ""
+        ),
+
+        "Student_Assessment_Link": implementation_paths.get(
+            "assessment",
+            ""
+        ),
+
+        "Phonics_Evidence_Link": implementation_paths.get(
+            "phonics",
+            ""
+        ),
+
+        "Portfolio_Evidence_Link": implementation_paths.get(
+            "portfolio",
+            ""
+        ),
+
+        "Assessment_Score_Pct": None,
+    }
 
     response = (
         supabase
@@ -378,111 +532,29 @@ def insert_implementation_to_db(entry):
 
 
 # ============================================================
+# SESSION STATE
+# ============================================================
+
+if "implementation_group_count" not in st.session_state:
+    st.session_state.implementation_group_count = 1
+
+
+# ============================================================
 # PAGE HEADER
 # ============================================================
 
-st.title("📝 Teacher Daily Implementation Portal")
+st.title("📝 Teacher Daily Implementation Reflection Portal")
 
 st.markdown(
     """
-Use this portal to record your daily classroom implementation,
-lesson planning, voice reflection and classroom evidence.
-"""
-)
-
-st.info(
-    """
-📌 **Important**
-
-For every implementation, first select the Grade, Subject and
-Lesson / Chapter.
-
-You can then:
-
-- 🎙️ Record a voice note directly
-- 📁 Upload an existing voice note
-- ▶️ Play your voice note
-- 📚 Upload the Lesson Plan
-- 📎 Upload classroom implementation evidence
+Use this space to share your daily classroom implementation,
+learning reflections, and related classroom materials.
 """
 )
 
 
 # ============================================================
-# VOICE NOTE INSTRUCTIONS
-# ============================================================
-
-with st.expander(
-    "📋 View Instructions — How should I record my voice note?"
-):
-
-    st.markdown(
-        """
-### 🎙️ Voice Reflection Structure
-
-Please use the following structure while recording your voice note.
-
-#### 1. What
-- Grade
-- Subject
-- Lesson Plan No.
-- Topic / Chapter
-
-#### 2. Why — Skill / Learning Objective
-What do I want students to learn or be able to do
-through this lesson?
-
-Think about the learning level:
-
-- Remembering
-- Understanding
-- Applying
-- Analysing
-- Evaluating
-- Creating
-
-#### 3. Teacher Activity — How
-How will I teach?
-
-Mention the digital and/or physical resources
-you will use.
-
-#### 4. Student Activity
-What will students do or participate in?
-
-#### 5. Practice & Apply
-What will students do in the Course Book / Workbook?
-
-Mention the specific:
-
-- Topic / Section
-- Page number
-- Classwork
-- Homework
-- Practice activity
-
-#### 6. Review
-How will I check students' learning?
-
----
-
-### 💡 Remember
-
-The purpose is not just to tell **what we are going to do**.
-
-Think about:
-
-**Why are we doing it?**
-
-and
-
-**How will it support student learning?**
-"""
-    )
-
-
-# ============================================================
-# LOAD MASTER DATA
+# LOAD ROSTER
 # ============================================================
 
 try:
@@ -492,8 +564,10 @@ try:
 except Exception as e:
 
     st.error(
-        f"Unable to load teacher database: {e}"
+        "Unable to load the teacher information right now."
     )
+
+    st.exception(e)
 
     st.stop()
 
@@ -501,550 +575,845 @@ except Exception as e:
 if master_df.empty:
 
     st.warning(
-        "No teacher data is available."
+        "No teacher information is currently available."
     )
 
     st.stop()
 
 
 # ============================================================
-# STATE / ZONE
+# TEACHER DETAILS
 # ============================================================
+
+st.markdown("### 👤 Teacher Details")
+
 
 state_options = sorted(
     [
-        x for x in
-        master_df["State_Zone"].dropna().unique()
+        x for x in master_df["State_Zone"].dropna().unique()
         if str(x).strip()
     ]
 )
 
 selected_state = st.selectbox(
-    "📍 State / Zone",
-    ["Select State / Zone"] + state_options
+    "State / Zone",
+    ["Select State / Zone"] + state_options,
+    key="teacher_state"
 )
 
 
 if selected_state == "Select State / Zone":
 
+    st.info(
+        "Please select your State / Zone to continue."
+    )
+
     st.stop()
 
 
-# ============================================================
-# CONSULTANT
-# ============================================================
-
-consultant_df = master_df[
+state_df = master_df[
     master_df["State_Zone"] == selected_state
 ].copy()
 
 
 consultant_options = sorted(
     [
-        x for x in
-        consultant_df["Uploaded_By"].dropna().unique()
+        x for x in state_df["Uploaded_By"].dropna().unique()
         if str(x).strip()
     ]
 )
 
-
 selected_consultant = st.selectbox(
-    "👤 Consultant",
-    ["Select Consultant"] + consultant_options
+    "Consultant",
+    ["Select Consultant"] + consultant_options,
+    key="teacher_consultant"
 )
 
 
 if selected_consultant == "Select Consultant":
 
+    st.info(
+        "Please select the Consultant to continue."
+    )
+
     st.stop()
 
 
-# ============================================================
-# SCHOOL
-# ============================================================
-
-school_df = consultant_df[
-    consultant_df["Uploaded_By"] == selected_consultant
+consultant_df = state_df[
+    state_df["Uploaded_By"] == selected_consultant
 ].copy()
 
 
 school_options = sorted(
     [
-        x for x in
-        school_df["Institution"].dropna().unique()
+        x for x in consultant_df["Institution"].dropna().unique()
         if str(x).strip()
     ]
 )
 
-
 selected_school = st.selectbox(
-    "🏫 School",
-    ["Select School"] + school_options
+    "School",
+    ["Select School"] + school_options,
+    key="teacher_school"
 )
 
 
 if selected_school == "Select School":
 
+    st.info(
+        "Please select your school to continue."
+    )
+
     st.stop()
 
 
-# ============================================================
-# TEACHER
-# ============================================================
-
-teacher_df = school_df[
-    school_df["Institution"] == selected_school
+school_df = consultant_df[
+    consultant_df["Institution"] == selected_school
 ].copy()
 
 
-teacher_df = teacher_df[
-    teacher_df["Role"]
+teacher_df = school_df[
+    school_df["Role"]
+    .fillna("")
+    .astype(str)
     .str.lower()
     .isin(["teacher", "teachers"])
-]
+].copy()
 
 
 teacher_options = sorted(
     [
-        x for x in
-        teacher_df["FullName"].dropna().unique()
+        x for x in teacher_df["FullName"].dropna().unique()
         if str(x).strip()
     ]
 )
 
 
+if not teacher_options:
+
+    st.warning(
+        "No teachers were found for the selected school."
+    )
+
+    st.stop()
+
+
 selected_teacher = st.selectbox(
-    "👩‍🏫 Teacher",
-    ["Select Teacher"] + teacher_options
+    "Teacher Name",
+    ["Select Teacher"] + teacher_options,
+    key="teacher_name"
 )
 
 
 if selected_teacher == "Select Teacher":
 
+    st.info(
+        "Please select your name to continue."
+    )
+
     st.stop()
 
 
-# ============================================================
-# DATE
-# ============================================================
-
 implementation_date = st.date_input(
-    "📅 Implementation Date"
+    "Implementation Date",
+    key="implementation_date"
 )
 
 
 # ============================================================
-# IMPLEMENTATION GROUP COUNT
+# MAIN IMPLEMENTATION GROUP FUNCTION
 # ============================================================
 
-if "implementation_group_count" not in st.session_state:
+def render_implementation_group(group_number):
 
-    st.session_state.implementation_group_count = 1
+    st.divider()
 
+    st.markdown(
+        f"## 📚 Implementation Group {group_number}"
+    )
 
-st.markdown("---")
+    st.caption(
+        "Add the details for one class, subject, lesson, "
+        "or classroom implementation."
+    )
 
-st.subheader("📚 Classroom Implementations")
+    # --------------------------------------------------------
+    # CLASS DETAILS
+    # --------------------------------------------------------
+
+    grade = st.selectbox(
+        "Grade",
+        GRADE_OPTIONS,
+        key=f"grade_{group_number}"
+    )
+
+    subject = st.selectbox(
+        "Subject",
+        SUBJECT_OPTIONS,
+        key=f"subject_{group_number}"
+    )
+
+    lesson_name = st.text_input(
+        "Lesson Plan No. & Topic / Chapter",
+        placeholder=(
+            "Example: Lesson Plan 5 – Plants Around Us"
+        ),
+        key=f"lesson_name_{group_number}"
+    )
+
+    # --------------------------------------------------------
+    # VOICE REFLECTION
+    # --------------------------------------------------------
+
+    st.markdown("### 🎙️ Record Your Reflection")
+
+    st.markdown(
+        """
+Please record a brief voice note about your planned
+classroom implementation.
+"""
+    )
+
+    recorded_audio = st.audio_input(
+        "🎙️ Record Your Reflection",
+        sample_rate=16000,
+        key=f"recorded_audio_{group_number}"
+    )
+
+    if recorded_audio is not None:
+
+        st.audio(
+            recorded_audio,
+            format=recorded_audio.type
+            or "audio/wav"
+        )
+
+    st.markdown("#### How to record your voice note")
+
+    st.info(
+        """
+Please briefly share your reflection in this order:
+
+**What**
+- Grade
+- Subject
+- Lesson Plan No. & Topic/Chapter
+
+**Why — Skill / Learning Objective**
+- What do I want students to learn or be able to do?
+- Think about Bloom’s Taxonomy: Remembering, Understanding,
+  Applying, Analysing, Evaluating, Creating.
+
+**Teacher Activity (How)**
+- How will I teach?
+- Which digital or physical resources will I use?
+
+**Student Activity**
+- What will students do or participate in?
+
+**Practice & Apply**
+- What will students do in the Course Book/Workbook?
+- Mention the specific topic, section, or page number.
+- Include any classwork or homework activity.
+
+**Review**
+- How will I check students’ learning?
+
+Remember: the purpose is not only to tell what you are
+going to do, but also to think about **why** you are doing it
+and **how** it will support student learning.
+"""
+    )
+
+    st.markdown("#### Or upload an existing voice note")
+
+    uploaded_voice_note = st.file_uploader(
+        "Upload Voice Note",
+        type=[
+            "mp3",
+            "wav",
+            "m4a",
+            "aac",
+            "ogg",
+            "webm"
+        ],
+        key=f"uploaded_voice_{group_number}",
+        label_visibility="collapsed"
+    )
+
+    # --------------------------------------------------------
+    # CLASSROOM IMPLEMENTATION & LEARNING REFLECTIONS
+    # --------------------------------------------------------
+
+    st.markdown(
+        "### 📸 Classroom Implementation & Learning Reflections"
+    )
+
+    st.markdown(
+        """
+Share a reflection related to your classroom implementation
+and learning. Select the area you would like to reflect on
+and share the relevant details, pictures, or videos.
+"""
+    )
+
+    st.markdown("#### Classroom Implementation Materials")
+
+    st.caption(
+        """
+You can share materials such as lesson plans, classroom
+activities, student written work, phonics/phonetics
+implementation, student assessments, and teacher portfolio
+materials. You can add more than one area for the same class.
+"""
+    )
+
+    # --------------------------------------------------------
+    # DYNAMIC IMPLEMENTATION AREAS
+    # --------------------------------------------------------
+
+    area_key = f"areas_{group_number}"
+
+    if area_key not in st.session_state:
+        st.session_state[area_key] = [
+            {
+                "id": uuid.uuid4().hex[:8],
+                "type": None
+            }
+        ]
+
+    areas = st.session_state[area_key]
+
+    areas_to_remove = []
+
+    for area_index, area in enumerate(areas):
+
+        unique_id = area["id"]
+
+        st.markdown(
+            f"#### Implementation Material {area_index + 1}"
+        )
+
+        selected_area = st.selectbox(
+            "Select an area to reflect on",
+            ["Select an area"] + IMPLEMENTATION_OPTIONS,
+            index=(
+                IMPLEMENTATION_OPTIONS.index(area["type"]) + 1
+                if area.get("type") in IMPLEMENTATION_OPTIONS
+                else 0
+            ),
+            key=(
+                f"implementation_type_"
+                f"{group_number}_"
+                f"{unique_id}"
+            )
+        )
+
+        if selected_area == "Select an area":
+
+            area["type"] = None
+
+        else:
+
+            area["type"] = selected_area
+
+            st.caption(
+                IMPLEMENTATION_DESCRIPTIONS[
+                    selected_area
+                ]
+            )
+
+            # --------------------------------------------
+            # REFLECTION DETAILS
+            # --------------------------------------------
+
+            reflection_text = st.text_area(
+                "Reflection / Details",
+                placeholder=(
+                    "Briefly share what you implemented, "
+                    "what students did, or what you observed."
+                ),
+                key=(
+                    f"reflection_text_"
+                    f"{group_number}_"
+                    f"{unique_id}"
+                ),
+                height=100
+            )
+
+            area["reflection_text"] = reflection_text
+
+            # --------------------------------------------
+            # FILE TYPES
+            # --------------------------------------------
+
+            if selected_area == "Lesson Plan":
+
+                files = st.file_uploader(
+                    "Upload Lesson Plan",
+                    type=[
+                        "pdf",
+                        "jpg",
+                        "jpeg",
+                        "png",
+                        "webp"
+                    ],
+                    accept_multiple_files=True,
+                    key=(
+                        f"files_lesson_plan_"
+                        f"{group_number}_"
+                        f"{unique_id}"
+                    )
+                )
+
+            elif selected_area == "Classroom Activity Conducted":
+
+                files = st.file_uploader(
+                    "Upload Classroom Activity Pictures / Video",
+                    type=[
+                        "jpg",
+                        "jpeg",
+                        "png",
+                        "webp",
+                        "mp4",
+                        "mov",
+                        "avi",
+                        "m4v",
+                        "webm"
+                    ],
+                    accept_multiple_files=True,
+                    key=(
+                        f"files_activity_"
+                        f"{group_number}_"
+                        f"{unique_id}"
+                    )
+                )
+
+            elif selected_area == (
+                "Student Written Work / Writing Practice"
+            ):
+
+                files = st.file_uploader(
+                    "Upload Student Written Work / Writing Practice",
+                    type=[
+                        "jpg",
+                        "jpeg",
+                        "png",
+                        "webp",
+                        "pdf"
+                    ],
+                    accept_multiple_files=True,
+                    key=(
+                        f"files_writing_"
+                        f"{group_number}_"
+                        f"{unique_id}"
+                    )
+                )
+
+            elif selected_area == (
+                "Phonics / Phonetics Implementation"
+            ):
+
+                files = st.file_uploader(
+                    "Upload Phonics / Phonetics Pictures or Videos",
+                    type=[
+                        "jpg",
+                        "jpeg",
+                        "png",
+                        "webp",
+                        "mp4",
+                        "mov",
+                        "avi",
+                        "m4v",
+                        "webm"
+                    ],
+                    accept_multiple_files=True,
+                    key=(
+                        f"files_phonics_"
+                        f"{group_number}_"
+                        f"{unique_id}"
+                    )
+                )
+
+            elif selected_area == "Student Assessment":
+
+                files = st.file_uploader(
+                    "Upload Student Assessment",
+                    type=[
+                        "jpg",
+                        "jpeg",
+                        "png",
+                        "webp",
+                        "pdf",
+                        "doc",
+                        "docx",
+                        "xlsx",
+                        "xls"
+                    ],
+                    accept_multiple_files=True,
+                    key=(
+                        f"files_assessment_"
+                        f"{group_number}_"
+                        f"{unique_id}"
+                    )
+                )
+
+            elif selected_area == "Teacher Portfolio":
+
+                files = st.file_uploader(
+                    "Upload Teacher Portfolio Material",
+                    type=[
+                        "jpg",
+                        "jpeg",
+                        "png",
+                        "webp",
+                        "pdf",
+                        "doc",
+                        "docx",
+                        "xlsx",
+                        "xls",
+                        "ppt",
+                        "pptx"
+                    ],
+                    accept_multiple_files=True,
+                    key=(
+                        f"files_portfolio_"
+                        f"{group_number}_"
+                        f"{unique_id}"
+                    )
+                )
+
+            else:
+
+                files = []
+
+            area["files"] = files or []
+
+            # --------------------------------------------
+            # FILE PREVIEW
+            # --------------------------------------------
+
+            if area["files"]:
+
+                st.caption(
+                    f"{len(area['files'])} file(s) selected."
+                )
+
+                for file in area["files"]:
+
+                    size_mb = get_file_size_mb(file)
+
+                    if size_mb > MAX_FILE_SIZE_MB:
+
+                        st.error(
+                            f"{file.name} is {size_mb:.1f} MB. "
+                            f"The maximum allowed size is "
+                            f"{MAX_FILE_SIZE_MB} MB."
+                        )
+
+                    else:
+
+                        st.write(
+                            f"📎 {file.name} "
+                            f"({size_mb:.1f} MB)"
+                        )
+
+        # --------------------------------------------
+        # REMOVE AREA
+        # --------------------------------------------
+
+        if len(areas) > 1:
+
+            if st.button(
+                "Remove this area",
+                key=(
+                    f"remove_area_"
+                    f"{group_number}_"
+                    f"{unique_id}"
+                )
+            ):
+
+                areas_to_remove.append(
+                    unique_id
+                )
+
+    # Remove requested areas
+    if areas_to_remove:
+
+        st.session_state[area_key] = [
+            area
+            for area in areas
+            if area["id"] not in areas_to_remove
+        ]
+
+        st.rerun()
+
+    # --------------------------------------------------------
+    # ADD ANOTHER AREA
+    # --------------------------------------------------------
+
+    if st.button(
+        "➕ Add Another Area",
+        key=f"add_area_{group_number}"
+    ):
+
+        if len(areas) >= len(IMPLEMENTATION_OPTIONS):
+
+            st.warning(
+                "All available areas have already been added."
+            )
+
+        else:
+
+            areas.append(
+                {
+                    "id": uuid.uuid4().hex[:8],
+                    "type": None
+                }
+            )
+
+            st.rerun()
+
+    # --------------------------------------------------------
+    # RETURN DATA
+    # --------------------------------------------------------
+
+    return {
+        "group_number": group_number,
+        "grade": grade,
+        "subject": subject,
+        "lesson_name": lesson_name.strip(),
+        "date": implementation_date,
+        "recorded_audio": recorded_audio,
+        "uploaded_voice_note": uploaded_voice_note,
+        "areas": areas,
+    }
 
 
 # ============================================================
-# GROUP UI
+# RENDER ALL IMPLEMENTATION GROUPS
 # ============================================================
 
-group_states = []
-
+all_groups = []
 
 for group_number in range(
     1,
     st.session_state.implementation_group_count + 1
 ):
 
-    st.markdown("---")
-
-    st.markdown(
-        f"### 📘 Implementation {group_number}"
+    group_data = render_implementation_group(
+        group_number
     )
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        grade = st.selectbox(
-            "Grade",
-            GRADE_OPTIONS,
-            key=f"group_{group_number}_grade"
-        )
-
-    with col2:
-
-        subject = st.selectbox(
-            "Subject",
-            SUBJECT_OPTIONS,
-            key=f"group_{group_number}_subject"
-        )
-
-    lesson_name = st.text_input(
-        "📖 Chapter / Lesson / Activity Name",
-        key=f"group_{group_number}_lesson"
-    )
-
-
-    # ========================================================
-    # VOICE NOTE
-    # ========================================================
-
-    st.markdown("#### 🎙️ Voice Note")
-
-    st.caption(
-        "You can record a new voice note, upload an existing "
-        "voice note, or use both."
-    )
-
-
-    # --------------------------------------------------------
-    # NATIVE RECORDER
-    # --------------------------------------------------------
-
-    recorded_voice = st.audio_input(
-        "🎤 Record Voice Note",
-        sample_rate=16000,
-        key=f"group_{group_number}_voice_record"
-    )
-
-
-    if recorded_voice is not None:
-
-        st.success(
-            "Voice note recorded successfully."
-        )
-
-        st.audio(
-            recorded_voice,
-            format="audio/wav"
-        )
-
-
-    # --------------------------------------------------------
-    # EXISTING VOICE NOTE UPLOAD
-    # --------------------------------------------------------
-
-    uploaded_voice_notes = st.file_uploader(
-        "📁 Upload Existing Voice Note",
-        type=[
-            "mp3",
-            "wav",
-            "m4a",
-            "ogg"
-        ],
-        accept_multiple_files=True,
-        key=f"group_{group_number}_voice_upload"
-    )
-
-
-    if uploaded_voice_notes:
-
-        st.markdown(
-            "**▶️ Uploaded Voice Notes**"
-        )
-
-        for idx, voice_file in enumerate(
-            uploaded_voice_notes,
-            start=1
-        ):
-
-            st.caption(
-                f"Voice Note {idx}: {voice_file.name}"
-            )
-
-            st.audio(
-                voice_file
-            )
-
-
-    # ========================================================
-    # LESSON PLAN
-    # ========================================================
-
-    st.markdown("#### 📚 Lesson Plan")
-
-    lesson_plan_files = st.file_uploader(
-        "Upload Lesson Plan",
-        type=[
-            "png",
-            "jpg",
-            "jpeg",
-            "pdf"
-        ],
-        accept_multiple_files=True,
-        key=f"group_{group_number}_lesson_plan"
-    )
-
-
-    # ========================================================
-    # CLASSROOM IMPLEMENTATION EVIDENCE
-    # ========================================================
-
-    st.markdown(
-        "#### 📎 Classroom Implementation Evidence"
-    )
-
-    evidence_type = st.selectbox(
-        "Select Evidence Type",
-        ["Select Evidence"] + EVIDENCE_TYPES,
-        key=f"group_{group_number}_evidence_type"
-    )
-
-
-    evidence_files = []
-
-    if evidence_type != "Select Evidence":
-
-        if evidence_type == "Classroom Activity":
-
-            st.caption(
-                "Upload classroom activity implementation videos."
-            )
-
-            evidence_files = st.file_uploader(
-                "Upload Classroom Activity Evidence",
-                type=[
-                    "mp4",
-                    "mov",
-                    "avi"
-                ],
-                accept_multiple_files=True,
-                key=f"group_{group_number}_activity_evidence"
-            )
-
-
-        elif evidence_type == "Student Written Work":
-
-            st.caption(
-                "Upload photographs or PDFs of student written work."
-            )
-
-            evidence_files = st.file_uploader(
-                "Upload Student Written Work",
-                type=[
-                    "pdf",
-                    "png",
-                    "jpg",
-                    "jpeg"
-                ],
-                accept_multiple_files=True,
-                key=f"group_{group_number}_writing_evidence"
-            )
-
-
-        elif evidence_type == "Phonics / Phonetics Implementation":
-
-            st.caption(
-                "Upload evidence of phonics / phonetics implementation."
-            )
-
-            evidence_files = st.file_uploader(
-                "Upload Phonics / Phonetics Evidence",
-                type=[
-                    "mp4",
-                    "mov",
-                    "mp3",
-                    "wav",
-                    "png",
-                    "jpg",
-                    "jpeg",
-                    "pdf"
-                ],
-                accept_multiple_files=True,
-                key=f"group_{group_number}_phonics_evidence"
-            )
-
-
-        elif evidence_type == "Student Assessment":
-
-            st.caption(
-                "Upload student assessment evidence."
-            )
-
-            evidence_files = st.file_uploader(
-                "Upload Student Assessment",
-                type=[
-                    "pdf",
-                    "png",
-                    "jpg",
-                    "jpeg",
-                    "mp4"
-                ],
-                accept_multiple_files=True,
-                key=f"group_{group_number}_assessment_evidence"
-            )
-
-
-        elif evidence_type == "Teacher Portfolio":
-
-            st.caption(
-                "Upload evidence for the teacher portfolio."
-            )
-
-            evidence_files = st.file_uploader(
-                "Upload Teacher Portfolio Evidence",
-                type=[
-                    "pdf",
-                    "png",
-                    "jpg",
-                    "jpeg",
-                    "mp4"
-                ],
-                accept_multiple_files=True,
-                key=f"group_{group_number}_portfolio_evidence"
-            )
-
-
-    # ========================================================
-    # SAVE GROUP STATE
-    # ========================================================
-
-    group_states.append(
-        {
-            "group_number": group_number,
-            "grade": grade,
-            "subject": subject,
-            "lesson_name": lesson_name.strip(),
-            "recorded_voice": recorded_voice,
-            "uploaded_voice_notes": uploaded_voice_notes or [],
-            "lesson_plan_files": lesson_plan_files or [],
-            "evidence_type": evidence_type,
-            "evidence_files": evidence_files or []
-        }
-    )
+    all_groups.append(group_data)
 
 
 # ============================================================
-# ADD / REMOVE IMPLEMENTATION
+# ADD ANOTHER CLASS / IMPLEMENTATION
 # ============================================================
 
-st.markdown("---")
+st.divider()
 
-button_col1, button_col2 = st.columns(2)
+if (
+    st.session_state.implementation_group_count
+    < MAX_IMPLEMENTATION_GROUPS
+):
 
-
-with button_col1:
-
-    if (
-        st.session_state.implementation_group_count
-        < MAX_IMPLEMENTATION_GROUPS
+    if st.button(
+        "➕ Add Another Class / Implementation",
+        use_container_width=True
     ):
 
-        if st.button(
-            "➕ Add Implementation",
-            use_container_width=True
-        ):
+        st.session_state.implementation_group_count += 1
 
-            st.session_state.implementation_group_count += 1
+        st.rerun()
 
-            st.rerun()
+else:
+
+    st.info(
+        f"You can add up to {MAX_IMPLEMENTATION_GROUPS} "
+        "classes / implementations at one time."
+    )
 
 
-with button_col2:
+# ============================================================
+# REMOVE LAST GROUP
+# ============================================================
 
-    if (
-        st.session_state.implementation_group_count
-        > 1
+if st.session_state.implementation_group_count > 1:
+
+    if st.button(
+        "Remove Last Class / Implementation"
     ):
 
-        if st.button(
-            "➖ Remove Last Implementation",
-            use_container_width=True
-        ):
+        group_to_remove = (
+            st.session_state.implementation_group_count
+        )
 
-            st.session_state.implementation_group_count -= 1
+        area_key = f"areas_{group_to_remove}"
 
-            st.rerun()
+        if area_key in st.session_state:
+            del st.session_state[area_key]
+
+        st.session_state.implementation_group_count -= 1
+
+        st.rerun()
 
 
 # ============================================================
-# SUBMIT
+# FILE SIZE NOTE
 # ============================================================
 
-st.markdown("---")
-
-submit_button = st.button(
-    "🚀 Submit Implementation",
-    type="primary",
-    use_container_width=True
+st.caption(
+    f"Maximum file size: {MAX_FILE_SIZE_MB} MB per file."
 )
 
 
 # ============================================================
-# SUBMISSION PROCESS
+# FINAL SUBMISSION
 # ============================================================
 
-if submit_button:
+st.divider()
+
+st.markdown(
+    "### 🚀 Share Your Daily Implementation"
+)
+
+st.markdown(
+    """
+Please review the class details and selected materials
+before sharing your implementation.
+"""
+)
+
+
+if st.button(
+    "Submit Daily Implementation",
+    type="primary",
+    use_container_width=True
+):
 
     # --------------------------------------------------------
     # BASIC VALIDATION
     # --------------------------------------------------------
 
-    if selected_state == "Select State / Zone":
+    validation_errors = []
 
-        st.error(
+    if not selected_state:
+        validation_errors.append(
             "Please select State / Zone."
         )
 
-        st.stop()
-
-
-    if selected_consultant == "Select Consultant":
-
-        st.error(
+    if not selected_consultant:
+        validation_errors.append(
             "Please select Consultant."
         )
 
-        st.stop()
-
-
-    if selected_school == "Select School":
-
-        st.error(
+    if not selected_school:
+        validation_errors.append(
             "Please select School."
         )
 
-        st.stop()
-
-
-    if selected_teacher == "Select Teacher":
-
-        st.error(
-            "Please select Teacher."
+    if not selected_teacher:
+        validation_errors.append(
+            "Please select Teacher Name."
         )
 
-        st.stop()
+    if not all_groups:
 
-
-    if not group_states:
-
-        st.error(
+        validation_errors.append(
             "Please add at least one implementation."
         )
 
-        st.stop()
-
-
-    # --------------------------------------------------------
-    # VALIDATE LESSON NAMES
-    # --------------------------------------------------------
-
-    for group in group_states:
+    for group in all_groups:
 
         if not group["lesson_name"]:
 
-            st.error(
-                f"Please enter Chapter / Lesson / Activity "
-                f"Name for Implementation "
-                f"{group['group_number']}."
+            validation_errors.append(
+                f"Implementation Group "
+                f"{group['group_number']}: "
+                "Please enter Lesson Plan No. & Topic / Chapter."
             )
 
-            st.stop()
+        # Validate areas
+        for area_index, area in enumerate(
+            group["areas"]
+        ):
 
+            if area.get("type") is None:
+
+                # Empty additional area is ignored
+                # if it is the only blank area.
+                if (
+                    len(group["areas"]) > 1
+                    or area_index == 0
+                ):
+                    validation_errors.append(
+                        f"Implementation Group "
+                        f"{group['group_number']}: "
+                        f"Please select an area for "
+                        f"Implementation Material "
+                        f"{area_index + 1}, "
+                        "or remove the unused area."
+                    )
+
+            else:
+
+                files = area.get("files", [])
+
+                for file in files:
+
+                    if (
+                        get_file_size_bytes(file)
+                        > MAX_FILE_SIZE_BYTES
+                    ):
+
+                        validation_errors.append(
+                            f"Implementation Group "
+                            f"{group['group_number']}: "
+                            f"{file.name} exceeds the "
+                            f"{MAX_FILE_SIZE_MB} MB limit."
+                        )
+
+        # Validate voice note size
+        if group["recorded_audio"] is not None:
+
+            if (
+                get_file_size_bytes(
+                    group["recorded_audio"]
+                )
+                > MAX_FILE_SIZE_BYTES
+            ):
+
+                validation_errors.append(
+                    f"Implementation Group "
+                    f"{group['group_number']}: "
+                    "Recorded voice note exceeds the "
+                    f"{MAX_FILE_SIZE_MB} MB limit."
+                )
+
+        if group["uploaded_voice_note"] is not None:
+
+            if (
+                get_file_size_bytes(
+                    group["uploaded_voice_note"]
+                )
+                > MAX_FILE_SIZE_BYTES
+            ):
+
+                validation_errors.append(
+                    f"Implementation Group "
+                    f"{group['group_number']}: "
+                    "Uploaded voice note exceeds the "
+                    f"{MAX_FILE_SIZE_MB} MB limit."
+                )
+
+    if validation_errors:
+
+        for error in validation_errors:
+            st.error(error)
+
+        st.stop()
 
     # --------------------------------------------------------
     # SUBMISSION ID
@@ -1052,528 +1421,341 @@ if submit_button:
 
     submission_id = uuid.uuid4().hex[:12]
 
-
-    # --------------------------------------------------------
-    # BASE R2 PATH
-    # --------------------------------------------------------
-
-    safe_school = sanitize_path_component(
+    school_path = sanitize_path_component(
         selected_school
     )
 
-    safe_teacher = sanitize_path_component(
+    teacher_path = sanitize_path_component(
         selected_teacher
     )
 
-    date_string = implementation_date.strftime(
+    date_path = implementation_date.strftime(
         "%Y-%m-%d"
     )
 
-
     submission_base = (
-        f"schools/{safe_school}"
-        f"/teachers/{safe_teacher}"
-        f"/{date_string}"
-        f"/submission_{submission_id}"
+        f"schools/{school_path}/"
+        f"teachers/{teacher_path}/"
+        f"{date_path}/"
+        f"submission_{submission_id}"
     )
 
-
     # --------------------------------------------------------
-    # BUILD UPLOAD JOBS
+    # PREPARE ALL UPLOAD JOBS
     # --------------------------------------------------------
 
     upload_jobs = []
 
+    group_upload_metadata = {}
 
-    for group in group_states:
+    for group in all_groups:
 
         group_number = group["group_number"]
 
-        implementation_base = (
-            f"{submission_base}"
-            f"/implementation_{group_number}"
+        group_base = (
+            f"{submission_base}/"
+            f"implementation_{group_number}"
         )
 
+        group_upload_metadata[group_number] = {
+            "group_base": group_base,
+            "voice": [],
+            "lesson_plan": [],
+            "activity": [],
+            "writing": [],
+            "phonics": [],
+            "assessment": [],
+            "portfolio": [],
+        }
 
-        # ====================================================
-        # VOICE NOTES
-        # ====================================================
+        # --------------------------------------------
+        # RECORDED VOICE
+        # --------------------------------------------
 
-        voice_folder = (
-            f"{implementation_base}"
-            f"/voice_notes"
-        )
-
-
-        # Recorded voice note
-        if group["recorded_voice"] is not None:
+        if group["recorded_audio"] is not None:
 
             upload_jobs.append(
                 {
-                    "file": group["recorded_voice"],
-                    "folder": voice_folder,
-                    "category": "voice",
-                    "group_number": group_number
+                    "uploaded_file":
+                        group["recorded_audio"],
+
+                    "folder_name":
+                        f"{group_base}/voice_notes",
+
+                    "category":
+                        "voice",
+
+                    "group_number":
+                        group_number,
                 }
             )
 
+        # --------------------------------------------
+        # UPLOADED VOICE
+        # --------------------------------------------
 
-        # Uploaded voice notes
-        for voice_file in group[
-            "uploaded_voice_notes"
-        ]:
+        if group["uploaded_voice_note"] is not None:
 
             upload_jobs.append(
                 {
-                    "file": voice_file,
-                    "folder": voice_folder,
-                    "category": "voice",
-                    "group_number": group_number
+                    "uploaded_file":
+                        group["uploaded_voice_note"],
+
+                    "folder_name":
+                        f"{group_base}/voice_notes",
+
+                    "category":
+                        "voice",
+
+                    "group_number":
+                        group_number,
                 }
             )
 
+        # --------------------------------------------
+        # CLASSROOM IMPLEMENTATION MATERIALS
+        # --------------------------------------------
 
-        # ====================================================
-        # LESSON PLAN
-        # ====================================================
+        for area in group["areas"]:
 
-        lesson_plan_folder = (
-            f"{implementation_base}"
-            f"/lesson_plans"
-        )
+            area_type = area.get("type")
 
+            if not area_type:
+                continue
 
-        for lesson_file in group[
-            "lesson_plan_files"
-        ]:
+            files = area.get("files", [])
 
-            upload_jobs.append(
-                {
-                    "file": lesson_file,
-                    "folder": lesson_plan_folder,
-                    "category": "picture",
-                    "group_number": group_number
-                }
-            )
+            if area_type == "Lesson Plan":
 
+                category = "lesson_plan"
+                folder = "lesson_plans"
 
-        # ====================================================
-        # CLASSROOM EVIDENCE
-        # ====================================================
+            elif area_type == "Classroom Activity Conducted":
 
-        evidence_type = group[
-            "evidence_type"
-        ]
+                category = "activity"
+                folder = "activity_videos"
 
-        evidence_files = group[
-            "evidence_files"
-        ]
+            elif area_type == (
+                "Student Written Work / Writing Practice"
+            ):
 
+                category = "writing"
+                folder = "student_work"
 
-        if evidence_type == "Classroom Activity":
+            elif area_type == (
+                "Phonics / Phonetics Implementation"
+            ):
 
-            evidence_folder = (
-                f"{implementation_base}"
-                f"/activity_videos"
-            )
+                category = "phonics"
+                folder = "phonics"
 
-            evidence_category = "video"
+            elif area_type == "Student Assessment":
 
+                category = "assessment"
+                folder = "student_assessments"
 
-        elif evidence_type == "Student Written Work":
+            elif area_type == "Teacher Portfolio":
 
-            evidence_folder = (
-                f"{implementation_base}"
-                f"/student_work"
-            )
+                category = "portfolio"
+                folder = "teacher_portfolio"
 
-            evidence_category = "writing"
+            else:
 
+                continue
 
-        elif evidence_type == (
-            "Phonics / Phonetics Implementation"
-        ):
-
-            evidence_folder = (
-                f"{implementation_base}"
-                f"/phonics"
-            )
-
-            evidence_category = "phonics"
-
-
-        elif evidence_type == "Student Assessment":
-
-            evidence_folder = (
-                f"{implementation_base}"
-                f"/student_assessments"
-            )
-
-            evidence_category = "assessment"
-
-
-        elif evidence_type == "Teacher Portfolio":
-
-            evidence_folder = (
-                f"{implementation_base}"
-                f"/teacher_portfolio"
-            )
-
-            evidence_category = "portfolio"
-
-
-        else:
-
-            evidence_folder = None
-            evidence_category = None
-
-
-        if (
-            evidence_folder
-            and evidence_category
-        ):
-
-            for evidence_file in evidence_files:
+            for file in files:
 
                 upload_jobs.append(
                     {
-                        "file": evidence_file,
-                        "folder": evidence_folder,
-                        "category": evidence_category,
-                        "group_number": group_number
+                        "uploaded_file": file,
+
+                        "folder_name":
+                            f"{group_base}/{folder}",
+
+                        "category": category,
+
+                        "group_number":
+                            group_number,
                     }
                 )
 
+    # --------------------------------------------------------
+    # UPLOAD
+    # --------------------------------------------------------
 
-    # ========================================================
-    # FILE SIZE VALIDATION
-    # ========================================================
+    progress_placeholder = st.empty()
 
-    oversized_files = []
+    progress_placeholder.info(
+        f"Uploading {len(upload_jobs)} file(s)..."
+    )
 
+    upload_results = upload_all_files_parallel(
+        upload_jobs
+    )
 
-    for job in upload_jobs:
+    # --------------------------------------------------------
+    # CHECK UPLOAD RESULTS
+    # --------------------------------------------------------
 
-        size_mb = get_file_size_mb(
-            job["file"]
-        )
+    failed_uploads = [
+        result
+        for result in upload_results
+        if not result["success"]
+    ]
 
-        if size_mb > MAX_FILE_SIZE_MB:
+    if failed_uploads:
 
-            oversized_files.append(
-                (
-                    getattr(
-                        job["file"],
-                        "name",
-                        "Unknown file"
-                    ),
-                    size_mb
-                )
-            )
-
-
-    if oversized_files:
+        progress_placeholder.empty()
 
         st.error(
-            f"Some files exceed the "
-            f"{MAX_FILE_SIZE_MB} MB limit."
+            "Some files could not be uploaded. "
+            "No database records were created."
         )
 
-        for filename, size_mb in oversized_files:
+        for result in failed_uploads:
 
-            st.write(
-                f"- {filename}: "
-                f"{size_mb:.2f} MB"
+            st.error(
+                f"{result.get('file_name', 'File')}: "
+                f"{result.get('error', 'Unknown error')}"
             )
 
         st.stop()
 
+    # --------------------------------------------------------
+    # COLLECT UPLOAD PATHS
+    # --------------------------------------------------------
 
-    # ========================================================
-    # UPLOAD FILES
-    # ========================================================
+    for result in upload_results:
 
-    if upload_jobs:
+        if not result["success"]:
+            continue
 
-        progress_placeholder = st.empty()
+        group_number = result["group_number"]
+        category = result["category"]
+        path = result["path"]
 
-        progress_placeholder.info(
-            f"Uploading {len(upload_jobs)} file(s)..."
-        )
+        if group_number not in group_upload_metadata:
+            continue
 
+        if category not in group_upload_metadata[
+            group_number
+        ]:
+            continue
 
-        upload_results = upload_all_files_parallel(
-            upload_jobs
-        )
+        group_upload_metadata[
+            group_number
+        ][category].append(path)
 
+    # --------------------------------------------------------
+    # CREATE DATABASE ROWS
+    # --------------------------------------------------------
 
-        failed_uploads = [
-            result
-            for result in upload_results
-            if not result["success"]
+    inserted_groups = 0
+
+    database_errors = []
+
+    for group in all_groups:
+
+        group_number = group["group_number"]
+
+        metadata = group_upload_metadata[
+            group_number
         ]
 
+        def join_paths(category):
 
-        if failed_uploads:
-
-            progress_placeholder.empty()
-
-            st.error(
-                "Some files could not be uploaded. "
-                "No database records were created."
+            paths = metadata.get(
+                category,
+                []
             )
 
+            return ",".join(paths)
 
-            for failed in failed_uploads:
+        implementation_paths = {
+            "voice":
+                join_paths("voice"),
 
-                st.write(
-                    f"❌ {failed['file_name']} — "
-                    f"{failed['error']}"
-                )
+            "lesson_plan":
+                join_paths("lesson_plan"),
 
-            st.stop()
+            "activity":
+                join_paths("activity"),
 
+            "writing":
+                join_paths("writing"),
 
-        progress_placeholder.success(
-            f"Successfully uploaded "
-            f"{len(upload_results)} file(s)."
-        )
+            "phonics":
+                join_paths("phonics"),
 
-    else:
+            "assessment":
+                join_paths("assessment"),
 
-        upload_results = []
+            "portfolio":
+                join_paths("portfolio"),
+        }
 
-
-    # ========================================================
-    # GROUP PATH HELPER
-    # ========================================================
-
-    def get_paths(
-        group_number,
-        category
-    ):
-
-        return [
-            result["path"]
-            for result in upload_results
-            if (
-                result["group_number"]
-                == group_number
-                and result["category"]
-                == category
-                and result["path"]
-            )
-        ]
-
-
-    # ========================================================
-    # TEACHER NAME
-    # ========================================================
-
-    first_name, last_name = split_teacher_name(
-        selected_teacher
-    )
-
-
-    # ========================================================
-    # INSERT EACH IMPLEMENTATION
-    # ========================================================
-
-    inserted_count = 0
-
-
-    try:
-
-        for group in group_states:
-
-            group_number = group[
-                "group_number"
-            ]
-
-
-            # ----------------------------------------------
-            # FILE PATHS
-            # ----------------------------------------------
-
-            voice_paths = get_paths(
-                group_number,
-                "voice"
-            )
-
-
-            lesson_plan_paths = get_paths(
-                group_number,
-                "picture"
-            )
-
-
-            activity_video_paths = get_paths(
-                group_number,
-                "video"
-            )
-
-
-            writing_paths = get_paths(
-                group_number,
-                "writing"
-            )
-
-
-            assessment_paths = get_paths(
-                group_number,
-                "assessment"
-            )
-
-
-            phonics_paths = get_paths(
-                group_number,
-                "phonics"
-            )
-
-
-            portfolio_paths = get_paths(
-                group_number,
-                "portfolio"
-            )
-
-
-            # ----------------------------------------------
-            # DB ENTRY
-            # ----------------------------------------------
-
-            entry = {
-
-                "State_Zone":
-                    selected_state,
-
-                "Uploaded_By":
-                    selected_consultant,
-
-                "Institution":
-                    selected_school,
-
-                "Center":
-                    selected_school,
-
-                "FirstName":
-                    first_name,
-
-                "LastName":
-                    last_name,
-
-                "FullName":
-                    selected_teacher,
-
-                "Role":
-                    "Teacher",
-
-                "Type":
-                    "Implementation",
-
-                "Grade":
-                    group["grade"],
-
-                "Subject":
-                    group["subject"],
-
-                "Book":
-                    group["lesson_name"],
-
-                "StartTime":
-                    "09:00",
-
-                "EndTime":
-                    "09:45",
-
-                "Duration_Min":
-                    0.0,
-
-                "Voice_Note_Link":
-                    ",".join(voice_paths)
-                    if voice_paths
-                    else None,
-
-                "Lesson_Plan_Picture":
-                    ",".join(lesson_plan_paths)
-                    if lesson_plan_paths
-                    else None,
-
-                "Video_Evidence_1":
-                    activity_video_paths[0]
-                    if len(activity_video_paths) > 0
-                    else None,
-
-                "Video_Evidence_2":
-                    activity_video_paths[1]
-                    if len(activity_video_paths) > 1
-                    else None,
-
-                "Video_Evidence_3":
-                    activity_video_paths[2]
-                    if len(activity_video_paths) > 2
-                    else None,
-
-                "Writing_Sample_Link":
-                    ",".join(writing_paths)
-                    if writing_paths
-                    else None,
-
-                "Student_Assessment_Link":
-                    ",".join(assessment_paths)
-                    if assessment_paths
-                    else None,
-
-                "Phonics_Evidence_Link":
-                    ",".join(phonics_paths)
-                    if phonics_paths
-                    else None,
-
-                "Portfolio_Evidence_Link":
-                    ",".join(portfolio_paths)
-                    if portfolio_paths
-                    else None,
-
-                "Assessment_Score_Pct":
-                    None
-            }
-
-
-            # ----------------------------------------------
-            # INSERT
-            # ----------------------------------------------
+        try:
 
             insert_implementation_to_db(
-                entry
+                state_zone=selected_state,
+                uploaded_by=selected_consultant,
+                institution=selected_school,
+                teacher_name=selected_teacher,
+                group_data=group,
+                implementation_paths=
+                    implementation_paths,
             )
 
-            inserted_count += 1
+            inserted_groups += 1
 
+        except Exception as e:
 
-        # ====================================================
-        # SUCCESS
-        # ====================================================
+            database_errors.append(
+                {
+                    "group": group_number,
+                    "error": str(e)
+                }
+            )
 
-        st.success(
-            f"✅ Successfully submitted "
-            f"{inserted_count} implementation(s)."
-        )
+    progress_placeholder.empty()
 
+    # --------------------------------------------------------
+    # FINAL RESULT
+    # --------------------------------------------------------
 
-        st.info(
-            f"Submission ID: `{submission_id}`"
-        )
-
-
-        # Clear cached master data if necessary
-        st.cache_data.clear()
-
-
-    except Exception as e:
+    if database_errors:
 
         st.error(
-            "Submission could not be saved."
+            "The files were uploaded, but some implementation "
+            "records could not be saved to the database."
         )
 
-        st.code(
-            str(e)
-        )
+        for item in database_errors:
+
+            st.error(
+                f"Implementation Group "
+                f"{item['group']}: "
+                f"{item['error']}"
+            )
+
+        st.stop()
+
+    # Clear cache so the next page load can get fresh data
+    try:
+        fetch_master_db_from_supabase.clear()
+    except Exception:
+        pass
+
+    st.success(
+        f"Your daily implementation has been shared successfully "
+        f"for {inserted_groups} class(es)."
+    )
+
+    st.info(
+        f"Implementation reference: {submission_id}"
+    )
+
+    st.balloons()
+
+    # Reset number of groups for next submission
+    st.session_state.implementation_group_count = 1
