@@ -12,6 +12,8 @@ import urllib.parse
 from io import BytesIO
 from sqlalchemy import text
 from supabase import create_client
+from pydantic import BaseModel, Field
+from typing import Dict, Literal
 
 # Google GenAI SDK (Requires package 'google-genai')
 from google import genai
@@ -39,14 +41,6 @@ except Exception as e:
     st.error(f"Supabase credentials missing or misconfigured in Streamlit Secrets: {e}")
 
 # --- CLOUDFLARE R2 (PUBLIC EVIDENCE BUCKET) SETUP ---
-# teacher_records evidence columns now store R2 OBJECT KEYS (written by the
-# already-migrated Teacher App) instead of full URLs. The bucket is public
-# (either the built-in r2.dev subdomain, or a custom domain you've connected
-# to the bucket for public serving), so a key resolves to a URL with simple
-# string concatenation — no signing, no credentials, no gateway needed.
-# R2_PUBLIC_BASE_URL examples:
-#   "https://pub-xxxxxxxxxxxxxxxx.r2.dev"
-#   "https://evidence.yourdomain.com"   (custom domain mapped to the bucket)
 R2_ENABLED = False
 try:
     R2_PUBLIC_BASE_URL = st.secrets["r2"]["public_base_url"].rstrip('/')
@@ -614,6 +608,66 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
         return response.text
     except Exception as e:
         return f"AI Generation Notice: {e}"
+
+
+# --- STRUCTURED OBSERVATION AI HELPER ---
+class RubricItemOutput(BaseModel):
+    grade: Literal["A", "B", "C", "NA"] = Field(description="Assigned grade based on OneLern rubric: A, B, C, or NA.")
+    remarks: str = Field(description="Specific, constructive remark explaining this grade.")
+
+class ClassroomObservationAIOutput(BaseModel):
+    flow_of_class: str = Field(description="Numbered step-by-step chronology of how the teacher conducted the class.")
+    high_points: str = Field(description="Numbered bullet points highlighting strong pedagogical moments.")
+    recommendations: str = Field(description="Actionable, prioritized recommendations for the teacher.")
+    rubrics: Dict[str, RubricItemOutput] = Field(description="Evaluations for each of the 12 rubric categories.")
+
+
+def generate_structured_observation_ai(audio_file_obj=None, text_transcript=""):
+    """Uses Gemini to extract narratives, grades, and remarks into a structured JSON schema."""
+    if not ai_client:
+        return None, "Gemini API client is not initialized in Streamlit secrets."
+
+    rubric_guidelines_str = json.dumps(OBSERVATION_RUBRIC_CONFIG, indent=2)
+
+    prompt = f"""
+    You are an expert Academic Consultant and Classroom Observer evaluating a school teacher.
+    Analyze the voice debrief or rough field notes provided by the mentor.
+
+    Here are the official 12 rubric categories and their descriptions:
+    {rubric_guidelines_str}
+
+    Mentor's Field Notes / Instructions:
+    {text_transcript if text_transcript.strip() else 'Analyze the attached voice note recording.'}
+
+    Your Task:
+    1. Chronologically reconstruct 'flow_of_class' as numbered steps.
+    2. Extract key positive practices into 'high_points' as numbered points.
+    3. Formulate actionable, constructive 'recommendations' as numbered points.
+    4. For all 12 rubric categories, assign the most appropriate grade ('A', 'B', 'C', or 'NA') and supply a 1-sentence specific observation remark explaining the rating. If a category was not observed or mentioned, assign 'B' or 'NA' with a neutral remark. Ensure dictionary keys strictly match the 12 category names.
+    """
+
+    contents_payload = [prompt]
+    if audio_file_obj is not None:
+        try:
+            audio_bytes = audio_file_obj.read()
+            contents_payload.append(
+                genai.types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
+            )
+        except Exception as e:
+            return None, f"Could not read audio bytes: {e}"
+
+    try:
+        response = ai_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=contents_payload,
+            config={
+                "response_mime_type": "application/json",
+                "response_schema": ClassroomObservationAIOutput,
+            }
+        )
+        return json.loads(response.text), None
+    except Exception as e:
+        return None, str(e)
 
 
 # --- REPORTLAB PDF GENERATORS ---
@@ -1196,24 +1250,12 @@ def generate_pdf_report(title_text, subtitle_text, school_name, summary_metrics,
     return buffer
 
 
-# --- R2 EVIDENCE RESOLUTION HELPERS ------------------------------------------------
-# These helpers translate a raw value stored in a teacher_records evidence column
-# into a single playable/linkable URL. A raw value may be:
-#   - a legacy Supabase Storage http(s) URL (records created before the Teacher App
-#     migration to R2) -> used as-is, unchanged.
-#   - a Cloudflare R2 object key (records created after migration), e.g.
-#     "teacher_uploads/DPS_Rohini/Anita_Sharma/2026-08-14/8f2c1e/video/clip1.mp4"
-#     -> resolved by joining it onto the bucket's public base URL. The bucket is
-#     public, so this is plain string concatenation — no signing, no credentials,
-#     no expiry, which is exactly what makes it safe to print permanently in a
-#     PDF report: the same link works today and will still work years from now.
-
+# --- R2 EVIDENCE RESOLUTION HELPERS ---
 def _is_legacy_http_url(value: str) -> bool:
     return value.strip().lower().startswith(("http://", "https://"))
 
 
 def split_evidence_raw_value(raw_val: str):
-    """One DB field can hold multiple comma-separated files (URLs or R2 keys)."""
     if raw_val is None:
         return []
     raw_val = str(raw_val).strip()
@@ -1223,7 +1265,6 @@ def split_evidence_raw_value(raw_val: str):
 
 
 def detect_evidence_file_type(value: str) -> str:
-    """Classify a URL or R2 key by extension so the app knows which widget to use."""
     path_part = urllib.parse.urlparse(value).path if _is_legacy_http_url(value) else value
     ext = os.path.splitext(path_part)[1].lower()
     if ext in (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".weba"):
@@ -1238,9 +1279,6 @@ def detect_evidence_file_type(value: str) -> str:
 
 
 def get_public_evidence_url(object_key: str):
-    """Permanent public URL for an R2 object key — same value used for in-app
-    preview AND for PDF reports, since the bucket is public and the link
-    never expires or needs re-signing."""
     if not R2_ENABLED or not object_key:
         return None
     encoded_key = urllib.parse.quote(object_key, safe="/")
@@ -1248,13 +1286,9 @@ def get_public_evidence_url(object_key: str):
 
 
 def resolve_evidence_links(raw_value: str):
-    """Given one raw evidence-column value, return a list of dicts, one per file.
-    'url' is the single permanent/public link, used both for in-app preview and
-    for anything written into a PDF report."""
     resolved = []
     for single_val in split_evidence_raw_value(raw_value):
         if _is_legacy_http_url(single_val):
-            # Pre-migration record: already a full, working, permanent URL.
             resolved.append({
                 "source": "legacy_url",
                 "object_key": None,
@@ -1262,7 +1296,6 @@ def resolve_evidence_links(raw_value: str):
                 "file_type": detect_evidence_file_type(single_val),
             })
         else:
-            # Post-migration record: value is an R2 object key.
             object_key = single_val.lstrip("/")
             resolved.append({
                 "source": "r2_key",
@@ -1274,8 +1307,6 @@ def resolve_evidence_links(raw_value: str):
 
 
 def render_evidence_media_preview(item: dict, widget_key: str):
-    """Inline audio/video/image/PDF playback inside the Admin App (Requirement:
-    display/play teacher-uploaded evidence, not just link to it)."""
     display_url = item.get("url")
     file_type = item.get("file_type", "other")
     if not display_url:
@@ -1298,7 +1329,6 @@ def render_evidence_media_preview(item: dict, widget_key: str):
             st.markdown(f"[⬇️ Open / Download File]({display_url})")
     except Exception:
         st.caption("⚠️ Unable to render an inline preview for this file. Use the link to open it directly.")
-# --- END R2 EVIDENCE RESOLUTION HELPERS --------------------------------------------
 
 
 def extract_evidence_items_vectorized(df_src, col_name):
@@ -1306,9 +1336,6 @@ def extract_evidence_items_vectorized(df_src, col_name):
         return []
 
     col_str = df_src[col_name].fillna('').astype(str).str.strip()
-    # NOTE (R2 migration): evidence columns now hold either a legacy Supabase
-    # Storage http(s) URL OR a Cloudflare R2 object key (no scheme). A non-empty
-    # cell is a candidate either way, so we no longer require an 'http' substring.
     valid_mask = col_str.str.len() > 0
     valid_rows = df_src[valid_mask]
 
@@ -1327,8 +1354,6 @@ def extract_evidence_items_vectorized(df_src, col_name):
         b_str = str(r['Book']).strip() if 'Book' in r and str(r['Book']).strip() else "Lesson Plan"
         for f in resolved_files:
             items.append({
-                # 'url' is the single public, permanent link so every existing
-                # PDF/markdown call site keeps working unchanged.
                 'url': f['url'],
                 'file_type': f['file_type'],
                 'object_key': f['object_key'],
@@ -3271,8 +3296,6 @@ else:
         avail_ev_cols = [c for c in evidence_cols if c in filtered_df.columns]
 
         if not filtered_df.empty and avail_ev_cols:
-            # R2 migration: a populated cell may be a legacy http(s) URL or a
-            # raw R2 object key, so any non-empty value counts as a submission.
             url_mask = pd.concat([
                 filtered_df[c].fillna('').astype(str).str.strip().str.len() > 0
                 for c in avail_ev_cols
@@ -3342,11 +3365,55 @@ else:
     # --- TAB 8: PHYSICAL CLASSROOM VISIT OBSERVATION FORM & LONGITUDINAL AUDIT TRAIL ---
     with tab8:
         st.header("📋 Classroom Observation Form & Longitudinal Audit Trail")
-        st.caption("Punch real-time classroom visit observations, select parameter rubrics with live yellow highlighting, and generate reports.")
+        st.caption("Punch real-time classroom visit observations, auto-populate rubrics and narratives with Gemini voice debriefs, and generate reports.")
 
         subtab_form, subtab_history = st.tabs(["📝 New Classroom Observation Visit", "📊 Teacher Visit History & Outcomes"])
 
         with subtab_form:
+            # --- AI Fast-Track Debrief Assistant (Voice & Text) ---
+            st.markdown("##### 🎙️ AI Fast-Track Observation Assistant (Voice or Rough Notes)")
+            st.caption("Speak your post-class debrief or type raw bullet points. Gemini will analyze the lesson, determine all 12 rubric grades and remarks, and write the narratives.")
+            
+            ai_v_col1, ai_v_col2 = st.columns([1.2, 1.8])
+            with ai_v_col1:
+                obs_audio_voice = st.audio_input("Record Voice Debrief:", key="obs_voice_input_top")
+            with ai_v_col2:
+                obs_text_field = st.text_area(
+                    "Or Type Rough Observation Notes:",
+                    placeholder="e.g., Started with a recap on states of matter. Showed water bottle for liquid. High student engagement with cold calling. However, didn't check workbooks or provide remedial feedback...",
+                    height=105,
+                    key="obs_text_notes_top"
+                )
+
+            if st.button("✨ Auto-Populate Form with Gemini AI", type="primary", key="btn_run_gemini_tab8"):
+                if not obs_audio_voice and not obs_text_field.strip():
+                    st.warning("Please record a voice note or provide rough text notes before generating.")
+                else:
+                    with st.spinner("Gemini is analyzing pedagogical indicators and structuring the evaluation..."):
+                        ai_data, ai_err = generate_structured_observation_ai(
+                            audio_file_obj=obs_audio_voice,
+                            text_transcript=obs_text_field.strip()
+                        )
+                        if ai_err:
+                            st.error(f"AI Generation Error: {ai_err}")
+                        elif ai_data:
+                            # 1. Update Narratives in Session State
+                            st.session_state["obs_narr_flow"] = ai_data.get("flow_of_class", "")
+                            st.session_state["obs_narr_high"] = ai_data.get("high_points", "")
+                            st.session_state["obs_narr_recom"] = ai_data.get("recommendations", "")
+
+                            # 2. Update All 12 Rubrics in Session State
+                            rubric_res = ai_data.get("rubrics", {})
+                            for cat_k in OBSERVATION_RUBRIC_CONFIG.keys():
+                                if cat_k in rubric_res:
+                                    st.session_state[f"rubric_opt_{cat_k}"] = rubric_res[cat_k].get("grade", "B")
+                                    st.session_state[f"rubric_rem_{cat_k}"] = rubric_res[cat_k].get("remarks", "")
+
+                            st.success("✅ Audit form populated successfully! Review the ratings and narratives below before saving.")
+                            st.rerun()
+
+            st.markdown("---")
+
             with st.form("classroom_visit_full_form"):
                 st.subheader("1. General Information & Metadata")
                 col_m1, col_m2, col_m3 = st.columns(3)
@@ -3370,7 +3437,7 @@ else:
 
                 st.markdown("---")
                 st.subheader("2. Parameter-Wise Evaluation Rubric (with Yellow Highlight Sync)")
-                st.caption("Select the grade level (the selected card highlights in yellow) and insert or customize remarks.")
+                st.caption("Select the grade level (the selected card highlights in yellow) and customize remarks.")
 
                 final_rubric_responses = {}
 
@@ -3420,7 +3487,9 @@ else:
                             key=f"snip_{cat_name}"
                         )
                         
-                        default_text = snippet_choice if snippet_choice != "(None / Custom)" else ""
+                        existing_rem = st.session_state.get(f"rubric_rem_{cat_name}", "")
+                        default_text = snippet_choice if snippet_choice != "(None / Custom)" else existing_rem
+
                         param_remark = st.text_area(
                             f"Specific Action Item / Remark:",
                             value=default_text,
@@ -3462,9 +3531,13 @@ else:
                     "4. Increase opportunities for students to predict, observe, and reason before providing explanations."
                 )
 
-                input_flow = st.text_area("Flow of the Class (Step-by-step chronology):", value=flow_default, height=130, key="obs_narr_flow")
-                input_high_points = st.text_area("High Points of the Class:", value=high_points_default, height=110, key="obs_narr_high")
-                input_recom = st.text_area("Recommendations by the Academic Mentor:", value=recom_default, height=110, key="obs_narr_recom")
+                current_flow = st.session_state.get("obs_narr_flow", flow_default)
+                current_high = st.session_state.get("obs_narr_high", high_points_default)
+                current_recom = st.session_state.get("obs_narr_recom", recom_default)
+
+                input_flow = st.text_area("Flow of the Class (Step-by-step chronology):", value=current_flow, height=130, key="obs_narr_flow")
+                input_high_points = st.text_area("High Points of the Class:", value=current_high, height=110, key="obs_narr_high")
+                input_recom = st.text_area("Recommendations by the Academic Mentor:", value=current_recom, height=110, key="obs_narr_recom")
 
                 submit_obs_form = st.form_submit_button("🚀 Compile PDF, Save to Database & Generate Audit")
 
