@@ -533,7 +533,7 @@ st.markdown(
     """
 Use this space to share your next day lesson implementation
 through a short voice reflection and relevant classroom
-implementation activity snd observation of todays class.
+activity,student writing,assesment,portfolio,phonics pic/videos of todays class.
 """
 )
 
