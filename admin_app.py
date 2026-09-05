@@ -9,6 +9,7 @@ import json
 import uuid
 import hashlib
 import urllib.parse
+import time
 from io import BytesIO
 from sqlalchemy import text
 from supabase import create_client
@@ -17,6 +18,7 @@ from typing import List, Literal
 
 # Google GenAI SDK (Requires package 'google-genai')
 from google import genai
+from google.genai import errors
 
 # ReportLab PDF Libraries
 from reportlab.lib.pagesizes import letter
@@ -590,9 +592,10 @@ def build_teacher_roster_cached(df):
 def get_gemini_summary(context_prompt, audio_file_obj=None):
     if not ai_client:
         return "⚠️ Gemini API key not found in Streamlit secrets."
-    try:
-        contents_payload = [context_prompt]
-        if audio_file_obj is not None:
+    
+    contents_payload = [context_prompt]
+    if audio_file_obj is not None:
+        try:
             audio_bytes = audio_file_obj.read()
             contents_payload.append(
                 genai.types.Part.from_bytes(
@@ -600,17 +603,25 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
                     mime_type="audio/wav"
                 )
             )
+        except Exception:
+            pass
 
-        response = ai_client.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=contents_payload
-        )
-        return response.text
-    except Exception as e:
-        return f"AI Generation Notice: {e}"
+    models_to_try = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash']
+    for m in models_to_try:
+        try:
+            response = ai_client.models.generate_content(
+                model=m,
+                contents=contents_payload
+            )
+            return response.text
+        except Exception:
+            time.sleep(1)
+            continue
+            
+    return "AI Generation Notice: Service temporarily busy. Please retry shortly."
 
 
-# --- STRUCTURED OBSERVATION AI HELPER (COMPLIANT WITH DEVELOPER API) ---
+# --- STRUCTURED OBSERVATION AI HELPER (COMPLIANT WITH DEVELOPER API & RETRY LOGIC) ---
 class RubricEvaluationItem(BaseModel):
     category: str = Field(description="The exact category name from the 12 rubric parameters.")
     grade: Literal["A", "B", "C", "NA"] = Field(description="Assigned grade based on OneLern rubric: A, B, C, or NA.")
@@ -623,8 +634,8 @@ class ClassroomObservationAIOutput(BaseModel):
     rubrics: List[RubricEvaluationItem] = Field(description="Evaluations for each of the 12 rubric categories.")
 
 
-def generate_structured_observation_ai(audio_file_obj=None, text_transcript=""):
-    """Uses Gemini to extract narratives, grades, and remarks into a schema compatible with Developer API."""
+def generate_structured_observation_ai(audio_file_obj=None, text_transcript="", max_retries=3):
+    """Extracts observation narratives and 12-rubric ratings with automatic fallback and retries."""
     if not ai_client:
         return None, "Gemini API client is not initialized in Streamlit secrets."
 
@@ -657,18 +668,33 @@ def generate_structured_observation_ai(audio_file_obj=None, text_transcript=""):
         except Exception as e:
             return None, f"Could not read audio bytes: {e}"
 
-    try:
-        response = ai_client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=contents_payload,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": ClassroomObservationAIOutput,
-            }
-        )
-        return json.loads(response.text), None
-    except Exception as e:
-        return None, str(e)
+    candidate_models = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"]
+    last_exception = None
+
+    for model_name in candidate_models:
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = ai_client.models.generate_content(
+                    model=model_name,
+                    contents=contents_payload,
+                    config={
+                        "response_mime_type": "application/json",
+                        "response_schema": ClassroomObservationAIOutput,
+                    }
+                )
+                return json.loads(response.text), None
+            except errors.APIError as e:
+                last_exception = e
+                if getattr(e, "code", None) in [503, 429] or "503" in str(e):
+                    time.sleep(2 ** attempt)
+                    continue
+                else:
+                    break
+            except Exception as e:
+                last_exception = e
+                time.sleep(1.5)
+
+    return None, f"Temporarily unable to process request: {last_exception}"
 
 
 # --- REPORTLAB PDF GENERATORS ---
