@@ -22,7 +22,7 @@ st.set_page_config(
 # IMPORTANT: set this to the exact public URL of this deployed app
 # (the one in your browser address bar), no trailing slash.
 # Example: "https://g7zafrvxkkmcpwkeq9.streamlit.app"
-APP_BASE_URL = "https://REPLACE-WITH-YOUR-APP-URL.streamlit.app"
+APP_BASE_URL = "https://consultant-bvjsg7zafrvxkkmcpwkeq9.streamlit.app"
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
 MAX_PARALLEL_UPLOADS = 5
