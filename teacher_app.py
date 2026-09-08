@@ -776,25 +776,12 @@ def render_implementation_group(
             """
         )
     st.caption(
-        "Record your reflection or upload an existing voice note."
+        "Record your reflection."
     )
     recorded_voice = st.audio_input(
         "🎙️ Record Your Reflection",
         sample_rate=16000,
         key=f"record_voice_{group_number}"
-    )
-    uploaded_voice = st.file_uploader(
-        "Or Upload an Existing Voice Note",
-        type=[
-            "mp3",
-            "wav",
-            "m4a",
-            "aac",
-            "ogg",
-            "mp4"
-        ],
-        accept_multiple_files=True,
-        key=f"voice_upload_{group_number}"
     )
     # ========================================================
     # CLASSROOM IMPLEMENTATION MATERIALS
@@ -807,13 +794,6 @@ def render_implementation_group(
         "activities, student written work, phonics/phonetics "
         "implementation, student assessments, and teacher "
         "portfolio materials."
-    )
-    st.markdown(
-        "#### Classroom Implementation Materials"
-    )
-    st.caption(
-        "You can upload the relevant material completed "
-        "for your classroom implementation."
     )
     uploaded_materials = []
     # ========================================================
@@ -1090,8 +1070,6 @@ def render_implementation_group(
             lesson_name,
         "recorded_voice":
             recorded_voice,
-        "uploaded_voice":
-            uploaded_voice or [],
         "uploaded_materials":
             uploaded_materials
     }
@@ -1271,20 +1249,6 @@ if st.session_state.get(
             upload_jobs.append(
                 (
                     recorded_voice,
-                    f"{group_base}/voice_notes",
-                    "voice",
-                    group_number
-                )
-            )
-        # ----------------------------------------------------
-        # UPLOADED VOICE
-        # ----------------------------------------------------
-        for voice_file in group[
-            "uploaded_voice"
-        ]:
-            upload_jobs.append(
-                (
-                    voice_file,
                     f"{group_base}/voice_notes",
                     "voice",
                     group_number
