@@ -457,6 +457,10 @@ if deep_linked_school_param and not deep_link_matches.empty:
     )
     consultant_df = deep_link_matches
     school_df = deep_link_matches
+    # Kept in sync with the manual-flow branch below, since later code
+    # (e.g. the "Other School" teacher-list check) reads this variable
+    # regardless of which branch set selected_school.
+    selected_school_option = selected_school
     st.success(
         f"📍 School: **{selected_school}** (opened via your school's shared link)"
     )
