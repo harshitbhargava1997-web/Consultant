@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import uuid
 import concurrent.futures
+import urllib.parse
 from datetime import datetime, timezone
 from supabase import create_client
 import boto3
@@ -18,6 +19,10 @@ st.set_page_config(
 # ============================================================
 # CONSTANTS
 # ============================================================
+# IMPORTANT: set this to the exact public URL of this deployed app
+# (the one in your browser address bar), no trailing slash.
+# Example: "https://g7zafrvxkkmcpwkeq9.streamlit.app"
+APP_BASE_URL = "https://REPLACE-WITH-YOUR-APP-URL.streamlit.app"
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
 MAX_PARALLEL_UPLOADS = 5
@@ -420,106 +425,163 @@ st.subheader(
     "👤 Teacher Details"
 )
 # ============================================================
-# STATE / ZONE
+# SCHOOL DEEP LINK (?school=...)
 # ============================================================
-state_options = sorted(
-    [
-        x
-        for x in
-        master_df["State_Zone"]
-        .dropna()
-        .unique()
-        if str(x).strip()
-    ]
-)
-selected_state = st.selectbox(
-    "State / Zone",
-    options=[
-        "Select State / Zone"
-    ] + state_options,
-    key="selected_state"
-)
-if selected_state == "Select State / Zone":
-    st.stop()
-state_df = master_df[
-    master_df["State_Zone"]
-    == selected_state
-].copy()
-# ============================================================
-# CONSULTANT
-# ============================================================
-consultant_options = sorted(
-    [
-        x
-        for x in
-        state_df["Uploaded_By"]
-        .dropna()
-        .unique()
-        if str(x).strip()
-    ]
-)
-selected_consultant = st.selectbox(
-    "Consultant",
-    options=[
-        "Select Consultant"
-    ] + consultant_options,
-    key="selected_consultant"
-)
-if selected_consultant == "Select Consultant":
-    st.stop()
-consultant_df = state_df[
-    state_df["Uploaded_By"]
-    == selected_consultant
-].copy()
-# ============================================================
-# SCHOOL
-# ============================================================
-school_options = sorted(
-    [
-        x
-        for x in
-        consultant_df["Institution"]
-        .dropna()
-        .unique()
-        if str(x).strip()
-    ]
-)
-school_dropdown_options = (
-    ["Select School"]
-    + school_options
-    + [OTHER_SCHOOL_OPTION]
-)
-selected_school_option = st.selectbox(
-    "School",
-    options=school_dropdown_options,
-    key="selected_school_option"
-)
-if selected_school_option == "Select School":
-    st.stop()
-# ============================================================
-# OTHER SCHOOL / NOT LISTED
-# ============================================================
-if selected_school_option == OTHER_SCHOOL_OPTION:
-    manually_entered_school = st.text_input(
-        "Enter School Name",
-        placeholder="Enter the school's full name",
-        key="manually_entered_school"
-    ).strip()
-    if not manually_entered_school:
-        st.info(
-            "Please enter the school's name to continue."
-        )
-        st.stop()
-    selected_school = manually_entered_school
-    # Empty dataframe because the school
-    # is not present in the master roster.
-    school_df = consultant_df.iloc[0:0].copy()
-else:
-    selected_school = selected_school_option
-    school_df = consultant_df[
-        consultant_df["Institution"]
-        == selected_school
+# Consultants can copy a per-school link (generated further below)
+# and share it with that school directly. Anyone opening such a link
+# lands straight on that school's teacher list, skipping the
+# State / Consultant / School dropdowns entirely.
+deep_linked_school_param = st.query_params.get("school", "").strip()
+deep_link_matches = (
+    master_df[
+        master_df["Institution"].astype(str).str.strip().str.lower()
+        == deep_linked_school_param.strip().lower()
     ].copy()
+    if deep_linked_school_param
+    else master_df.iloc[0:0]
+)
+if deep_linked_school_param and not deep_link_matches.empty:
+    # ---- DEEP LINK MODE: school pre-selected via shared link ----
+    selected_school = deep_link_matches["Institution"].iloc[0]
+    state_mode = deep_link_matches["State_Zone"].mode()
+    selected_state = (
+        state_mode.iloc[0]
+        if not state_mode.empty
+        else deep_link_matches["State_Zone"].iloc[0]
+    )
+    consultant_mode = deep_link_matches["Uploaded_By"].mode()
+    selected_consultant = (
+        consultant_mode.iloc[0]
+        if not consultant_mode.empty
+        else deep_link_matches["Uploaded_By"].iloc[0]
+    )
+    consultant_df = deep_link_matches
+    school_df = deep_link_matches
+    st.success(
+        f"📍 School: **{selected_school}** (opened via your school's shared link)"
+    )
+else:
+    if deep_linked_school_param:
+        st.warning(
+            f"The link for \"{deep_linked_school_param}\" wasn't recognized. "
+            "Please select your details manually below."
+        )
+    # ============================================================
+    # STATE / ZONE
+    # ============================================================
+    state_options = sorted(
+        [
+            x
+            for x in
+            master_df["State_Zone"]
+            .dropna()
+            .unique()
+            if str(x).strip()
+        ]
+    )
+    selected_state = st.selectbox(
+        "State / Zone",
+        options=[
+            "Select State / Zone"
+        ] + state_options,
+        key="selected_state"
+    )
+    if selected_state == "Select State / Zone":
+        st.stop()
+    state_df = master_df[
+        master_df["State_Zone"]
+        == selected_state
+    ].copy()
+    # ============================================================
+    # CONSULTANT
+    # ============================================================
+    consultant_options = sorted(
+        [
+            x
+            for x in
+            state_df["Uploaded_By"]
+            .dropna()
+            .unique()
+            if str(x).strip()
+        ]
+    )
+    selected_consultant = st.selectbox(
+        "Consultant",
+        options=[
+            "Select Consultant"
+        ] + consultant_options,
+        key="selected_consultant"
+    )
+    if selected_consultant == "Select Consultant":
+        st.stop()
+    consultant_df = state_df[
+        state_df["Uploaded_By"]
+        == selected_consultant
+    ].copy()
+    # ============================================================
+    # SCHOOL
+    # ============================================================
+    school_options = sorted(
+        [
+            x
+            for x in
+            consultant_df["Institution"]
+            .dropna()
+            .unique()
+            if str(x).strip()
+        ]
+    )
+    # ---- Shareable per-school links for this consultant ----
+    if school_options:
+        with st.expander("🔗 Get shareable links for your schools"):
+            if "REPLACE-WITH-YOUR-APP-URL" in APP_BASE_URL:
+                st.caption(
+                    "⚠️ Set APP_BASE_URL near the top of the app's code "
+                    "to your deployed app's actual URL to activate these links."
+                )
+            for school_name in school_options:
+                school_link = (
+                    f"{APP_BASE_URL}/?school="
+                    f"{urllib.parse.quote(school_name)}"
+                )
+                st.caption(school_name)
+                st.code(school_link, language=None)
+    school_dropdown_options = (
+        ["Select School"]
+        + school_options
+        + [OTHER_SCHOOL_OPTION]
+    )
+    selected_school_option = st.selectbox(
+        "School",
+        options=school_dropdown_options,
+        key="selected_school_option"
+    )
+    if selected_school_option == "Select School":
+        st.stop()
+    # ============================================================
+    # OTHER SCHOOL / NOT LISTED
+    # ============================================================
+    if selected_school_option == OTHER_SCHOOL_OPTION:
+        manually_entered_school = st.text_input(
+            "Enter School Name",
+            placeholder="Enter the school's full name",
+            key="manually_entered_school"
+        ).strip()
+        if not manually_entered_school:
+            st.info(
+                "Please enter the school's name to continue."
+            )
+            st.stop()
+        selected_school = manually_entered_school
+        # Empty dataframe because the school
+        # is not present in the master roster.
+        school_df = consultant_df.iloc[0:0].copy()
+    else:
+        selected_school = selected_school_option
+        school_df = consultant_df[
+            consultant_df["Institution"]
+            == selected_school
+        ].copy()
 # ============================================================
 # TEACHER LIST
 # ============================================================
