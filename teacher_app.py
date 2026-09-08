@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import uuid
 import concurrent.futures
+from datetime import datetime, timezone
 from supabase import create_client
 import boto3
 from boto3.s3.transfer import TransferConfig
@@ -1493,7 +1494,9 @@ if st.session_state.get(
                 if portfolio_paths
                 else None,
             "Assessment_Score_Pct":
-                None
+                None,
+            "submitted_at":
+                datetime.now(timezone.utc).isoformat()
         }
         database_entries.append(
             entry
