@@ -482,8 +482,7 @@ def fetch_observation_history(teacher_name=None, school_name=None):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_master_db_from_supabase():
-    query = """
-        SELECT 
+    base_cols = """
             "State_Zone", "Uploaded_By", "Institution", "Center",
             "FirstName", "LastName", "FullName", "Role", "Type",
             "Grade", "Subject", "Book", "StartTime", "EndTime",
@@ -492,57 +491,37 @@ def fetch_master_db_from_supabase():
             "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
             "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
             "Record_Hash"
+    """
+    query_with_submitted_at = f"""
+        SELECT 
+            {base_cols},
+            "submitted_at"
+        FROM teacher_records
+        ORDER BY "submitted_at" DESC NULLS LAST;
+    """
+    query_without_submitted_at = f"""
+        SELECT 
+            {base_cols}
         FROM teacher_records
         ORDER BY "StartTime" DESC;
     """
     try:
-        df_raw = conn.query(query, ttl=0)
-    except Exception as e:
-        st.error(f"Error fetching from PostgreSQL: {e}")
-        df_raw = pd.DataFrame()
+        df_raw = conn.query(query_with_submitted_at, ttl=0)
+    except Exception:
+        # "submitted_at" column not present yet on this database
+        # (run add_submitted_at_column.sql to enable accurate
+        # submission timestamps in Tab 7). Fall back gracefully
+        # so the rest of the app keeps working either way.
+        try:
+            df_raw = conn.query(query_without_submitted_at, ttl=0)
+        except Exception as e:
+            st.error(f"Error fetching from PostgreSQL: {e}")
+            df_raw = pd.DataFrame()
 
     if not df_raw.empty:
-        for dt_col in ['StartTime', 'EndTime']:
+        for dt_col in ['StartTime', 'EndTime', 'submitted_at']:
             if dt_col in df_raw.columns:
                 df_raw[dt_col] = pd.to_datetime(df_raw[dt_col], errors='coerce')
-
-    sub_records = []
-    try:
-        file_list = supabase.storage.from_(BUCKET_NAME).list("submissions", {"limit": 10000})
-        if file_list:
-            for item in file_list:
-                fname = item.get('name', '')
-                if fname.endswith('.json'):
-                    raw_data = supabase.storage.from_(BUCKET_NAME).download(f"submissions/{fname}")
-                    if raw_data:
-                        sub_records.append(json.loads(raw_data.decode('utf-8')))
-    except Exception:
-        pass
-
-    if sub_records:
-        subs_df = pd.DataFrame(sub_records)
-        for dt_col in ['StartTime', 'EndTime']:
-            if dt_col in subs_df.columns:
-                subs_df[dt_col] = pd.to_datetime(subs_df[dt_col], errors='coerce')
-        if not subs_df.empty:
-            if 'Record_Hash' not in subs_df.columns:
-                subs_df['Record_Hash'] = None
-            missing_hash = subs_df['Record_Hash'].isna() | (subs_df['Record_Hash'].astype(str).str.strip() == '')
-            if missing_hash.any():
-                subs_df.loc[missing_hash, 'Record_Hash'] = subs_df.loc[missing_hash].apply(compute_record_hash, axis=1)
-
-        combined = pd.concat([df_raw, subs_df], ignore_index=True) if not df_raw.empty else subs_df
-
-        if 'Record_Hash' in combined.columns:
-            has_hash = combined['Record_Hash'].notna() & (combined['Record_Hash'].astype(str).str.strip() != '')
-        else:
-            has_hash = pd.Series(False, index=combined.index)
-
-        hashed_part = combined.loc[has_hash].drop_duplicates(subset=['Record_Hash'], keep='last')
-        unhashed_part = combined.loc[~has_hash]
-        combined = pd.concat([hashed_part, unhashed_part], ignore_index=True)
-
-        df_raw = combined
 
     if df_raw.empty:
         return pd.DataFrame()
@@ -2197,25 +2176,60 @@ else:
     # --- HIERARCHICAL GLOBAL FILTERS ---
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Hierarchical Global Filters")
-    
+
+    if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True, help="Force-fetch the latest submissions now instead of waiting for the cache to expire."):
+        fetch_master_db_from_supabase.clear()
+        build_teacher_roster_cached.clear()
+        st.rerun()
+
+    def _sync_multiselect_selection(widget_key, known_key, current_options, default_options):
+        """
+        Keeps a multiselect's selection in sync as new options (new states,
+        consultants, schools) appear across reruns/sessions, instead of only
+        applying `default=` on first render. Any option not seen before is
+        auto-added to the current selection so new data isn't silently
+        hidden until a manual reselect or full app reboot.
+        """
+        previously_known = set(st.session_state.get(known_key, []))
+        newly_seen = [o for o in current_options if o not in previously_known]
+
+        if widget_key not in st.session_state:
+            st.session_state[widget_key] = list(default_options)
+        elif newly_seen:
+            merged = list(st.session_state[widget_key]) + [o for o in newly_seen if o not in st.session_state[widget_key]]
+            st.session_state[widget_key] = merged
+
+        # Drop any stale selections for options that no longer exist at all.
+        st.session_state[widget_key] = [o for o in st.session_state[widget_key] if o in current_options]
+        st.session_state[known_key] = current_options
+
     all_states = sorted([str(s) for s in df['State_Zone'].unique() if str(s).strip() and str(s).lower() not in ['nan', 'none']])
     default_states = ["Madhya Pradesh (MP)"] if "Madhya Pradesh (MP)" in all_states else all_states
-    
+
     if all_states:
-        selected_states = st.sidebar.multiselect("1. Select State(s) / Zone(s)", options=all_states, default=default_states)
+        _sync_multiselect_selection("gf_selected_states", "_known_states", all_states, default_states)
+        selected_states = st.sidebar.multiselect("1. Select State(s) / Zone(s)", options=all_states, key="gf_selected_states")
         df_state = df[df['State_Zone'].isin(selected_states)] if selected_states else df
     else:
         df_state = df
 
     all_employees = sorted([str(e) for e in df_state['Uploaded_By'].unique() if str(e).strip() and str(e).lower() not in ['nan', 'none']])
     if all_employees:
-        selected_employees = st.sidebar.multiselect("2. Select Consultant(s)", options=all_employees, default=all_employees)
+        _sync_multiselect_selection("gf_selected_employees", "_known_employees", all_employees, all_employees)
+        selected_employees = st.sidebar.multiselect("2. Select Consultant(s)", options=all_employees, key="gf_selected_employees")
         df_emp = df_state[df_state['Uploaded_By'].isin(selected_employees)] if selected_employees else df_state
     else:
         df_emp = df_state
 
     all_schools = sorted([str(s) for s in df_emp['Institution'].unique() if str(s).strip() and str(s).lower() not in ['nan', 'none']])
-    selected_schools = st.sidebar.multiselect("3. Select School(s)", options=all_schools, default=all_schools)
+    _sync_multiselect_selection("gf_selected_schools", "_known_schools", all_schools, all_schools)
+    selected_schools = st.sidebar.multiselect("3. Select School(s)", options=all_schools, key="gf_selected_schools")
+
+    new_schools_this_run = [s for s in all_schools if s not in set(st.session_state.get("_seen_schools_ever", []))]
+    st.session_state["_seen_schools_ever"] = list(set(st.session_state.get("_seen_schools_ever", [])) | set(all_schools))
+    if new_schools_this_run and st.session_state.get("_filters_initialized", False):
+        st.sidebar.success(f"✅ Auto-added {len(new_schools_this_run)} new school(s) to your filters: {', '.join(new_schools_this_run)}")
+    st.session_state["_filters_initialized"] = True
 
     school_master_roster = master_teacher_roster[master_teacher_roster['Institution'].isin(selected_schools)] if selected_schools else master_teacher_roster
     school_filtered_df = df_emp[df_emp['Institution'].isin(selected_schools)] if selected_schools else df_emp
@@ -3433,22 +3447,32 @@ else:
             tot_subs = len(t7_filtered)
             st.metric("📋 Total Submissions Found", tot_subs)
 
-            t7_display_cols = ['StartTime', 'Institution', 'FullName', 'Grade', 'Subject', 'Book', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Writing_Sample_Link']
+            has_submitted_at = 'submitted_at' in t7_filtered.columns
+            t7_sort_col = 'submitted_at' if has_submitted_at else 'StartTime'
+
+            t7_display_cols = ['submitted_at', 'FullName', 'Institution', 'Grade', 'Subject', 'Book', 'StartTime', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Writing_Sample_Link']
             t7_avail = [c for c in t7_display_cols if c in t7_filtered.columns]
-            
-            t7_table = t7_filtered[t7_avail].sort_values(by='StartTime', ascending=False)
+
+            t7_table = t7_filtered[t7_avail].sort_values(by=t7_sort_col, ascending=False)
+            t7_table = t7_table.rename(columns={
+                'submitted_at': 'Submitted On',
+                'FullName': 'Teacher Name',
+                'Institution': 'School',
+                'StartTime': 'Class Time (Recorded)'
+            })
             st.dataframe(t7_table, use_container_width=True)
 
             st.markdown("---")
             st.markdown("##### 🎬 Play / View Evidence Files")
             st.caption("Files are streamed directly from the public R2 bucket.")
 
-            t7_preview_rows = t7_filtered.sort_values(by='StartTime', ascending=False).head(25)
+            t7_preview_rows = t7_filtered.sort_values(by=t7_sort_col, ascending=False).head(25)
             if t7_preview_rows.empty:
                 st.caption("No submissions to preview.")
             else:
                 for row_idx, r7 in t7_preview_rows.iterrows():
-                    row_label = f"{r7.get('StartTime', '')} — {r7.get('FullName', 'Unknown Teacher')} ({r7.get('Institution', 'Unknown School')})"
+                    submitted_display = r7.get('submitted_at', '') if has_submitted_at else r7.get('StartTime', '')
+                    row_label = f"{submitted_display} — {r7.get('FullName', 'Unknown Teacher')} ({r7.get('Institution', 'Unknown School')})"
                     with st.expander(f"📁 {row_label}"):
                         any_file_for_row = False
                         for ev_col in avail_ev_cols:
