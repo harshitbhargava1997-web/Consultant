@@ -4,7 +4,7 @@ import re
 import uuid
 import concurrent.futures
 import urllib.parse
-from datetime import datetime, timezone, time as dt_time
+from datetime import datetime, timezone
 from supabase import create_client
 import boto3
 from boto3.s3.transfer import TransferConfig
@@ -882,26 +882,6 @@ def render_implementation_group(
     )
 
     # ========================================================
-    # ACTUAL CLASS START / END TIME
-    # ------------------------------------------------------
-    # These used to be hardcoded to 09:00–09:45 for every
-    # submission regardless of when the class actually ran.
-    # They're now real inputs so StartTime / EndTime /
-    # Duration_Min reflect what actually happened.
-    # ========================================================
-    time_col1, time_col2 = st.columns(2)
-    with time_col1:
-        class_start_time = st.time_input(
-            "Class Start Time",
-            key=f"class_start_time_{group_number}"
-        )
-    with time_col2:
-        class_end_time = st.time_input(
-            "Class End Time",
-            key=f"class_end_time_{group_number}"
-        )
-
-    # ========================================================
     # VOICE REFLECTION
     # ========================================================
     st.markdown(
@@ -1213,8 +1193,6 @@ def render_implementation_group(
         "grade": grade,
         "subject": subject,
         "lesson_name": lesson_name,
-        "class_start_time": class_start_time,
-        "class_end_time": class_end_time,
         "recorded_voice": recorded_voice,
         "uploaded_materials": uploaded_materials
     }
@@ -1314,25 +1292,15 @@ if st.session_state.get(
     # VALIDATE LESSON NAMES + CLASS TIMES
     # ========================================================
     invalid_groups = []
-    bad_time_groups = []
     for group in all_groups:
         if not str(group["lesson_name"]).strip():
             invalid_groups.append(group["group_number"])
-        if group["class_end_time"] <= group["class_start_time"]:
-            bad_time_groups.append(group["group_number"])
 
     if invalid_groups:
         st.error(
             "Please enter Lesson Plan No. & "
             "Topic / Chapter for Class Implementation "
             f"{', '.join(map(str, invalid_groups))}."
-        )
-        st.stop()
-
-    if bad_time_groups:
-        st.error(
-            "Class End Time must be after Class Start Time for "
-            f"Class Implementation {', '.join(map(str, bad_time_groups))}."
         )
         st.stop()
 
@@ -1524,17 +1492,13 @@ if st.session_state.get(
         video_3 = activity_paths[2] if len(activity_paths) > 2 else None
 
         # ----------------------------------------------------
-        # REAL TIMESTAMPS — no more fake 09:00–09:45.
+        # SUBMISSION TIMESTAMP — the only timing field we
+        # actually have a true signal for is when the teacher
+        # submitted the form. That's recorded once, below, as
+        # submitted_at. We don't fabricate a class start/end
+        # time or duration since nothing in the form captures
+        # that anymore.
         # ----------------------------------------------------
-        start_dt = datetime.combine(
-            selected_date, group["class_start_time"]
-        )
-        end_dt = datetime.combine(
-            selected_date, group["class_end_time"]
-        )
-        duration_minutes = round(
-            (end_dt - start_dt).total_seconds() / 60, 1
-        )
 
         entry = {
             "State_Zone": selected_state,
@@ -1549,9 +1513,6 @@ if st.session_state.get(
             "Grade": group["grade"],
             "Subject": group["subject"],
             "Book": group["lesson_name"],
-            "StartTime": start_dt.isoformat(),
-            "EndTime": end_dt.isoformat(),
-            "Duration_Min": duration_minutes,
             "Voice_Note_Link": (
                 ",".join(voice_paths) if voice_paths else None
             ),
