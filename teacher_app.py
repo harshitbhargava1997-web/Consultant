@@ -1494,20 +1494,17 @@ if st.session_state.get(
         first_name, last_name = split_teacher_name(selected_teacher)
 
         # ----------------------------------------------------
-        # ACTIVITY EVIDENCE — no more silent data loss.
+        # ACTIVITY EVIDENCE
         # ------------------------------------------------------
-        # The old code only ever stored the first 3 activity files
-        # in Video_Evidence_1/2/3 — anything beyond that was
-        # uploaded to R2 but never referenced anywhere, so it was
-        # effectively lost. We still populate Video_Evidence_1/2/3
-        # for backward compatibility with any existing reports/
-        # dashboards, but Activity_Evidence_Link now holds the
-        # FULL comma-separated list of every activity file path so
-        # nothing is dropped, regardless of how many were uploaded.
-        #
-        # NOTE: this requires an "Activity_Evidence_Link" text
-        # column to exist on the teacher_records table — add it in
-        # Supabase if it isn't there yet.
+        # Matches the original schema: only the first 3 activity
+        # files are referenced, in Video_Evidence_1/2/3. Any
+        # activity files beyond the first 3 still upload
+        # successfully to R2, but nothing in the database points
+        # to them — this is a known limitation, kept intentionally
+        # here because the teacher_records table doesn't have an
+        # "Activity_Evidence_Link" (or similar) column to hold the
+        # rest. Add such a column later if you want every file
+        # referenced instead of just the first 3.
         # ----------------------------------------------------
         video_1 = activity_paths[0] if len(activity_paths) > 0 else None
         video_2 = activity_paths[1] if len(activity_paths) > 1 else None
@@ -1551,9 +1548,6 @@ if st.session_state.get(
             "Video_Evidence_1": video_1,
             "Video_Evidence_2": video_2,
             "Video_Evidence_3": video_3,
-            "Activity_Evidence_Link": (
-                ",".join(activity_paths) if activity_paths else None
-            ),
             "Writing_Sample_Link": (
                 ",".join(writing_paths) if writing_paths else None
             ),
