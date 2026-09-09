@@ -46,6 +46,23 @@ PRESERVED_SESSION_KEYS = {
     "last_submission_role",
 }
 
+# Identity/context keys that should ALSO survive a reset. Without this,
+# a teacher who opens their school's shared link, picks themselves from
+# the Teacher dropdown, and submits would have to re-pick State /
+# Consultant / School / Teacher from scratch for every single class they
+# log — even though it's the same person on the same link. These keys
+# hold that context, so only the lesson-specific fields (grade, subject,
+# lesson name, files, voice recording, material areas) get cleared.
+IDENTITY_SESSION_KEYS = {
+    "selected_state",
+    "selected_consultant",
+    "selected_school_option",
+    "manually_entered_school",
+    "selected_teacher_option",
+    "manually_entered_teacher",
+    "implementation_date",
+}
+
 GRADE_OPTIONS = [
     "Nursery",
     "LKG",
@@ -101,17 +118,22 @@ def request_submission():
 
 def reset_form_for_next_submission():
     """
-    Wipe every widget's stored value so the form goes back to a clean
-    state after a successful submission (grade/subject/lesson name/
-    files/voice recording/material areas/teacher selection, etc).
+    Wipe every LESSON-specific widget value so the class-implementation
+    part of the form goes back to a clean state after a successful
+    submission (grade/subject/lesson name/files/voice recording/material
+    areas, etc). Identity/context fields — State, Consultant, School,
+    Teacher, Date — are deliberately kept, in IDENTITY_SESSION_KEYS, so a
+    teacher submitting several classes in one sitting (e.g. from their
+    school's shared link) isn't forced to re-pick who they are every time.
 
     We can't "clear" a file_uploader or audio_input widget in place —
     Streamlit only resets a widget when its session_state key no longer
     exists — so the reliable approach is to delete every key that isn't
-    explicitly in PRESERVED_SESSION_KEYS and then rerun.
+    explicitly preserved and then rerun.
     """
+    keep = PRESERVED_SESSION_KEYS | IDENTITY_SESSION_KEYS
     for key in list(st.session_state.keys()):
-        if key not in PRESERVED_SESSION_KEYS:
+        if key not in keep:
             del st.session_state[key]
     st.session_state.implementation_group_count = 1
     st.session_state.submit_requested = False
@@ -1492,13 +1514,17 @@ if st.session_state.get(
         video_3 = activity_paths[2] if len(activity_paths) > 2 else None
 
         # ----------------------------------------------------
-        # SUBMISSION TIMESTAMP — the only timing field we
-        # actually have a true signal for is when the teacher
-        # submitted the form. That's recorded once, below, as
-        # submitted_at. We don't fabricate a class start/end
-        # time or duration since nothing in the form captures
-        # that anymore.
+        # SUBMISSION TIMESTAMP — the only timing signal we
+        # actually have is when the teacher submitted the form.
+        # StartTime/EndTime/Duration_Min stay in the record for
+        # backend/schema compatibility, but they are filled in
+        # automatically here — the teacher never sees or fills
+        # these in on the form. StartTime and EndTime are both
+        # set to the real moment of submission; Duration_Min
+        # defaults to 0.0 since no real class duration is
+        # captured anymore.
         # ----------------------------------------------------
+        submission_moment = datetime.now(timezone.utc)
 
         entry = {
             "State_Zone": selected_state,
@@ -1513,6 +1539,9 @@ if st.session_state.get(
             "Grade": group["grade"],
             "Subject": group["subject"],
             "Book": group["lesson_name"],
+            "StartTime": submission_moment.isoformat(),
+            "EndTime": submission_moment.isoformat(),
+            "Duration_Min": 0.0,
             "Voice_Note_Link": (
                 ",".join(voice_paths) if voice_paths else None
             ),
