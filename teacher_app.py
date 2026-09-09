@@ -4,10 +4,11 @@ import re
 import uuid
 import concurrent.futures
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time as dt_time
 from supabase import create_client
 import boto3
 from boto3.s3.transfer import TransferConfig
+
 # ============================================================
 # PAGE CONFIG
 # ============================================================
@@ -16,6 +17,7 @@ st.set_page_config(
     page_icon="📝",
     layout="centered"
 )
+
 # ============================================================
 # CONSTANTS
 # ============================================================
@@ -23,6 +25,7 @@ st.set_page_config(
 # (the one in your browser address bar), no trailing slash.
 # Example: "https://g7zafrvxkkmcpwkeq9.streamlit.app"
 APP_BASE_URL = "https://consultant-bvjsg7zafrvxkkmcpwkeq9.streamlit.app"
+
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
 MAX_PARALLEL_UPLOADS = 5
@@ -30,6 +33,19 @@ R2_MULTIPART_THRESHOLD = 8 * 1024 * 1024
 R2_MULTIPART_CHUNK_SIZE = 8 * 1024 * 1024
 MAX_IMPLEMENTATION_GROUPS = 10
 TEACHER_RECORDS_TABLE = "teacher_records"
+
+# Keys that should survive a full-form reset after a successful submission.
+# Everything else in session_state is wiped so every widget goes back to
+# its default value (this is what actually "refreshes" the form — see
+# reset_form_for_next_submission()).
+PRESERVED_SESSION_KEYS = {
+    "implementation_group_count",
+    "submit_requested",
+    "last_submission_ok",
+    "last_submission_count",
+    "last_submission_role",
+}
+
 GRADE_OPTIONS = [
     "Nursery",
     "LKG",
@@ -40,6 +56,7 @@ GRADE_OPTIONS = [
     "Grade 4",
     "Grade 5"
 ]
+
 SUBJECT_OPTIONS = [
     "All Subjects Together",
     "Phonics / Literacy",
@@ -56,6 +73,7 @@ SUBJECT_OPTIONS = [
     "Play Time",
     "Play Based"
 ]
+
 IMPLEMENTATION_MATERIAL_OPTIONS = [
     "Lesson Plan",
     "Classroom Activity Conducted",
@@ -64,8 +82,10 @@ IMPLEMENTATION_MATERIAL_OPTIONS = [
     "Student Assessment",
     "Teacher Portfolio"
 ]
+
 OTHER_TEACHER_OPTION = "Other Teacher / Not Listed"
 OTHER_SCHOOL_OPTION = "Other School / Not Listed"
+
 # ============================================================
 # SESSION STATE
 # ============================================================
@@ -73,8 +93,30 @@ if "implementation_group_count" not in st.session_state:
     st.session_state.implementation_group_count = 1
 if "submit_requested" not in st.session_state:
     st.session_state.submit_requested = False
+
+
 def request_submission():
     st.session_state.submit_requested = True
+
+
+def reset_form_for_next_submission():
+    """
+    Wipe every widget's stored value so the form goes back to a clean
+    state after a successful submission (grade/subject/lesson name/
+    files/voice recording/material areas/teacher selection, etc).
+
+    We can't "clear" a file_uploader or audio_input widget in place —
+    Streamlit only resets a widget when its session_state key no longer
+    exists — so the reliable approach is to delete every key that isn't
+    explicitly in PRESERVED_SESSION_KEYS and then rerun.
+    """
+    for key in list(st.session_state.keys()):
+        if key not in PRESERVED_SESSION_KEYS:
+            del st.session_state[key]
+    st.session_state.implementation_group_count = 1
+    st.session_state.submit_requested = False
+
+
 # ============================================================
 # SUPABASE CONNECTION
 # ============================================================
@@ -86,7 +128,10 @@ def get_supabase_client():
         supabase_url,
         supabase_key
     )
+
+
 supabase = get_supabase_client()
+
 # ============================================================
 # CLOUDFLARE R2 CONNECTION
 # ============================================================
@@ -106,13 +151,18 @@ def get_r2_client():
         region_name="auto"
     )
     return client, R2_BUCKET_NAME
+
+
 r2_client, R2_BUCKET_NAME = get_r2_client()
+
 R2_TRANSFER_CONFIG = TransferConfig(
     multipart_threshold=R2_MULTIPART_THRESHOLD,
     multipart_chunksize=R2_MULTIPART_CHUNK_SIZE,
     max_concurrency=5,
     use_threads=True
 )
+
+
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
@@ -131,6 +181,8 @@ def sanitize_path_component(value):
         value
     )
     return value[:150]
+
+
 def get_file_size_mb(uploaded_file):
     if uploaded_file is None:
         return 0
@@ -138,6 +190,8 @@ def get_file_size_mb(uploaded_file):
         return uploaded_file.size / (1024 * 1024)
     except Exception:
         return 0
+
+
 def split_teacher_name(full_name):
     if not full_name:
         return "", ""
@@ -145,6 +199,8 @@ def split_teacher_name(full_name):
     if len(parts) == 1:
         return parts[0], ""
     return parts[0], " ".join(parts[1:])
+
+
 # ============================================================
 # FETCH MASTER ROSTER
 # ============================================================
@@ -205,8 +261,10 @@ def fetch_master_db_from_supabase():
             )
     df = df.drop_duplicates()
     return df
+
+
 # ============================================================
-# R2 UPLOAD
+# R2 UPLOAD / DELETE (with rollback support)
 # ============================================================
 def upload_file_to_r2(
     uploaded_file,
@@ -292,6 +350,43 @@ def upload_file_to_r2(
             "path": "",
             "error": str(e)
         }
+
+
+def delete_files_from_r2(object_keys):
+    """
+    Best-effort rollback: delete objects that were already uploaded to
+    R2 for a submission that ultimately failed (upload partially failed,
+    or the database insert failed after upload succeeded). R2's delete
+    API accepts up to 1000 keys per call, so we batch in chunks of 1000.
+    Returns a list of (key, error) tuples for any deletions that failed —
+    callers should surface these so orphaned files can be cleaned up
+    manually if automatic rollback itself fails.
+    """
+    object_keys = [k for k in object_keys if k]
+    if not object_keys:
+        return []
+    delete_errors = []
+    chunk_size = 1000
+    for i in range(0, len(object_keys), chunk_size):
+        chunk = object_keys[i:i + chunk_size]
+        try:
+            response = r2_client.delete_objects(
+                Bucket=R2_BUCKET_NAME,
+                Delete={
+                    "Objects": [{"Key": k} for k in chunk],
+                    "Quiet": True
+                }
+            )
+            for err in response.get("Errors", []) or []:
+                delete_errors.append(
+                    (err.get("Key", ""), err.get("Message", "Unknown error"))
+                )
+        except Exception as e:
+            for k in chunk:
+                delete_errors.append((k, str(e)))
+    return delete_errors
+
+
 # ============================================================
 # PARALLEL UPLOAD
 # ============================================================
@@ -324,17 +419,32 @@ def upload_all_files_parallel(upload_jobs):
                 future.result()
             )
     return results
+
+
 # ============================================================
-# DATABASE INSERT
+# DATABASE INSERT (single atomic batch insert)
 # ============================================================
-def insert_implementation_to_db(entry):
+def insert_implementations_to_db(entries):
+    """
+    Insert every class-implementation entry for this submission in a
+    single INSERT statement instead of looping row-by-row. A multi-row
+    INSERT is a single Postgres statement, so it is atomic: either every
+    row for this submission is saved, or none are — there is no scenario
+    where implementation_2 gets saved but implementation_1 doesn't. This
+    also means we only need one try/except to know whether the whole
+    submission's records were persisted.
+    """
+    if not entries:
+        return None
     response = (
         supabase
         .table(TEACHER_RECORDS_TABLE)
-        .insert(entry)
+        .insert(entries)
         .execute()
     )
     return response
+
+
 # ============================================================
 # CLASS IMPLEMENTATION STATE
 # ============================================================
@@ -351,6 +461,8 @@ def initialize_group_state(group_number):
                 }
             ]
         }
+
+
 def add_material_area(group_number):
     initialize_group_state(
         group_number
@@ -363,6 +475,8 @@ def add_material_area(group_number):
             "type": None
         }
     )
+
+
 def remove_material_area(
     group_number,
     area_id
@@ -382,18 +496,45 @@ def remove_material_area(
         for area in areas
         if area["id"] != area_id
     ]
+
+
 def add_another_class():
     if (
         st.session_state.implementation_group_count
         < MAX_IMPLEMENTATION_GROUPS
     ):
         st.session_state.implementation_group_count += 1
+
+
 # ============================================================
 # HEADER
 # ============================================================
 st.title(
     "📝 Teacher Daily Implementation Reflection Portal"
 )
+
+if st.session_state.pop("last_submission_ok", False):
+    _count = st.session_state.pop("last_submission_count", 0)
+    _role = st.session_state.pop("last_submission_role", "Teacher")
+    if _role == "Consultant":
+        st.success(
+            f"✅ {_count} classroom observation(s) submitted successfully."
+        )
+        st.info(
+            "The consultant observation, voice reflection and selected "
+            "classroom implementation materials have been saved "
+            "successfully. The form below is ready for a new entry."
+        )
+    else:
+        st.success(
+            f"✅ {_count} class implementation(s) submitted successfully."
+        )
+        st.info(
+            "Your voice reflection and selected classroom implementation "
+            "materials have been saved successfully. The form below is "
+            "ready for a new entry."
+        )
+
 st.markdown(
     """
 Use this space to share your next day lesson implementation
@@ -402,6 +543,7 @@ activity, student writing, assessment, portfolio,
 phonics pictures/videos of today's class.
 """
 )
+
 # ============================================================
 # LOAD MASTER DATA
 # ============================================================
@@ -413,24 +555,23 @@ except Exception as e:
     )
     st.exception(e)
     st.stop()
+
 if master_df.empty:
     st.warning(
         "No teacher data is currently available."
     )
     st.stop()
+
 # ============================================================
 # TEACHER DETAILS
 # ============================================================
 st.subheader(
     "👤 Teacher Details"
 )
+
 # ============================================================
 # SCHOOL DEEP LINK (?school=...)
 # ============================================================
-# Consultants can copy a per-school link (generated further below)
-# and share it with that school directly. Anyone opening such a link
-# lands straight on that school's teacher list, skipping the
-# State / Consultant / School dropdowns entirely.
 deep_linked_school_param = st.query_params.get("school", "").strip()
 deep_link_matches = (
     master_df[
@@ -440,6 +581,7 @@ deep_link_matches = (
     if deep_linked_school_param
     else master_df.iloc[0:0]
 )
+
 if deep_linked_school_param and not deep_link_matches.empty:
     # ---- DEEP LINK MODE: school pre-selected via shared link ----
     selected_school = deep_link_matches["Institution"].iloc[0]
@@ -457,9 +599,6 @@ if deep_linked_school_param and not deep_link_matches.empty:
     )
     consultant_df = deep_link_matches
     school_df = deep_link_matches
-    # Kept in sync with the manual-flow branch below, since later code
-    # (e.g. the "Other School" teacher-list check) reads this variable
-    # regardless of which branch set selected_school.
     selected_school_option = selected_school
     st.success(
         f"📍 School: **{selected_school}** (opened via your school's shared link)"
@@ -496,6 +635,7 @@ else:
         master_df["State_Zone"]
         == selected_state
     ].copy()
+
     # ============================================================
     # CONSULTANT
     # ============================================================
@@ -522,6 +662,7 @@ else:
         state_df["Uploaded_By"]
         == selected_consultant
     ].copy()
+
     # ============================================================
     # SCHOOL
     # ============================================================
@@ -535,7 +676,6 @@ else:
             if str(x).strip()
         ]
     )
-    # ---- Shareable per-school links for this consultant ----
     if school_options:
         with st.expander("🔗 Get shareable links for your schools"):
             if "REPLACE-WITH-YOUR-APP-URL" in APP_BASE_URL:
@@ -562,6 +702,7 @@ else:
     )
     if selected_school_option == "Select School":
         st.stop()
+
     # ============================================================
     # OTHER SCHOOL / NOT LISTED
     # ============================================================
@@ -577,8 +718,6 @@ else:
             )
             st.stop()
         selected_school = manually_entered_school
-        # Empty dataframe because the school
-        # is not present in the master roster.
         school_df = consultant_df.iloc[0:0].copy()
     else:
         selected_school = selected_school_option
@@ -586,6 +725,7 @@ else:
             consultant_df["Institution"]
             == selected_school
         ].copy()
+
 # ============================================================
 # TEACHER LIST
 # ============================================================
@@ -609,11 +749,10 @@ teacher_names = sorted(
         if str(x).strip()
     ]
 )
-# ============================================================
-# IF OTHER SCHOOL, NO MASTER TEACHERS EXIST
-# ============================================================
+
 if selected_school_option == OTHER_SCHOOL_OPTION:
     teacher_names = []
+
 # ============================================================
 # BUILD SINGLE TEACHER DROPDOWN
 # ============================================================
@@ -651,6 +790,7 @@ selected_teacher_option = st.selectbox(
 )
 if selected_teacher_option == "Select Teacher":
     st.stop()
+
 # ============================================================
 # DETERMINE SELECTED PERSON
 # ============================================================
@@ -683,6 +823,7 @@ else:
         selected_person_role = "Consultant"
     else:
         selected_person_role = "Teacher"
+
 # ============================================================
 # DATE
 # ============================================================
@@ -690,6 +831,7 @@ selected_date = st.date_input(
     "Implementation Date",
     key="implementation_date"
 )
+
 # ============================================================
 # RENDER ONE CLASS IMPLEMENTATION
 # ============================================================
@@ -705,10 +847,12 @@ def render_implementation_group(
     group_state = st.session_state[
         group_state_key
     ]
+
     st.markdown("---")
     st.subheader(
         f"Class Implementation {group_number}"
     )
+
     # ========================================================
     # GRADE + SUBJECT
     # ========================================================
@@ -725,6 +869,7 @@ def render_implementation_group(
             SUBJECT_OPTIONS,
             key=f"subject_{group_number}"
         )
+
     # ========================================================
     # LESSON / TOPIC
     # ========================================================
@@ -735,6 +880,27 @@ def render_implementation_group(
         ),
         key=f"lesson_name_{group_number}"
     )
+
+    # ========================================================
+    # ACTUAL CLASS START / END TIME
+    # ------------------------------------------------------
+    # These used to be hardcoded to 09:00–09:45 for every
+    # submission regardless of when the class actually ran.
+    # They're now real inputs so StartTime / EndTime /
+    # Duration_Min reflect what actually happened.
+    # ========================================================
+    time_col1, time_col2 = st.columns(2)
+    with time_col1:
+        class_start_time = st.time_input(
+            "Class Start Time",
+            key=f"class_start_time_{group_number}"
+        )
+    with time_col2:
+        class_end_time = st.time_input(
+            "Class End Time",
+            key=f"class_end_time_{group_number}"
+        )
+
     # ========================================================
     # VOICE REFLECTION
     # ========================================================
@@ -783,6 +949,7 @@ def render_implementation_group(
         sample_rate=16000,
         key=f"record_voice_{group_number}"
     )
+
     # ========================================================
     # CLASSROOM IMPLEMENTATION MATERIALS
     # ========================================================
@@ -795,7 +962,9 @@ def render_implementation_group(
         "implementation, student assessments, and teacher "
         "portfolio materials."
     )
+
     uploaded_materials = []
+
     # ========================================================
     # MATERIAL AREAS
     # ========================================================
@@ -851,9 +1020,7 @@ def render_implementation_group(
             area["type"] = None
             continue
         area["type"] = selected_area
-        # ====================================================
-        # LESSON PLAN
-        # ====================================================
+
         if selected_area == "Lesson Plan":
             files = st.file_uploader(
                 "Upload Lesson Plan",
@@ -878,9 +1045,6 @@ def render_implementation_group(
                         "category": "lesson_plan"
                     }
                 )
-        # ====================================================
-        # CLASSROOM ACTIVITY
-        # ====================================================
         elif selected_area == (
             "Classroom Activity Conducted"
         ):
@@ -910,9 +1074,6 @@ def render_implementation_group(
                         "category": "activity"
                     }
                 )
-        # ====================================================
-        # STUDENT WRITTEN WORK
-        # ====================================================
         elif selected_area == (
             "Student Written Work / Writing Practice"
         ):
@@ -939,9 +1100,6 @@ def render_implementation_group(
                         "category": "writing"
                     }
                 )
-        # ====================================================
-        # PHONICS / PHONETICS
-        # ====================================================
         elif selected_area == (
             "Phonics / Phonetics Implementation"
         ):
@@ -972,9 +1130,6 @@ def render_implementation_group(
                         "category": "phonics"
                     }
                 )
-        # ====================================================
-        # STUDENT ASSESSMENT
-        # ====================================================
         elif selected_area == (
             "Student Assessment"
         ):
@@ -1001,9 +1156,6 @@ def render_implementation_group(
                         "category": "assessment"
                     }
                 )
-        # ====================================================
-        # TEACHER PORTFOLIO
-        # ====================================================
         elif selected_area == (
             "Teacher Portfolio"
         ):
@@ -1033,9 +1185,7 @@ def render_implementation_group(
                         "category": "portfolio"
                     }
                 )
-        # ====================================================
-        # REMOVE AREA
-        # ====================================================
+
         if len(group_state["areas"]) > 1:
             if st.button(
                 "Remove This Area",
@@ -1050,29 +1200,26 @@ def render_implementation_group(
                     area_id
                 )
                 st.rerun()
-    # ========================================================
-    # ADD ANOTHER REFLECTION / EVIDENCE
-    # ========================================================
+
     st.button(
         "＋ Add Another Reflection / Evidence",
         key=f"add_area_{group_number}",
         on_click=add_material_area,
         args=(group_number,)
     )
+
     return {
-        "group_number":
-            group_number,
-        "grade":
-            grade,
-        "subject":
-            subject,
-        "lesson_name":
-            lesson_name,
-        "recorded_voice":
-            recorded_voice,
-        "uploaded_materials":
-            uploaded_materials
+        "group_number": group_number,
+        "grade": grade,
+        "subject": subject,
+        "lesson_name": lesson_name,
+        "class_start_time": class_start_time,
+        "class_end_time": class_end_time,
+        "recorded_voice": recorded_voice,
+        "uploaded_materials": uploaded_materials
     }
+
+
 # ============================================================
 # DAILY CLASSROOM IMPLEMENTATIONS
 # ============================================================
@@ -1080,6 +1227,7 @@ st.markdown("---")
 st.header(
     "📖 Daily Classroom Implementation"
 )
+
 all_groups = []
 for group_number in range(
     1,
@@ -1091,6 +1239,7 @@ for group_number in range(
     all_groups.append(
         group_data
     )
+
 # ============================================================
 # ADD ANOTHER CLASS
 # ============================================================
@@ -1109,6 +1258,7 @@ else:
         f"Maximum of {MAX_IMPLEMENTATION_GROUPS} "
         "classes can be added at one time."
     )
+
 # ============================================================
 # SUBMISSION
 # ============================================================
@@ -1125,6 +1275,7 @@ st.button(
     use_container_width=True,
     on_click=request_submission
 )
+
 # ============================================================
 # SUBMISSION PROCESS
 # ============================================================
@@ -1132,56 +1283,44 @@ if st.session_state.get(
     "submit_requested",
     False
 ):
-    # Consume the submission request immediately.
     st.session_state.submit_requested = False
+
     # ========================================================
     # BASIC VALIDATION
     # ========================================================
     if selected_state == "Select State / Zone":
-        st.error(
-            "Please select State / Zone."
-        )
+        st.error("Please select State / Zone.")
         st.stop()
     if selected_consultant == "Select Consultant":
-        st.error(
-            "Please select Consultant."
-        )
+        st.error("Please select Consultant.")
         st.stop()
     if selected_school_option == "Select School":
-        st.error(
-            "Please select School."
-        )
+        st.error("Please select School.")
         st.stop()
     if not selected_school.strip():
-        st.error(
-            "Please enter the school name."
-        )
+        st.error("Please enter the school name.")
         st.stop()
     if selected_teacher_option == "Select Teacher":
-        st.error(
-            "Please select Teacher."
-        )
+        st.error("Please select Teacher.")
         st.stop()
     if (
-        selected_teacher_option
-        == OTHER_TEACHER_OPTION
+        selected_teacher_option == OTHER_TEACHER_OPTION
         and not selected_teacher.strip()
     ):
-        st.error(
-            "Please enter the teacher's name."
-        )
+        st.error("Please enter the teacher's name.")
         st.stop()
+
     # ========================================================
-    # VALIDATE LESSON NAMES
+    # VALIDATE LESSON NAMES + CLASS TIMES
     # ========================================================
     invalid_groups = []
+    bad_time_groups = []
     for group in all_groups:
-        if not str(
-            group["lesson_name"]
-        ).strip():
-            invalid_groups.append(
-                group["group_number"]
-            )
+        if not str(group["lesson_name"]).strip():
+            invalid_groups.append(group["group_number"])
+        if group["class_end_time"] <= group["class_start_time"]:
+            bad_time_groups.append(group["group_number"])
+
     if invalid_groups:
         st.error(
             "Please enter Lesson Plan No. & "
@@ -1189,62 +1328,45 @@ if st.session_state.get(
             f"{', '.join(map(str, invalid_groups))}."
         )
         st.stop()
+
+    if bad_time_groups:
+        st.error(
+            "Class End Time must be after Class Start Time for "
+            f"Class Implementation {', '.join(map(str, bad_time_groups))}."
+        )
+        st.stop()
+
     # ========================================================
     # SUBMISSION ID
     # ========================================================
-    submission_id = (
-        uuid.uuid4()
-        .hex[:12]
-    )
-    school_path = sanitize_path_component(
-        selected_school
-    )
-    teacher_path = sanitize_path_component(
-        selected_teacher
-    )
-    date_string = selected_date.strftime(
-        "%Y-%m-%d"
-    )
+    submission_id = uuid.uuid4().hex[:12]
+    school_path = sanitize_path_component(selected_school)
+    teacher_path = sanitize_path_component(selected_teacher)
+    date_string = selected_date.strftime("%Y-%m-%d")
     submission_base = (
-        f"schools/"
-        f"{school_path}/"
-        f"teachers/"
-        f"{teacher_path}/"
-        f"{date_string}/"
-        f"submission_{submission_id}"
+        f"schools/{school_path}/teachers/{teacher_path}/"
+        f"{date_string}/submission_{submission_id}"
     )
+
     # ========================================================
     # COLLECT UPLOAD JOBS
     # ========================================================
     upload_jobs = []
     category_folder_map = {
-        "lesson_plan":
-            "lesson_plans",
-        "activity":
-            "activity_videos",
-        "writing":
-            "student_work",
-        "phonics":
-            "phonics",
-        "assessment":
-            "student_assessments",
-        "portfolio":
-            "teacher_portfolio"
+        "lesson_plan": "lesson_plans",
+        "activity": "activity_videos",
+        "writing": "student_work",
+        "phonics": "phonics",
+        "assessment": "student_assessments",
+        "portfolio": "teacher_portfolio"
     }
     for group in all_groups:
-        group_number = group[
-            "group_number"
-        ]
+        group_number = group["group_number"]
         group_base = (
-            f"{submission_base}/"
-            f"implementation_{group_number}"
+            f"{submission_base}/implementation_{group_number}"
         )
-        # ----------------------------------------------------
-        # RECORDED VOICE
-        # ----------------------------------------------------
-        recorded_voice = group[
-            "recorded_voice"
-        ]
+
+        recorded_voice = group["recorded_voice"]
         if recorded_voice is not None:
             upload_jobs.append(
                 (
@@ -1254,21 +1376,11 @@ if st.session_state.get(
                     group_number
                 )
             )
-        # ----------------------------------------------------
-        # CLASSROOM MATERIALS
-        # ----------------------------------------------------
-        for material in group[
-            "uploaded_materials"
-        ]:
-            category = material[
-                "category"
-            ]
-            file = material[
-                "file"
-            ]
-            folder = category_folder_map[
-                category
-            ]
+
+        for material in group["uploaded_materials"]:
+            category = material["category"]
+            file = material["file"]
+            folder = category_folder_map[category]
             upload_jobs.append(
                 (
                     file,
@@ -1277,8 +1389,9 @@ if st.session_state.get(
                     group_number
                 )
             )
+
     # ========================================================
-    # CHECK FILE SIZES
+    # CHECK FILE SIZES (before touching R2 at all)
     # ========================================================
     oversized_files = []
     for (
@@ -1287,309 +1400,222 @@ if st.session_state.get(
         category,
         group_number
     ) in upload_jobs:
-        size_mb = get_file_size_mb(
-            uploaded_file
-        )
+        size_mb = get_file_size_mb(uploaded_file)
         if size_mb > MAX_FILE_SIZE_MB:
-            oversized_files.append(
-                (
-                    uploaded_file.name,
-                    size_mb
-                )
-            )
+            oversized_files.append((uploaded_file.name, size_mb))
+
     if oversized_files:
         st.error(
-            "The following files exceed the "
-            f"{MAX_FILE_SIZE_MB} MB limit:"
+            f"The following files exceed the {MAX_FILE_SIZE_MB} MB limit:"
         )
         for file_name, size_mb in oversized_files:
-            st.write(
-                f"• {file_name} — "
-                f"{size_mb:.1f} MB"
-            )
+            st.write(f"• {file_name} — {size_mb:.1f} MB")
         st.stop()
+
     # ========================================================
     # UPLOAD FILES
     # ========================================================
-    progress = st.progress(
-        0,
-        text="Preparing uploads..."
-    )
+    progress = st.progress(0, text="Preparing uploads...")
+
     if upload_jobs:
         progress.progress(
             10,
-            text=(
-                f"Uploading {len(upload_jobs)} "
-                "file(s)..."
-            )
+            text=f"Uploading {len(upload_jobs)} file(s)..."
         )
         try:
-            upload_results = upload_all_files_parallel(
-                upload_jobs
-            )
+            upload_results = upload_all_files_parallel(upload_jobs)
         except Exception as e:
             st.error(
-                "An unexpected error occurred while "
-                "uploading files."
+                "An unexpected error occurred while uploading files. "
+                "No files or records were kept — please try submitting again."
             )
             st.exception(e)
             st.stop()
     else:
         upload_results = []
-    progress.progress(
-        70,
-        text="Checking uploaded files..."
-    )
+
+    progress.progress(70, text="Checking uploaded files...")
+
     # ========================================================
-    # UPLOAD FAILURE
+    # UPLOAD FAILURE -> ROLLBACK ANY FILES THAT DID SUCCEED
+    # ------------------------------------------------------
+    # If even one file in this submission failed to upload, we treat
+    # the whole submission as failed. Any files that DID upload
+    # successfully in this same batch are now orphaned (no DB record
+    # will ever reference them), so we delete them from R2 rather than
+    # silently leaving them in the bucket.
     # ========================================================
-    failed_uploads = [
-        result
-        for result in upload_results
-        if not result["success"]
-    ]
+    failed_uploads = [r for r in upload_results if not r["success"]]
+    successful_uploads = [r for r in upload_results if r["success"]]
+
     if failed_uploads:
+        rollback_errors = delete_files_from_r2(
+            [r["path"] for r in successful_uploads]
+        )
         st.error(
-            "Some files could not be uploaded. "
-            "No database records were created."
+            "Some files could not be uploaded, so this submission was "
+            "not saved. No database records were created."
         )
         for result in failed_uploads:
-            st.write(
-                f"• {result['file_name']} — "
-                f"{result['error']}"
+            st.write(f"• {result['file_name']} — {result['error']}")
+        if successful_uploads:
+            st.caption(
+                f"{len(successful_uploads)} file(s) that had already "
+                "uploaded were removed automatically."
             )
+        if rollback_errors:
+            st.warning(
+                "Some already-uploaded files could not be automatically "
+                "removed and may need manual cleanup:"
+            )
+            for key, err in rollback_errors:
+                st.caption(f"• {key} — {err}")
         st.stop()
+
     # ========================================================
     # GET PATHS
     # ========================================================
-    def get_paths(
-        group_number,
-        category
-    ):
+    def get_paths(group_number, category):
         return [
             result["path"]
             for result in upload_results
             if (
-                result["group_number"]
-                == group_number
-                and result["category"]
-                == category
+                result["group_number"] == group_number
+                and result["category"] == category
                 and result["success"]
             )
         ]
+
     # ========================================================
-    # DATABASE ENTRIES
+    # BUILD DATABASE ENTRIES
     # ========================================================
     database_entries = []
     for group in all_groups:
-        group_number = group[
-            "group_number"
-        ]
-        voice_paths = get_paths(
-            group_number,
-            "voice"
+        group_number = group["group_number"]
+
+        voice_paths = get_paths(group_number, "voice")
+        lesson_plan_paths = get_paths(group_number, "lesson_plan")
+        activity_paths = get_paths(group_number, "activity")
+        writing_paths = get_paths(group_number, "writing")
+        assessment_paths = get_paths(group_number, "assessment")
+        phonics_paths = get_paths(group_number, "phonics")
+        portfolio_paths = get_paths(group_number, "portfolio")
+
+        first_name, last_name = split_teacher_name(selected_teacher)
+
+        # ----------------------------------------------------
+        # ACTIVITY EVIDENCE — no more silent data loss.
+        # ------------------------------------------------------
+        # The old code only ever stored the first 3 activity files
+        # in Video_Evidence_1/2/3 — anything beyond that was
+        # uploaded to R2 but never referenced anywhere, so it was
+        # effectively lost. We still populate Video_Evidence_1/2/3
+        # for backward compatibility with any existing reports/
+        # dashboards, but Activity_Evidence_Link now holds the
+        # FULL comma-separated list of every activity file path so
+        # nothing is dropped, regardless of how many were uploaded.
+        #
+        # NOTE: this requires an "Activity_Evidence_Link" text
+        # column to exist on the teacher_records table — add it in
+        # Supabase if it isn't there yet.
+        # ----------------------------------------------------
+        video_1 = activity_paths[0] if len(activity_paths) > 0 else None
+        video_2 = activity_paths[1] if len(activity_paths) > 1 else None
+        video_3 = activity_paths[2] if len(activity_paths) > 2 else None
+
+        # ----------------------------------------------------
+        # REAL TIMESTAMPS — no more fake 09:00–09:45.
+        # ----------------------------------------------------
+        start_dt = datetime.combine(
+            selected_date, group["class_start_time"]
         )
-        lesson_plan_paths = get_paths(
-            group_number,
-            "lesson_plan"
+        end_dt = datetime.combine(
+            selected_date, group["class_end_time"]
         )
-        activity_paths = get_paths(
-            group_number,
-            "activity"
+        duration_minutes = round(
+            (end_dt - start_dt).total_seconds() / 60, 1
         )
-        writing_paths = get_paths(
-            group_number,
-            "writing"
-        )
-        assessment_paths = get_paths(
-            group_number,
-            "assessment"
-        )
-        phonics_paths = get_paths(
-            group_number,
-            "phonics"
-        )
-        portfolio_paths = get_paths(
-            group_number,
-            "portfolio"
-        )
-        first_name, last_name = (
-            split_teacher_name(
-                selected_teacher
-            )
-        )
-        # ====================================================
-        # EXISTING THREE ACTIVITY COLUMNS
-        # ====================================================
-        video_1 = (
-            activity_paths[0]
-            if len(activity_paths) > 0
-            else None
-        )
-        video_2 = (
-            activity_paths[1]
-            if len(activity_paths) > 1
-            else None
-        )
-        video_3 = (
-            activity_paths[2]
-            if len(activity_paths) > 2
-            else None
-        )
-        # ====================================================
-        # TIMESTAMP VALUES
-        # ====================================================
-        implementation_start_timestamp = (
-            f"{selected_date.strftime('%Y-%m-%d')}"
-            f"T09:00:00"
-        )
-        implementation_end_timestamp = (
-            f"{selected_date.strftime('%Y-%m-%d')}"
-            f"T09:45:00"
-        )
-        # ====================================================
-        # TEACHER RECORDS ENTRY
-        # ====================================================
+
         entry = {
-            "State_Zone":
-                selected_state,
-            "Uploaded_By":
-                selected_consultant,
-            "Institution":
-                selected_school,
-            "Center":
-                selected_school,
-            "FirstName":
-                first_name,
-            "LastName":
-                last_name,
-            "FullName":
-                selected_teacher,
-            "Role":
-                selected_person_role,
-            "Type":
-                "Classroom Reflection",
-            "Grade":
-                group["grade"],
-            "Subject":
-                group["subject"],
-            "Book":
-                group["lesson_name"],
-            "StartTime":
-                implementation_start_timestamp,
-            "EndTime":
-                implementation_end_timestamp,
-            "Duration_Min":
-                0.0,
-            "Voice_Note_Link":
-                ",".join(
-                    voice_paths
-                )
-                if voice_paths
-                else None,
-            "Lesson_Plan_Picture":
-                ",".join(
-                    lesson_plan_paths
-                )
-                if lesson_plan_paths
-                else None,
-            "Video_Evidence_1":
-                video_1,
-            "Video_Evidence_2":
-                video_2,
-            "Video_Evidence_3":
-                video_3,
-            "Writing_Sample_Link":
-                ",".join(
-                    writing_paths
-                )
-                if writing_paths
-                else None,
-            "Student_Assessment_Link":
-                ",".join(
-                    assessment_paths
-                )
-                if assessment_paths
-                else None,
-            "Phonics_Evidence_Link":
-                ",".join(
-                    phonics_paths
-                )
-                if phonics_paths
-                else None,
-            "Portfolio_Evidence_Link":
-                ",".join(
-                    portfolio_paths
-                )
-                if portfolio_paths
-                else None,
-            "Assessment_Score_Pct":
-                None,
-            "submitted_at":
-                datetime.now(timezone.utc).isoformat()
+            "State_Zone": selected_state,
+            "Uploaded_By": selected_consultant,
+            "Institution": selected_school,
+            "Center": selected_school,
+            "FirstName": first_name,
+            "LastName": last_name,
+            "FullName": selected_teacher,
+            "Role": selected_person_role,
+            "Type": "Classroom Reflection",
+            "Grade": group["grade"],
+            "Subject": group["subject"],
+            "Book": group["lesson_name"],
+            "StartTime": start_dt.isoformat(),
+            "EndTime": end_dt.isoformat(),
+            "Duration_Min": duration_minutes,
+            "Voice_Note_Link": (
+                ",".join(voice_paths) if voice_paths else None
+            ),
+            "Lesson_Plan_Picture": (
+                ",".join(lesson_plan_paths) if lesson_plan_paths else None
+            ),
+            "Video_Evidence_1": video_1,
+            "Video_Evidence_2": video_2,
+            "Video_Evidence_3": video_3,
+            "Activity_Evidence_Link": (
+                ",".join(activity_paths) if activity_paths else None
+            ),
+            "Writing_Sample_Link": (
+                ",".join(writing_paths) if writing_paths else None
+            ),
+            "Student_Assessment_Link": (
+                ",".join(assessment_paths) if assessment_paths else None
+            ),
+            "Phonics_Evidence_Link": (
+                ",".join(phonics_paths) if phonics_paths else None
+            ),
+            "Portfolio_Evidence_Link": (
+                ",".join(portfolio_paths) if portfolio_paths else None
+            ),
+            "Assessment_Score_Pct": None,
+            "submitted_at": datetime.now(timezone.utc).isoformat()
         }
-        database_entries.append(
-            entry
-        )
+        database_entries.append(entry)
+
     # ========================================================
-    # SAVE TO SUPABASE
+    # SAVE TO SUPABASE — single atomic batch insert, with
+    # rollback of every uploaded file if it fails.
     # ========================================================
-    progress.progress(
-        85,
-        text="Saving implementation details..."
-    )
-    inserted_count = 0
-    database_errors = []
-    for entry in database_entries:
-        try:
-            insert_implementation_to_db(
-                entry
-            )
-            inserted_count += 1
-        except Exception as e:
-            database_errors.append(
-                str(e)
-            )
-    # ========================================================
-    # DATABASE FAILURE
-    # ========================================================
-    if database_errors:
+    progress.progress(85, text="Saving implementation details...")
+
+    all_uploaded_paths = [r["path"] for r in upload_results if r["success"]]
+
+    try:
+        insert_implementations_to_db(database_entries)
+    except Exception as e:
+        rollback_errors = delete_files_from_r2(all_uploaded_paths)
         st.error(
-            "Implementation files were uploaded, "
-            "but some database records could not be saved."
+            "The database record could not be saved, so this submission "
+            "was not completed. The files that had been uploaded were "
+            "automatically removed — please try submitting again."
         )
-        for error in database_errors:
-            st.code(error)
+        st.code(str(e))
+        if rollback_errors:
+            st.warning(
+                "Some uploaded files could not be automatically removed "
+                "and may need manual cleanup:"
+            )
+            for key, err in rollback_errors:
+                st.caption(f"• {key} — {err}")
         st.stop()
+
     # ========================================================
-    # SUCCESS
+    # SUCCESS — reset the form so it's ready for the next entry
     # ========================================================
-    progress.progress(
-        100,
-        text="Submission completed successfully."
-    )
-    if selected_person_role == "Consultant":
-        st.success(
-            f"✅ {inserted_count} classroom observation(s) "
-            "submitted successfully."
-        )
-        st.info(
-            "The consultant observation, voice reflection "
-            "and selected classroom implementation materials "
-            "have been saved successfully."
-        )
-    else:
-        st.success(
-            f"✅ {inserted_count} class implementation(s) "
-            "submitted successfully."
-        )
-        st.info(
-            "Your voice reflection and selected "
-            "classroom implementation materials "
-            "have been saved successfully."
-        )
-    # ========================================================
-    # PREPARE NEXT SUBMISSION
-    # ========================================================
-    st.session_state.implementation_group_count = 1
-    st.session_state.submit_requested = False
+    progress.progress(100, text="Submission completed successfully.")
+
+    st.session_state["last_submission_ok"] = True
+    st.session_state["last_submission_count"] = len(database_entries)
+    st.session_state["last_submission_role"] = selected_person_role
+
+    reset_form_for_next_submission()
+    st.rerun()
