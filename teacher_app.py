@@ -41,6 +41,7 @@ TEACHER_RECORDS_TABLE = "teacher_records"
 PRESERVED_SESSION_KEYS = {
     "implementation_group_count",
     "submit_requested",
+    "submission_in_progress",
     "last_submission_ok",
     "last_submission_count",
     "last_submission_role",
@@ -110,9 +111,22 @@ if "implementation_group_count" not in st.session_state:
     st.session_state.implementation_group_count = 1
 if "submit_requested" not in st.session_state:
     st.session_state.submit_requested = False
+if "submission_in_progress" not in st.session_state:
+    st.session_state.submission_in_progress = False
 
 
 def request_submission():
+    """
+    Button on_click callback. Streamlit runs this callback FIRST, before
+    the script body re-executes — including for a second click that
+    arrives while the first click's script run is still processing (e.g.
+    still uploading files). That ordering is what makes this a reliable
+    double-submit guard: if a submission is already in progress, a repeat
+    click is a no-op instead of queuing a second upload/insert pass.
+    """
+    if st.session_state.submission_in_progress:
+        return
+    st.session_state.submission_in_progress = True
     st.session_state.submit_requested = True
 
 
@@ -125,6 +139,10 @@ def reset_form_for_next_submission():
     Teacher, Date — are deliberately kept, in IDENTITY_SESSION_KEYS, so a
     teacher submitting several classes in one sitting (e.g. from their
     school's shared link) isn't forced to re-pick who they are every time.
+    Note that a school shared link (?school=... in the URL) isn't
+    session_state at all — it lives in the URL query params, which a
+    st.rerun() never touches — so re-opening the form after a submission
+    stays on the same school's deep link automatically.
 
     We can't "clear" a file_uploader or audio_input widget in place —
     Streamlit only resets a widget when its session_state key no longer
@@ -137,6 +155,7 @@ def reset_form_for_next_submission():
             del st.session_state[key]
     st.session_state.implementation_group_count = 1
     st.session_state.submit_requested = False
+    st.session_state.submission_in_progress = False
 
 
 # ============================================================
@@ -1270,10 +1289,15 @@ st.caption(
     f"Maximum file size: {MAX_FILE_SIZE_MB} MB per file."
 )
 st.button(
-    "🚀 Submit Implementation",
+    (
+        "⏳ Submitting..."
+        if st.session_state.submission_in_progress
+        else "🚀 Submit Implementation"
+    ),
     type="primary",
     use_container_width=True,
-    on_click=request_submission
+    on_click=request_submission,
+    disabled=st.session_state.submission_in_progress
 )
 
 # ============================================================
@@ -1285,321 +1309,347 @@ if st.session_state.get(
 ):
     st.session_state.submit_requested = False
 
-    # ========================================================
-    # BASIC VALIDATION
-    # ========================================================
-    if selected_state == "Select State / Zone":
-        st.error("Please select State / Zone.")
-        st.stop()
-    if selected_consultant == "Select Consultant":
-        st.error("Please select Consultant.")
-        st.stop()
-    if selected_school_option == "Select School":
-        st.error("Please select School.")
-        st.stop()
-    if not selected_school.strip():
-        st.error("Please enter the school name.")
-        st.stop()
-    if selected_teacher_option == "Select Teacher":
-        st.error("Please select Teacher.")
-        st.stop()
-    if (
-        selected_teacher_option == OTHER_TEACHER_OPTION
-        and not selected_teacher.strip()
-    ):
-        st.error("Please enter the teacher's name.")
-        st.stop()
-
-    # ========================================================
-    # VALIDATE LESSON NAMES + CLASS TIMES
-    # ========================================================
-    invalid_groups = []
-    for group in all_groups:
-        if not str(group["lesson_name"]).strip():
-            invalid_groups.append(group["group_number"])
-
-    if invalid_groups:
-        st.error(
-            "Please enter Lesson Plan No. & "
-            "Topic / Chapter for Class Implementation "
-            f"{', '.join(map(str, invalid_groups))}."
-        )
-        st.stop()
-
-    # ========================================================
-    # SUBMISSION ID
-    # ========================================================
-    submission_id = uuid.uuid4().hex[:12]
-    school_path = sanitize_path_component(selected_school)
-    teacher_path = sanitize_path_component(selected_teacher)
-    date_string = selected_date.strftime("%Y-%m-%d")
-    submission_base = (
-        f"schools/{school_path}/teachers/{teacher_path}/"
-        f"{date_string}/submission_{submission_id}"
-    )
-
-    # ========================================================
-    # COLLECT UPLOAD JOBS
-    # ========================================================
-    upload_jobs = []
-    category_folder_map = {
-        "lesson_plan": "lesson_plans",
-        "activity": "activity_videos",
-        "writing": "student_work",
-        "phonics": "phonics",
-        "assessment": "student_assessments",
-        "portfolio": "teacher_portfolio"
-    }
-    for group in all_groups:
-        group_number = group["group_number"]
-        group_base = (
-            f"{submission_base}/implementation_{group_number}"
-        )
-
-        recorded_voice = group["recorded_voice"]
-        if recorded_voice is not None:
-            upload_jobs.append(
-                (
-                    recorded_voice,
-                    f"{group_base}/voice_notes",
-                    "voice",
-                    group_number
-                )
-            )
-
-        for material in group["uploaded_materials"]:
-            category = material["category"]
-            file = material["file"]
-            folder = category_folder_map[category]
-            upload_jobs.append(
-                (
-                    file,
-                    f"{group_base}/{folder}",
-                    category,
-                    group_number
-                )
-            )
-
-    # ========================================================
-    # CHECK FILE SIZES (before touching R2 at all)
-    # ========================================================
-    oversized_files = []
-    for (
-        uploaded_file,
-        folder_name,
-        category,
-        group_number
-    ) in upload_jobs:
-        size_mb = get_file_size_mb(uploaded_file)
-        if size_mb > MAX_FILE_SIZE_MB:
-            oversized_files.append((uploaded_file.name, size_mb))
-
-    if oversized_files:
-        st.error(
-            f"The following files exceed the {MAX_FILE_SIZE_MB} MB limit:"
-        )
-        for file_name, size_mb in oversized_files:
-            st.write(f"• {file_name} — {size_mb:.1f} MB")
-        st.stop()
-
-    # ========================================================
-    # UPLOAD FILES
-    # ========================================================
-    progress = st.progress(0, text="Preparing uploads...")
-
-    if upload_jobs:
-        progress.progress(
-            10,
-            text=f"Uploading {len(upload_jobs)} file(s)..."
-        )
-        try:
-            upload_results = upload_all_files_parallel(upload_jobs)
-        except Exception as e:
-            st.error(
-                "An unexpected error occurred while uploading files. "
-                "No files or records were kept — please try submitting again."
-            )
-            st.exception(e)
-            st.stop()
-    else:
-        upload_results = []
-
-    progress.progress(70, text="Checking uploaded files...")
-
-    # ========================================================
-    # UPLOAD FAILURE -> ROLLBACK ANY FILES THAT DID SUCCEED
-    # ------------------------------------------------------
-    # If even one file in this submission failed to upload, we treat
-    # the whole submission as failed. Any files that DID upload
-    # successfully in this same batch are now orphaned (no DB record
-    # will ever reference them), so we delete them from R2 rather than
-    # silently leaving them in the bucket.
-    # ========================================================
-    failed_uploads = [r for r in upload_results if not r["success"]]
-    successful_uploads = [r for r in upload_results if r["success"]]
-
-    if failed_uploads:
-        rollback_errors = delete_files_from_r2(
-            [r["path"] for r in successful_uploads]
-        )
-        st.error(
-            "Some files could not be uploaded, so this submission was "
-            "not saved. No database records were created."
-        )
-        for result in failed_uploads:
-            st.write(f"• {result['file_name']} — {result['error']}")
-        if successful_uploads:
-            st.caption(
-                f"{len(successful_uploads)} file(s) that had already "
-                "uploaded were removed automatically."
-            )
-        if rollback_errors:
-            st.warning(
-                "Some already-uploaded files could not be automatically "
-                "removed and may need manual cleanup:"
-            )
-            for key, err in rollback_errors:
-                st.caption(f"• {key} — {err}")
-        st.stop()
-
-    # ========================================================
-    # GET PATHS
-    # ========================================================
-    def get_paths(group_number, category):
-        return [
-            result["path"]
-            for result in upload_results
-            if (
-                result["group_number"] == group_number
-                and result["category"] == category
-                and result["success"]
-            )
-        ]
-
-    # ========================================================
-    # BUILD DATABASE ENTRIES
-    # ========================================================
-    database_entries = []
-    for group in all_groups:
-        group_number = group["group_number"]
-
-        voice_paths = get_paths(group_number, "voice")
-        lesson_plan_paths = get_paths(group_number, "lesson_plan")
-        activity_paths = get_paths(group_number, "activity")
-        writing_paths = get_paths(group_number, "writing")
-        assessment_paths = get_paths(group_number, "assessment")
-        phonics_paths = get_paths(group_number, "phonics")
-        portfolio_paths = get_paths(group_number, "portfolio")
-
-        first_name, last_name = split_teacher_name(selected_teacher)
-
-        # ----------------------------------------------------
-        # ACTIVITY EVIDENCE
-        # ------------------------------------------------------
-        # Matches the original schema: only the first 3 activity
-        # files are referenced, in Video_Evidence_1/2/3. Any
-        # activity files beyond the first 3 still upload
-        # successfully to R2, but nothing in the database points
-        # to them — this is a known limitation, kept intentionally
-        # here because the teacher_records table doesn't have an
-        # "Activity_Evidence_Link" (or similar) column to hold the
-        # rest. Add such a column later if you want every file
-        # referenced instead of just the first 3.
-        # ----------------------------------------------------
-        video_1 = activity_paths[0] if len(activity_paths) > 0 else None
-        video_2 = activity_paths[1] if len(activity_paths) > 1 else None
-        video_3 = activity_paths[2] if len(activity_paths) > 2 else None
-
-        # ----------------------------------------------------
-        # SUBMISSION TIMESTAMP — the only timing signal we
-        # actually have is when the teacher submitted the form.
-        # StartTime/EndTime/Duration_Min stay in the record for
-        # backend/schema compatibility, but they are filled in
-        # automatically here — the teacher never sees or fills
-        # these in on the form. StartTime and EndTime are both
-        # set to the real moment of submission; Duration_Min
-        # defaults to 0.0 since no real class duration is
-        # captured anymore.
-        # ----------------------------------------------------
-        submission_moment = datetime.now(timezone.utc)
-
-        entry = {
-            "State_Zone": selected_state,
-            "Uploaded_By": selected_consultant,
-            "Institution": selected_school,
-            "Center": selected_school,
-            "FirstName": first_name,
-            "LastName": last_name,
-            "FullName": selected_teacher,
-            "Role": selected_person_role,
-            "Type": "Classroom Reflection",
-            "Grade": group["grade"],
-            "Subject": group["subject"],
-            "Book": group["lesson_name"],
-            "StartTime": submission_moment.isoformat(),
-            "EndTime": submission_moment.isoformat(),
-            "Duration_Min": 0.0,
-            "Voice_Note_Link": (
-                ",".join(voice_paths) if voice_paths else None
-            ),
-            "Lesson_Plan_Picture": (
-                ",".join(lesson_plan_paths) if lesson_plan_paths else None
-            ),
-            "Video_Evidence_1": video_1,
-            "Video_Evidence_2": video_2,
-            "Video_Evidence_3": video_3,
-            "Writing_Sample_Link": (
-                ",".join(writing_paths) if writing_paths else None
-            ),
-            "Student_Assessment_Link": (
-                ",".join(assessment_paths) if assessment_paths else None
-            ),
-            "Phonics_Evidence_Link": (
-                ",".join(phonics_paths) if phonics_paths else None
-            ),
-            "Portfolio_Evidence_Link": (
-                ",".join(portfolio_paths) if portfolio_paths else None
-            ),
-            "Assessment_Score_Pct": None,
-            "submitted_at": datetime.now(timezone.utc).isoformat()
-        }
-        database_entries.append(entry)
-
-    # ========================================================
-    # SAVE TO SUPABASE — single atomic batch insert, with
-    # rollback of every uploaded file if it fails.
-    # ========================================================
-    progress.progress(85, text="Saving implementation details...")
-
-    all_uploaded_paths = [r["path"] for r in upload_results if r["success"]]
-
+    # submission_in_progress was set True by request_submission() and is
+    # guaranteed to be reset back to False in the `finally` block below,
+    # no matter which exit path (validation error, upload failure, DB
+    # failure, or success) this run takes. That's what makes the submit
+    # button safe to click again afterwards, and unclickable while a
+    # submission from an earlier click is still being processed.
     try:
-        insert_implementations_to_db(database_entries)
-    except Exception as e:
-        rollback_errors = delete_files_from_r2(all_uploaded_paths)
-        st.error(
-            "The database record could not be saved, so this submission "
-            "was not completed. The files that had been uploaded were "
-            "automatically removed — please try submitting again."
-        )
-        st.code(str(e))
-        if rollback_errors:
-            st.warning(
-                "Some uploaded files could not be automatically removed "
-                "and may need manual cleanup:"
+        # ========================================================
+        # BASIC VALIDATION
+        # ========================================================
+        if selected_state == "Select State / Zone":
+            st.error("Please select State / Zone.")
+            st.stop()
+        if selected_consultant == "Select Consultant":
+            st.error("Please select Consultant.")
+            st.stop()
+        if selected_school_option == "Select School":
+            st.error("Please select School.")
+            st.stop()
+        if not selected_school.strip():
+            st.error("Please enter the school name.")
+            st.stop()
+        if selected_teacher_option == "Select Teacher":
+            st.error("Please select Teacher.")
+            st.stop()
+        if (
+            selected_teacher_option == OTHER_TEACHER_OPTION
+            and not selected_teacher.strip()
+        ):
+            st.error("Please enter the teacher's name.")
+            st.stop()
+
+        # ========================================================
+        # VALIDATE LESSON NAMES + CLASS TIMES
+        # ========================================================
+        invalid_groups = []
+        for group in all_groups:
+            if not str(group["lesson_name"]).strip():
+                invalid_groups.append(group["group_number"])
+
+        if invalid_groups:
+            st.error(
+                "Please enter Lesson Plan No. & "
+                "Topic / Chapter for Class Implementation "
+                f"{', '.join(map(str, invalid_groups))}."
             )
-            for key, err in rollback_errors:
-                st.caption(f"• {key} — {err}")
-        st.stop()
+            st.stop()
 
-    # ========================================================
-    # SUCCESS — reset the form so it's ready for the next entry
-    # ========================================================
-    progress.progress(100, text="Submission completed successfully.")
+        # ========================================================
+        # SUBMISSION ID
+        # ========================================================
+        submission_id = uuid.uuid4().hex[:12]
+        school_path = sanitize_path_component(selected_school)
+        teacher_path = sanitize_path_component(selected_teacher)
+        date_string = selected_date.strftime("%Y-%m-%d")
+        submission_base = (
+            f"schools/{school_path}/teachers/{teacher_path}/"
+            f"{date_string}/submission_{submission_id}"
+        )
 
-    st.session_state["last_submission_ok"] = True
-    st.session_state["last_submission_count"] = len(database_entries)
-    st.session_state["last_submission_role"] = selected_person_role
+        # ========================================================
+        # COLLECT UPLOAD JOBS
+        # ========================================================
+        upload_jobs = []
+        category_folder_map = {
+            "lesson_plan": "lesson_plans",
+            "activity": "activity_videos",
+            "writing": "student_work",
+            "phonics": "phonics",
+            "assessment": "student_assessments",
+            "portfolio": "teacher_portfolio"
+        }
+        for group in all_groups:
+            group_number = group["group_number"]
+            group_base = (
+                f"{submission_base}/implementation_{group_number}"
+            )
 
-    reset_form_for_next_submission()
-    st.rerun()
+            recorded_voice = group["recorded_voice"]
+            if recorded_voice is not None:
+                upload_jobs.append(
+                    (
+                        recorded_voice,
+                        f"{group_base}/voice_notes",
+                        "voice",
+                        group_number
+                    )
+                )
+
+            for material in group["uploaded_materials"]:
+                category = material["category"]
+                file = material["file"]
+                folder = category_folder_map[category]
+                upload_jobs.append(
+                    (
+                        file,
+                        f"{group_base}/{folder}",
+                        category,
+                        group_number
+                    )
+                )
+
+        # ========================================================
+        # CHECK FILE SIZES (before touching R2 at all)
+        # ========================================================
+        oversized_files = []
+        for (
+            uploaded_file,
+            folder_name,
+            category,
+            group_number
+        ) in upload_jobs:
+            size_mb = get_file_size_mb(uploaded_file)
+            if size_mb > MAX_FILE_SIZE_MB:
+                oversized_files.append((uploaded_file.name, size_mb))
+
+        if oversized_files:
+            st.error(
+                f"The following files exceed the {MAX_FILE_SIZE_MB} MB limit:"
+            )
+            for file_name, size_mb in oversized_files:
+                st.write(f"• {file_name} — {size_mb:.1f} MB")
+            st.stop()
+
+        # ========================================================
+        # UPLOAD FILES
+        # ========================================================
+        progress = st.progress(0, text="Preparing uploads...")
+
+        if upload_jobs:
+            progress.progress(
+                10,
+                text=f"Uploading {len(upload_jobs)} file(s)..."
+            )
+            try:
+                upload_results = upload_all_files_parallel(upload_jobs)
+            except Exception as e:
+                st.error(
+                    "An unexpected error occurred while uploading files. "
+                    "No files or records were kept — please try submitting again."
+                )
+                st.exception(e)
+                st.stop()
+        else:
+            upload_results = []
+
+        progress.progress(70, text="Checking uploaded files...")
+
+        # ========================================================
+        # UPLOAD FAILURE -> ROLLBACK ANY FILES THAT DID SUCCEED
+        # ------------------------------------------------------
+        # If even one file in this submission failed to upload, we treat
+        # the whole submission as failed. Any files that DID upload
+        # successfully in this same batch are now orphaned (no DB record
+        # will ever reference them), so we delete them from R2 rather than
+        # silently leaving them in the bucket.
+        # ========================================================
+        failed_uploads = [r for r in upload_results if not r["success"]]
+        successful_uploads = [r for r in upload_results if r["success"]]
+
+        if failed_uploads:
+            rollback_errors = delete_files_from_r2(
+                [r["path"] for r in successful_uploads]
+            )
+            st.error(
+                "Some files could not be uploaded, so this submission was "
+                "not saved. No database records were created."
+            )
+            for result in failed_uploads:
+                st.write(f"• {result['file_name']} — {result['error']}")
+            if successful_uploads:
+                st.caption(
+                    f"{len(successful_uploads)} file(s) that had already "
+                    "uploaded were removed automatically."
+                )
+            if rollback_errors:
+                st.warning(
+                    "Some already-uploaded files could not be automatically "
+                    "removed and may need manual cleanup:"
+                )
+                for key, err in rollback_errors:
+                    st.caption(f"• {key} — {err}")
+            st.stop()
+
+        # ========================================================
+        # GET PATHS
+        # ========================================================
+        def get_paths(group_number, category):
+            return [
+                result["path"]
+                for result in upload_results
+                if (
+                    result["group_number"] == group_number
+                    and result["category"] == category
+                    and result["success"]
+                )
+            ]
+
+        # ========================================================
+        # BUILD DATABASE ENTRIES
+        # ========================================================
+        database_entries = []
+        for group in all_groups:
+            group_number = group["group_number"]
+
+            voice_paths = get_paths(group_number, "voice")
+            lesson_plan_paths = get_paths(group_number, "lesson_plan")
+            activity_paths = get_paths(group_number, "activity")
+            writing_paths = get_paths(group_number, "writing")
+            assessment_paths = get_paths(group_number, "assessment")
+            phonics_paths = get_paths(group_number, "phonics")
+            portfolio_paths = get_paths(group_number, "portfolio")
+
+            first_name, last_name = split_teacher_name(selected_teacher)
+
+            # ----------------------------------------------------
+            # ACTIVITY EVIDENCE
+            # ------------------------------------------------------
+            # Matches the original schema: only the first 3 activity
+            # files are referenced, in Video_Evidence_1/2/3. Any
+            # activity files beyond the first 3 still upload
+            # successfully to R2, but nothing in the database points
+            # to them — this is a known limitation, kept intentionally
+            # here because the teacher_records table doesn't have an
+            # "Activity_Evidence_Link" (or similar) column to hold the
+            # rest. Add such a column later if you want every file
+            # referenced instead of just the first 3.
+            # ----------------------------------------------------
+            video_1 = activity_paths[0] if len(activity_paths) > 0 else None
+            video_2 = activity_paths[1] if len(activity_paths) > 1 else None
+            video_3 = activity_paths[2] if len(activity_paths) > 2 else None
+
+            # ----------------------------------------------------
+            # SUBMISSION TIMESTAMP — the only timing signal we
+            # actually have is when the teacher submitted the form.
+            # StartTime/EndTime/Duration_Min stay in the record for
+            # backend/schema compatibility, but they are filled in
+            # automatically here — the teacher never sees or fills
+            # these in on the form. StartTime and EndTime are both
+            # set to the real moment of submission; Duration_Min
+            # defaults to 0.0 since no real class duration is
+            # captured anymore.
+            # ----------------------------------------------------
+            submission_moment = datetime.now(timezone.utc)
+
+            entry = {
+                "State_Zone": selected_state,
+                "Uploaded_By": selected_consultant,
+                "Institution": selected_school,
+                "Center": selected_school,
+                "FirstName": first_name,
+                "LastName": last_name,
+                "FullName": selected_teacher,
+                "Role": selected_person_role,
+                "Type": "Classroom Reflection",
+                "Grade": group["grade"],
+                "Subject": group["subject"],
+                "Book": group["lesson_name"],
+                "StartTime": submission_moment.isoformat(),
+                "EndTime": submission_moment.isoformat(),
+                "Duration_Min": 0.0,
+                "Voice_Note_Link": (
+                    ",".join(voice_paths) if voice_paths else None
+                ),
+                "Lesson_Plan_Picture": (
+                    ",".join(lesson_plan_paths) if lesson_plan_paths else None
+                ),
+                "Video_Evidence_1": video_1,
+                "Video_Evidence_2": video_2,
+                "Video_Evidence_3": video_3,
+                "Writing_Sample_Link": (
+                    ",".join(writing_paths) if writing_paths else None
+                ),
+                "Student_Assessment_Link": (
+                    ",".join(assessment_paths) if assessment_paths else None
+                ),
+                "Phonics_Evidence_Link": (
+                    ",".join(phonics_paths) if phonics_paths else None
+                ),
+                "Portfolio_Evidence_Link": (
+                    ",".join(portfolio_paths) if portfolio_paths else None
+                ),
+                "Assessment_Score_Pct": None,
+                "submitted_at": datetime.now(timezone.utc).isoformat()
+            }
+            database_entries.append(entry)
+
+        # ========================================================
+        # SAVE TO SUPABASE — single atomic batch insert, with
+        # rollback of every uploaded file if it fails.
+        # ========================================================
+        progress.progress(85, text="Saving implementation details...")
+
+        all_uploaded_paths = [r["path"] for r in upload_results if r["success"]]
+
+        try:
+            insert_implementations_to_db(database_entries)
+        except Exception as e:
+            rollback_errors = delete_files_from_r2(all_uploaded_paths)
+            st.error(
+                "The database record could not be saved, so this submission "
+                "was not completed. The files that had been uploaded were "
+                "automatically removed — please try submitting again."
+            )
+            st.code(str(e))
+            if rollback_errors:
+                st.warning(
+                    "Some uploaded files could not be automatically removed "
+                    "and may need manual cleanup:"
+                )
+                for key, err in rollback_errors:
+                    st.caption(f"• {key} — {err}")
+            st.stop()
+
+        # ========================================================
+        # SUCCESS — reset the form so it's ready for the next entry
+        # ========================================================
+        progress.progress(100, text="Submission completed successfully.")
+
+        st.session_state["last_submission_ok"] = True
+        st.session_state["last_submission_count"] = len(database_entries)
+        st.session_state["last_submission_role"] = selected_person_role
+
+        # Drop the browser onto this school's own shared link
+        # (?school=...) for the next entry — even if this submission
+        # was reached the manual way (State -> Consultant -> School ->
+        # Teacher) rather than via a shared link. Skip this for a
+        # manually-typed "Other School" name: it isn't in the roster,
+        # so a ?school= link to it wouldn't resolve on the next load
+        # (see the deep-link lookup above) and would just show the
+        # "link not recognized" warning instead of helping.
+        if selected_school_option != OTHER_SCHOOL_OPTION:
+            st.query_params["school"] = selected_school
+
+        reset_form_for_next_submission()
+        st.rerun()
+    finally:
+        # Belt-and-braces: reset_form_for_next_submission() already does
+        # this on the success path, but every other exit above (each
+        # st.stop() call) skips the rest of the try block, so this is
+        # what guarantees the flag always comes back down — otherwise
+        # the submit button would stay permanently disabled after the
+        # first validation error or upload failure.
+        st.session_state.submission_in_progress = False
