@@ -59,8 +59,6 @@ IDENTITY_SESSION_KEYS = {
     "selected_consultant",
     "selected_school_option",
     "manually_entered_school",
-    "selected_teacher_option",
-    "manually_entered_teacher",
     "implementation_date",
 }
 
@@ -84,6 +82,7 @@ SUBJECT_OPTIONS = [
     "Hindi",
     "Environmental Studies (EVS)",
     "Science",
+    "Social Science",
     "General Knowledge (GK)",
     "English Grammar",
     "Computer",
@@ -98,7 +97,8 @@ IMPLEMENTATION_MATERIAL_OPTIONS = [
     "Student Written Work / Writing Practice",
     "Phonics / Phonetics Implementation",
     "Student Assessment",
-    "Teacher Portfolio"
+    "Teacher Portfolio",
+    "Event Pictures"
 ]
 
 OTHER_TEACHER_OPTION = "Other Teacher / Not Listed"
@@ -136,13 +136,19 @@ def reset_form_for_next_submission():
     part of the form goes back to a clean state after a successful
     submission (grade/subject/lesson name/files/voice recording/material
     areas, etc). Identity/context fields — State, Consultant, School,
-    Teacher, Date — are deliberately kept, in IDENTITY_SESSION_KEYS, so a
-    teacher submitting several classes in one sitting (e.g. from their
-    school's shared link) isn't forced to re-pick who they are every time.
+    Date — are deliberately kept, in IDENTITY_SESSION_KEYS, so a school
+    isn't forced to re-pick State / Consultant / School every time.
     Note that a school shared link (?school=... in the URL) isn't
     session_state at all — it lives in the URL query params, which a
     st.rerun() never touches — so re-opening the form after a submission
     stays on the same school's deep link automatically.
+
+    Teacher is deliberately NOT preserved: after every submission the
+    form should look exactly like it did the moment the school's shared
+    link was first opened, with the Teacher dropdown back on "Select
+    Teacher" — so whoever submits next (which may be a different
+    teacher at the same school) always has to actively pick her own
+    name rather than silently inheriting the previous submitter's.
 
     We can't "clear" a file_uploader or audio_input widget in place —
     Streamlit only resets a widget when its session_state key no longer
@@ -1206,6 +1212,31 @@ def render_implementation_group(
                         "category": "portfolio"
                     }
                 )
+        elif selected_area == (
+            "Event Pictures"
+        ):
+            files = st.file_uploader(
+                "Upload Event Pictures",
+                type=[
+                    "jpg",
+                    "jpeg",
+                    "png",
+                    "webp"
+                ],
+                accept_multiple_files=True,
+                key=(
+                    f"event_pictures_files_"
+                    f"{group_number}_"
+                    f"{area_id}"
+                )
+            )
+            for file in files or []:
+                uploaded_materials.append(
+                    {
+                        "file": file,
+                        "category": "event_pictures"
+                    }
+                )
 
         if len(group_state["areas"]) > 1:
             if st.button(
@@ -1379,7 +1410,8 @@ if st.session_state.get(
             "writing": "student_work",
             "phonics": "phonics",
             "assessment": "student_assessments",
-            "portfolio": "teacher_portfolio"
+            "portfolio": "teacher_portfolio",
+            "event_pictures": "event_pictures"
         }
         for group in all_groups:
             group_number = group["group_number"]
@@ -1521,6 +1553,7 @@ if st.session_state.get(
             assessment_paths = get_paths(group_number, "assessment")
             phonics_paths = get_paths(group_number, "phonics")
             portfolio_paths = get_paths(group_number, "portfolio")
+            event_picture_paths = get_paths(group_number, "event_pictures")
 
             first_name, last_name = split_teacher_name(selected_teacher)
 
@@ -1590,6 +1623,10 @@ if st.session_state.get(
                 ),
                 "Portfolio_Evidence_Link": (
                     ",".join(portfolio_paths) if portfolio_paths else None
+                ),
+                "Event_Pictures_Link": (
+                    ",".join(event_picture_paths)
+                    if event_picture_paths else None
                 ),
                 "Assessment_Score_Pct": None,
                 "submitted_at": datetime.now(timezone.utc).isoformat()
