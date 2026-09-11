@@ -10,6 +10,7 @@ import uuid
 import hashlib
 import urllib.parse
 import time
+import boto3
 from io import BytesIO
 from sqlalchemy import text
 from supabase import create_client
@@ -50,6 +51,34 @@ try:
 except Exception as e:
     R2_PUBLIC_BASE_URL = None
     st.warning(f"R2 public base URL missing or misconfigured in Streamlit Secrets — evidence files will not load: {e}")
+
+# --- CLOUDFLARE R2 DELETE CLIENT ---
+# Separate from R2_PUBLIC_BASE_URL above (which is read-only, just a
+# CDN-style base URL). Deleting an uploaded evidence file for real needs
+# write credentials, so this reuses the SAME [r2] secrets block the
+# teacher-facing submission app already has — copy R2_ENDPOINT_URL,
+# R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET_NAME from that
+# app's secrets.toml into this app's [r2] section (alongside the
+# existing public_base_url key) to enable the "Delete" buttons in Tab 7.
+R2_DELETE_ENABLED = False
+r2_delete_client = None
+R2_DELETE_BUCKET_NAME = None
+try:
+    r2_delete_secrets = st.secrets["r2"]
+    r2_delete_client = boto3.client(
+        "s3",
+        endpoint_url=r2_delete_secrets["R2_ENDPOINT_URL"],
+        aws_access_key_id=r2_delete_secrets["R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=r2_delete_secrets["R2_SECRET_ACCESS_KEY"],
+        region_name="auto"
+    )
+    R2_DELETE_BUCKET_NAME = r2_delete_secrets["R2_BUCKET_NAME"]
+    R2_DELETE_ENABLED = True
+except Exception:
+    # Delete credentials aren't configured yet — the "🗑️ Delete" button in
+    # Tab 7 will stay hidden rather than erroring, since everything else
+    # (viewing files via the public base URL above) keeps working either way.
+    pass
 
 try:
     GEMINI_API_KEY = st.secrets["gemini"]["api_key"]
@@ -482,7 +511,14 @@ def fetch_observation_history(teacher_name=None, school_name=None):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_master_db_from_supabase():
-    base_cols = """
+    # "id" is included so Tab 7's delete-evidence feature can target one
+    # exact row. Almost every Supabase table has this by default, but in
+    # case some older/custom setup doesn't expose it, we fall back to a
+    # query without "id" rather than breaking the whole dashboard — the
+    # delete buttons just won't be offered in that case (see HAS_ID_COLUMN
+    # check in Tab 7).
+    base_cols_with_id = """
+            "id",
             "State_Zone", "Uploaded_By", "Institution", "Center",
             "FirstName", "LastName", "FullName", "Role", "Type",
             "Grade", "Subject", "Book", "StartTime", "EndTime",
@@ -490,33 +526,51 @@ def fetch_master_db_from_supabase():
             "Voice_Note_Link", "Lesson_Plan_Picture",
             "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
             "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+            "Student_Assessment_Link", "Event_Pictures_Link",
             "Record_Hash"
     """
-    query_with_submitted_at = f"""
-        SELECT 
-            {base_cols},
-            "submitted_at"
-        FROM teacher_records
-        ORDER BY "submitted_at" DESC NULLS LAST;
+    base_cols_no_id = """
+            "State_Zone", "Uploaded_By", "Institution", "Center",
+            "FirstName", "LastName", "FullName", "Role", "Type",
+            "Grade", "Subject", "Book", "StartTime", "EndTime",
+            COALESCE("Duration_Min", 0.0) AS "Duration_Min",
+            "Voice_Note_Link", "Lesson_Plan_Picture",
+            "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
+            "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+            "Student_Assessment_Link", "Event_Pictures_Link",
+            "Record_Hash"
     """
-    query_without_submitted_at = f"""
-        SELECT 
-            {base_cols}
-        FROM teacher_records
-        ORDER BY "StartTime" DESC;
-    """
-    try:
-        df_raw = conn.query(query_with_submitted_at, ttl=0)
-    except Exception:
-        # "submitted_at" column not present yet on this database
-        # (run add_submitted_at_column.sql to enable accurate
-        # submission timestamps in Tab 7). Fall back gracefully
-        # so the rest of the app keeps working either way.
-        try:
-            df_raw = conn.query(query_without_submitted_at, ttl=0)
-        except Exception as e:
-            st.error(f"Error fetching from PostgreSQL: {e}")
-            df_raw = pd.DataFrame()
+
+    def _query(base_cols, with_submitted_at):
+        if with_submitted_at:
+            q = f'SELECT {base_cols}, "submitted_at" FROM teacher_records ORDER BY "submitted_at" DESC NULLS LAST;'
+        else:
+            q = f'SELECT {base_cols} FROM teacher_records ORDER BY "StartTime" DESC;'
+        return conn.query(q, ttl=0)
+
+    df_raw = None
+    last_error = None
+    # Try (with id, with submitted_at) -> (with id, no submitted_at) ->
+    # (no id, with submitted_at) -> (no id, no submitted_at). The
+    # "submitted_at" column not being present yet (run
+    # add_submitted_at_column.sql to enable accurate submission
+    # timestamps in Tab 7) and "id" not being present are independent
+    # possible gaps, so we try every combination before giving up.
+    for base_cols in (base_cols_with_id, base_cols_no_id):
+        for with_submitted_at in (True, False):
+            try:
+                df_raw = _query(base_cols, with_submitted_at)
+                last_error = None
+                break
+            except Exception as e:
+                last_error = e
+                continue
+        if df_raw is not None:
+            break
+
+    if df_raw is None:
+        st.error(f"Error fetching from PostgreSQL: {last_error}")
+        df_raw = pd.DataFrame()
 
     if not df_raw.empty:
         for dt_col in ['StartTime', 'EndTime', 'submitted_at']:
@@ -1439,6 +1493,8 @@ def extract_evidence_items_vectorized(df_src, col_name):
                 'object_key': f['object_key'],
                 'source': f['source'],
                 'date': d_str, 'grade': g_str, 'subject': s_str, 'lesson': b_str,
+                'record_id': r['id'] if 'id' in r and pd.notna(r['id']) else None,
+                'column': col_name,
             })
 
     seen = set()
@@ -1461,6 +1517,78 @@ def evidence_items_across_columns(df_src, columns):
                 seen.add(url)
                 items.append(item)
     return items
+
+
+# Every evidence column an uploaded file can live in. delete_evidence_item()
+# refuses to touch anything outside this set, as a guard against a typo'd
+# or unexpected column name ever reaching a raw SQL UPDATE.
+DELETABLE_EVIDENCE_COLUMNS = {
+    'Voice_Note_Link', 'Lesson_Plan_Picture',
+    'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3',
+    'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link',
+    'Student_Assessment_Link', 'Event_Pictures_Link',
+}
+
+
+def delete_evidence_item(record_id, column_name, object_key, url):
+    """
+    Permanently removes ONE evidence file: deletes the underlying object
+    from R2 (skipped for legacy external links that were never stored in
+    R2 — we have no write access to wherever those live) and removes just
+    that file's reference from the matching teacher_records row, leaving
+    any other files listed in the same column untouched. Because every
+    admin view (Tab 4, Tab 7, PDF reports) reads straight from
+    teacher_records, the removed file disappears everywhere the moment
+    the page/report is refreshed — there's no separate "clean it out of
+    the PDF" step needed.
+
+    Returns (success: bool, message: str | None) — message is an error
+    on failure, or a non-fatal warning on success (e.g. DB updated but
+    R2 delete failed), or None if everything went cleanly.
+    """
+    if column_name not in DELETABLE_EVIDENCE_COLUMNS:
+        return False, f"'{column_name}' is not a recognized evidence column."
+    if not record_id:
+        return False, "This record has no database id to target (older row, or the 'id' column isn't available) — cannot safely delete."
+
+    try:
+        with conn.session as s:
+            current = s.execute(
+                text(f'SELECT "{column_name}" FROM teacher_records WHERE id = :id'),
+                {"id": int(record_id)}
+            ).fetchone()
+    except Exception as e:
+        return False, f"Could not read the current value: {e}"
+
+    if current is None:
+        return False, "Record not found — it may already have been deleted."
+
+    current_raw = current[0]
+    target = (object_key or url or "").strip()
+    remaining = [v for v in split_evidence_raw_value(current_raw) if v.strip() != target]
+    new_value = ",".join(remaining) if remaining else None
+
+    try:
+        with conn.session as s:
+            s.execute(
+                text(f'UPDATE teacher_records SET "{column_name}" = :val WHERE id = :id'),
+                {"val": new_value, "id": int(record_id)}
+            )
+            s.commit()
+    except Exception as e:
+        return False, f"Could not update the database: {e}"
+
+    r2_warning = None
+    if object_key and R2_DELETE_ENABLED:
+        try:
+            r2_delete_client.delete_object(Bucket=R2_DELETE_BUCKET_NAME, Key=object_key)
+        except Exception as e:
+            r2_warning = f"Database record updated, but the file could not be removed from R2 storage and may need manual cleanup: {e}"
+    elif object_key and not R2_DELETE_ENABLED:
+        r2_warning = "Database record updated, but R2 delete credentials aren't configured yet, so the file itself still exists in storage (see the R2 delete client note near the top of this file)."
+
+    fetch_master_db_from_supabase.clear()
+    return True, r2_warning
 
 
 def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_content_kpi, calc_lib_kpi, daily_ld_target, daily_content_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True, active_metric_mode="Content / Book Usage"):
@@ -1662,7 +1790,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
 
     if enable_qual_kpi:
         story.append(Paragraph("<b>Classroom Submissions & Evidence Compliance</b>", sec_head_style))
-        qual_summary_table_data = [["Teacher Name", "LP / Audio Notes", "Activity Videos", "Writing Samples", "Phonics Evidences", "Portfolio Artifacts", "Status"]]
+        qual_summary_table_data = [["Teacher Name", "LP / Audio Notes", "Activity Videos", "Writing Samples", "Phonics Evidences", "Portfolio Artifacts", "Assessments", "Event Pics", "Status"]]
         
         for t_name in teachers_list:
             sub_t = school_curr_df[school_curr_df['FullName'] == t_name]
@@ -1672,12 +1800,14 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             vn_cnt = len(extract_evidence_items_vectorized(sub_t, 'Voice_Note_Link'))
             ph_cnt = len(extract_evidence_items_vectorized(sub_t, 'Phonics_Evidence_Link'))
             pf_cnt = len(extract_evidence_items_vectorized(sub_t, 'Portfolio_Evidence_Link'))
+            as_cnt = len(extract_evidence_items_vectorized(sub_t, 'Student_Assessment_Link'))
+            ev_cnt = len(extract_evidence_items_vectorized(sub_t, 'Event_Pictures_Link'))
             
             is_q_ok = (v_cnt >= target_vid_count and w_cnt >= target_writing_count and (lp_cnt + vn_cnt) >= target_lp_combo_count and ph_cnt >= target_phonics_count and pf_cnt >= target_portfolio_count)
             q_stat = "Met Standard" if is_q_ok else "In Progress"
-            qual_summary_table_data.append([t_name, str(lp_cnt + vn_cnt), str(v_cnt), str(w_cnt), str(ph_cnt), str(pf_cnt), q_stat])
+            qual_summary_table_data.append([t_name, str(lp_cnt + vn_cnt), str(v_cnt), str(w_cnt), str(ph_cnt), str(pf_cnt), str(as_cnt), str(ev_cnt), q_stat])
 
-        qual_table_obj = Table(qual_summary_table_data, colWidths=[130, 80, 70, 70, 75, 75, 40])
+        qual_table_obj = Table(qual_summary_table_data, colWidths=[100, 55, 50, 50, 55, 55, 50, 45, 45])
         qual_table_obj.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -1720,10 +1850,12 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         v_writing = extract_evidence_items_vectorized(evidence_source, 'Writing_Sample_Link')
         v_phonics = extract_evidence_items_vectorized(evidence_source, 'Phonics_Evidence_Link')
         v_portfolio = extract_evidence_items_vectorized(evidence_source, 'Portfolio_Evidence_Link')
+        v_assessment = extract_evidence_items_vectorized(evidence_source, 'Student_Assessment_Link')
+        v_events = extract_evidence_items_vectorized(evidence_source, 'Event_Pictures_Link')
         v_vid = evidence_items_across_columns(evidence_source, ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3'])
 
         lp_combo_total = len(v_voice) + len(v_pic)
-        total_artifacts = lp_combo_total + len(v_vid) + len(v_writing) + len(v_phonics) + len(v_portfolio)
+        total_artifacts = lp_combo_total + len(v_vid) + len(v_writing) + len(v_phonics) + len(v_portfolio) + len(v_assessment) + len(v_events)
 
         pdf_book_items = []
         if not teacher_books.empty:
@@ -1746,6 +1878,10 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             pdf_link_items.append(f'• 🔤 <a href="{item["url"]}"><u><b>Open Phonics Evidence #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
         for i, item in enumerate(v_portfolio, 1): 
             pdf_link_items.append(f'• 📁 <a href="{item["url"]}"><u><b>View Teacher Portfolio Showcase #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
+        for i, item in enumerate(v_assessment, 1):
+            pdf_link_items.append(f'• 🧪 <a href="{item["url"]}"><u><b>View Student Assessment #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
+        for i, item in enumerate(v_events, 1):
+            pdf_link_items.append(f'• 🎉 <a href="{item["url"]}"><u><b>View Event Picture #{i}</b></u></a> — <i>{item["grade"]} | {item["subject"]} ({item["lesson"]}, {item["date"]})</i>')
 
         story.append(Paragraph(f"<b>Academic Performance Profile: {target_teacher}</b>", title_style))
         story.append(Spacer(1, 4))
@@ -1764,6 +1900,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         if include_library:
             summary_metrics["Library Usage"] = f"{t_day_lib:.1f}m"
         summary_metrics["Phonics / Portfolio"] = f"{len(v_phonics)} / {len(v_portfolio)}"
+        summary_metrics["Assessments / Events"] = f"{len(v_assessment)} / {len(v_events)}"
         summary_metrics["Activity Submissions"] = f"{total_artifacts}"
 
         headers_row = [Paragraph(k, card_header) for k in summary_metrics.keys()]
@@ -2844,10 +2981,12 @@ else:
             v_writing = extract_evidence_items_vectorized(evidence_source, 'Writing_Sample_Link')
             v_phonics = extract_evidence_items_vectorized(evidence_source, 'Phonics_Evidence_Link')
             v_portfolio = extract_evidence_items_vectorized(evidence_source, 'Portfolio_Evidence_Link')
+            v_assessment = extract_evidence_items_vectorized(evidence_source, 'Student_Assessment_Link')
+            v_events = extract_evidence_items_vectorized(evidence_source, 'Event_Pictures_Link')
             v_vid = evidence_items_across_columns(evidence_source, ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3'])
 
             lp_combo_total = len(v_voice) + len(v_pic)
-            total_artifacts = lp_combo_total + len(v_vid) + len(v_writing) + len(v_phonics) + len(v_portfolio)
+            total_artifacts = lp_combo_total + len(v_vid) + len(v_writing) + len(v_phonics) + len(v_portfolio) + len(v_assessment) + len(v_events)
 
             col_btn_top, col_bulk_btn = st.columns(2)
             with col_btn_top:
@@ -3015,15 +3154,17 @@ else:
 
             st.subheader("3. Qualitative Evidences & Artifact Hub (Phonics & Portfolio Integrated)")
 
-            v_cols = st.columns(5)
+            v_cols = st.columns(7)
             v_cols[0].metric("📖 LP / Audio Notes", f"{lp_combo_total}", delta=f"{len(v_voice)} Audio | {len(v_pic)} Img")
             v_cols[1].metric("🎥 Activity Videos", f"{len(v_vid)}")
             v_cols[2].metric("📝 Writing Samples", f"{len(v_writing)}")
             v_cols[3].metric("🔤 Phonics Evidence", f"{len(v_phonics)}")
             v_cols[4].metric("📁 Portfolio Uploads", f"{len(v_portfolio)}")
+            v_cols[5].metric("🧪 Assessments", f"{len(v_assessment)}")
+            v_cols[6].metric("🎉 Event Pictures", f"{len(v_events)}")
 
             st.markdown("##### 📌 Detailed Evidence Submissions & Direct Artifact Links")
-            q_cols1, q_cols2, q_cols3 = st.columns(3)
+            q_cols1, q_cols2, q_cols3, q_cols4 = st.columns(4)
             
             with q_cols1:
                 st.markdown("###### 📖 1. Lesson Plans & Pre-Class Voice Notes")
@@ -3065,6 +3206,19 @@ else:
                             render_evidence_media_preview(item, widget_key=f"q3_{i_idx}")
                 else:
                     st.caption("No phonics implementation or portfolio files uploaded.")
+
+            with q_cols4:
+                st.markdown("###### 🧪 4. Student Assessments & Event Pictures")
+                for item in v_assessment:
+                    st.markdown(f"• 🧪 [Student Assessment]({item['url']}) - **{item['grade']}** | *{item['subject']}* ({item['lesson']}, {item['date']})")
+                for item in v_events:
+                    st.markdown(f"• 🎉 [Event Picture]({item['url']}) - **{item['grade']}** | *{item['subject']}* ({item['lesson']}, {item['date']})")
+                if v_assessment or v_events:
+                    with st.expander("👁️ Play / view these files"):
+                        for i_idx, item in enumerate(v_assessment + v_events):
+                            render_evidence_media_preview(item, widget_key=f"q4_{i_idx}")
+                else:
+                    st.caption("No student assessments or event pictures uploaded.")
 
             st.markdown("---")
 
@@ -3407,7 +3561,7 @@ else:
                 target_phonics_count_t7 = st.number_input("Min. Phonics Submissions", min_value=1, max_value=20, value=2, step=1, key="t7_ph_cnt")
                 target_portfolio_count_t7 = st.number_input("Min. Portfolio Artifacts", min_value=1, max_value=20, value=1, step=1, key="t7_pf_cnt")
 
-        evidence_cols = ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link']
+        evidence_cols = ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Student_Assessment_Link', 'Event_Pictures_Link']
         avail_ev_cols = [c for c in evidence_cols if c in filtered_df.columns]
 
         if not filtered_df.empty and avail_ev_cols:
@@ -3450,7 +3604,7 @@ else:
             has_submitted_at = 'submitted_at' in t7_filtered.columns
             t7_sort_col = 'submitted_at' if has_submitted_at else 'StartTime'
 
-            t7_display_cols = ['submitted_at', 'FullName', 'Institution', 'Grade', 'Subject', 'Book', 'StartTime', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Writing_Sample_Link']
+            t7_display_cols = ['submitted_at', 'FullName', 'Institution', 'Grade', 'Subject', 'Book', 'StartTime', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Writing_Sample_Link', 'Student_Assessment_Link', 'Event_Pictures_Link']
             t7_avail = [c for c in t7_display_cols if c in t7_filtered.columns]
 
             t7_table = t7_filtered[t7_avail].sort_values(by=t7_sort_col, ascending=False)
@@ -3465,6 +3619,8 @@ else:
             st.markdown("---")
             st.markdown("##### 🎬 Play / View Evidence Files")
             st.caption("Files are streamed directly from the public R2 bucket.")
+            if not R2_DELETE_ENABLED:
+                st.caption("⚠️ R2 delete credentials aren't configured, so files can be removed from records here, but not from R2 storage itself. See the note near the top of this app.")
 
             t7_preview_rows = t7_filtered.sort_values(by=t7_sort_col, ascending=False).head(25)
             if t7_preview_rows.empty:
@@ -3473,6 +3629,8 @@ else:
                 for row_idx, r7 in t7_preview_rows.iterrows():
                     submitted_display = r7.get('submitted_at', '') if has_submitted_at else r7.get('StartTime', '')
                     row_label = f"{submitted_display} — {r7.get('FullName', 'Unknown Teacher')} ({r7.get('Institution', 'Unknown School')})"
+                    record_id = r7.get('id') if 'id' in r7 else None
+                    has_record_id = record_id is not None and pd.notna(record_id)
                     with st.expander(f"📁 {row_label}"):
                         any_file_for_row = False
                         for ev_col in avail_ev_cols:
@@ -3483,7 +3641,43 @@ else:
                             any_file_for_row = True
                             st.markdown(f"**{ev_col.replace('_', ' ')}**")
                             for f_idx, f_item in enumerate(files_in_cell):
-                                render_evidence_media_preview(f_item, widget_key=f"t7_{row_idx}_{ev_col}_{f_idx}")
+                                prev_col, del_col = st.columns([5, 1])
+                                with prev_col:
+                                    render_evidence_media_preview(f_item, widget_key=f"t7_{row_idx}_{ev_col}_{f_idx}")
+                                with del_col:
+                                    if not has_record_id:
+                                        st.caption("No id — can't delete")
+                                    else:
+                                        del_base_key = f"t7del_{row_idx}_{ev_col}_{f_idx}"
+                                        confirm_key = f"{del_base_key}_confirm"
+                                        if st.session_state.get(confirm_key):
+                                            st.warning("Permanently delete this file?")
+                                            yes_col, no_col = st.columns(2)
+                                            with yes_col:
+                                                if st.button("✅ Yes", key=f"{del_base_key}_yes"):
+                                                    ok, msg = delete_evidence_item(
+                                                        record_id, ev_col,
+                                                        f_item.get('object_key'), f_item.get('url')
+                                                    )
+                                                    st.session_state[confirm_key] = False
+                                                    if ok:
+                                                        st.success("Deleted." if not msg else msg)
+                                                    else:
+                                                        st.error(msg)
+                                                    time.sleep(0.5)
+                                                    st.rerun()
+                                            with no_col:
+                                                if st.button("✖ No", key=f"{del_base_key}_no"):
+                                                    st.session_state[confirm_key] = False
+                                                    st.rerun()
+                                        else:
+                                            if st.button(
+                                                "🗑️ Delete",
+                                                key=del_base_key,
+                                                help="Permanently removes this file from R2 storage and from this record — can't be undone."
+                                            ):
+                                                st.session_state[confirm_key] = True
+                                                st.rerun()
                         if not any_file_for_row:
                             st.caption("No evidence files found in this submission.")
 
