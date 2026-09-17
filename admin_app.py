@@ -2123,7 +2123,15 @@ if uploaded_files:
             inserted_count, duplicate_count = ingest_excel_to_postgresql(new_processed_dfs)
             fetch_master_db_from_supabase.clear()
             build_teacher_roster_cached.clear()
-            st.sidebar.success(f"🎉 Database sync complete: {inserted_count} record(s) inserted successfully!")
+            if inserted_count == 0 and duplicate_count > 0:
+                st.sidebar.warning(
+                    f"⚠️ 0 records inserted — all {duplicate_count} row(s) matched an existing Record_Hash "
+                    "already in the database. If you just deleted this consultant's data and expected a fresh "
+                    "insert, the delete likely didn't remove the old rows (check the delete confirmation message "
+                    "above for a row count / mismatch warning)."
+                )
+            else:
+                st.sidebar.success(f"🎉 Database sync complete: {inserted_count} record(s) inserted successfully!")
             st.rerun()
 
 df = fetch_master_db_from_supabase()
@@ -2224,14 +2232,27 @@ if not df.empty:
                         st.error("Please enter the consultant name.")
                     else:
                         with conn.session as s:
-                            s.execute(
-                                text('DELETE FROM teacher_records WHERE LOWER("Uploaded_By") = LOWER(:name) AND "State_Zone" = :state'),
+                            del_result = s.execute(
+                                text('''
+                                    DELETE FROM teacher_records
+                                    WHERE LOWER(TRIM("Uploaded_By")) = LOWER(TRIM(:name))
+                                      AND TRIM("State_Zone") = TRIM(:state)
+                                '''),
                                 {"name": del_emp_name.strip(), "state": del_state_zone}
                             )
+                            deleted_rows = del_result.rowcount
                             s.commit()
                         fetch_master_db_from_supabase.clear()
                         build_teacher_roster_cached.clear()
-                        st.success(f"Successfully deleted records for {del_emp_name} in {del_state_zone}!")
+                        if deleted_rows and deleted_rows > 0:
+                            st.success(f"Successfully deleted {deleted_rows} record(s) for {del_emp_name} in {del_state_zone}!")
+                        else:
+                            st.warning(
+                                f"No records matched '{del_emp_name}' in '{del_state_zone}' — nothing was deleted. "
+                                "Check for a name/state mismatch with how the data was originally uploaded "
+                                "(the delete no longer requires an exact State/Zone string match, but the "
+                                "consultant name and state must still exist together in the database)."
+                            )
                         st.rerun()
                 except Exception as e:
                     st.error(f"Error deleting consultant data: {e}")
@@ -2483,16 +2504,14 @@ else:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-    # 8 Dedicated Active Tabs
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    # 6 Dedicated Active Tabs
+    tab1, tab2, tab3, tab4, tab7, tab8 = st.tabs([
         "📘 1. Lesson Plan Preparation Tracker", 
         "📚 2. Library Usage Tracker", 
         "📖 3. Content & Chapters (Primary KPI)", 
         "👤 4. Teacher 360° Profile Report",
-        "🏛️ 5. Manager Portfolio Quadrants",
-        "🏫 6. School Teacher Progression",
-        "📬 7. Live Evidence Submissions Feed",
-        "📋 8. Classroom Visit Observation Form"
+        "📬 5. Live Evidence Submissions Feed",
+        "📋 6. Classroom Visit Observation Form"
     ])
 
     # TAB 1: LESSON PLAN PREPARATION TRACKER
@@ -3332,221 +3351,6 @@ else:
                 filter_description_text, 
                 final_school_wa_msg
             )
-
-    # TAB 5: MANAGER PORTFOLIO & SCHOOL QUADRANTS (CONTENT-DRIVEN)
-    with tab5:
-        st.header("🏛️ Academic Manager Portfolio Overview")
-        st.caption("High-level classification, Quantitative indicators (Lesson Prep & Content Delivery), and Week-on-Week Velocity tracking.")
-
-        if school_filtered_df.empty:
-            st.warning("No data available for the selected school filter.")
-        else:
-            with st.expander("🎯 Portfolio Quadrant Benchmark Settings", expanded=False):
-                t5_kcol1, t5_kcol2 = st.columns(2)
-                with t5_kcol1:
-                    enable_quant_kpi_t5 = st.checkbox("Enable Quantitative Benchmark", value=True, key="t5_enable_quant_kpi")
-                    daily_ld_target_t5 = st.number_input("Lesson Prep Target (Mins/Day)", min_value=0.0, max_value=60.0, value=10.0, step=5.0, key="t5_ld_target", disabled=not enable_quant_kpi_t5) if enable_quant_kpi_t5 else 0.0
-                    daily_content_target_t5 = st.number_input("Content / Book Delivery Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t5_content_target", disabled=not enable_quant_kpi_t5) if enable_quant_kpi_t5 else 0.0
-                with t5_kcol2:
-                    enable_qual_kpi_t5 = st.checkbox("Enable Qualitative Artifact Benchmark", value=True, key="t5_enable_qual_kpi")
-                    target_vid_count_t5 = st.number_input("Min. Activity Videos Required", min_value=1, max_value=20, value=3, step=1, key="t5_vid_cnt", disabled=not enable_qual_kpi_t5) if enable_qual_kpi_t5 else 0
-                    target_writing_count_t5 = st.number_input("Min. Writing Practice Required", min_value=1, max_value=20, value=3, step=1, key="t5_writing_cnt", disabled=not enable_qual_kpi_t5) if enable_qual_kpi_t5 else 0
-
-            t5_class_filter = st.selectbox("Filter Portfolio by Classification:", ["All Classifications", "🌟 Pace Setters", "📘 Lesson Focused", "📖 Content Focused", "🚨 Priority Focus"], key="t5_class_filter")
-
-            ld_school_stats = filtered_df[filtered_df['Type'] == 'lessonDelivery'].groupby('Institution')['Duration_Min'].sum().reset_index().rename(columns={'Duration_Min': 'lessonDelivery'})
-            
-            c_school_raw = filtered_df[filtered_df['Book'].str.len() > 0]
-            c_school_df = c_school_raw[~c_school_raw['Book'].str.match(r'^Lesson Plan', case=False, na=False)]
-            content_school_stats = c_school_df.groupby('Institution')['Duration_Min'].sum().reset_index().rename(columns={'Duration_Min': 'contentDelivery'})
-
-            school_stats = pd.merge(ld_school_stats, content_school_stats, on='Institution', how='outer').fillna(0.0)
-            
-            all_active_schools = school_filtered_df['Institution'].unique()
-            for s_name in all_active_schools:
-                if s_name not in school_stats['Institution'].values:
-                    new_row = pd.DataFrame({'Institution': [s_name], 'lessonDelivery': [0.0], 'contentDelivery': [0.0]})
-                    school_stats = pd.concat([school_stats, new_row], ignore_index=True)
-
-            school_roster_count = school_master_roster.groupby('Institution')['FullName'].nunique().reset_index().rename(columns={'FullName': 'Roster_Teachers'})
-            school_stats = school_stats.merge(school_roster_count, on='Institution', how='left').fillna({'Roster_Teachers': 0})
-
-            school_stats['Avg_Lesson_Prep_Mins'] = np.where((school_stats['Roster_Teachers'] > 0) & (selected_num_days > 0), school_stats['lessonDelivery'] / school_stats['Roster_Teachers'] / selected_num_days, 0.0).round(1)
-            school_stats['Avg_Content_Delivery_Mins'] = np.where((school_stats['Roster_Teachers'] > 0) & (selected_num_days > 0), school_stats['contentDelivery'] / school_stats['Roster_Teachers'] / selected_num_days, 0.0).round(1)
-
-            qual_agg = []
-            for s_name in school_stats['Institution'].unique():
-                s_data = filtered_df[filtered_df['Institution'] == s_name]
-                s_vids = len(evidence_items_across_columns(s_data, ['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']))
-                s_w = len(extract_evidence_items_vectorized(s_data, 'Writing_Sample_Link'))
-                s_lp = len(extract_evidence_items_vectorized(s_data, 'Lesson_Plan_Picture'))
-                s_vn = len(extract_evidence_items_vectorized(s_data, 'Voice_Note_Link'))
-                s_ph = len(extract_evidence_items_vectorized(s_data, 'Phonics_Evidence_Link'))
-                s_pf = len(extract_evidence_items_vectorized(s_data, 'Portfolio_Evidence_Link'))
-
-                qual_agg.append({
-                    'Institution': s_name,
-                    'Activity_Videos': s_vids,
-                    'Writing_Samples': s_w,
-                    'LP_Audio_Submissions': s_lp + s_vn,
-                    'Phonics_Evidences': s_ph,
-                    'Portfolio_Artifacts': s_pf
-                })
-            
-            qual_df_school = pd.DataFrame(qual_agg)
-            school_stats = school_stats.merge(qual_df_school, on='Institution', how='left').fillna(0)
-
-            def classify_school(row):
-                if not enable_quant_kpi_t5:
-                    return 'Active Portfolio'
-                ld_ok = row['Avg_Lesson_Prep_Mins'] >= daily_ld_target_t5
-                content_ok = row['Avg_Content_Delivery_Mins'] >= daily_content_target_t5
-                qual_ok = True
-                if enable_qual_kpi_t5:
-                    qual_ok = (row['Activity_Videos'] >= target_vid_count_t5) or (row['Writing_Samples'] >= target_writing_count_t5)
-
-                if ld_ok and content_ok and qual_ok:
-                    return '🌟 Pace Setters'
-                elif ld_ok and not content_ok:
-                    return '📘 Lesson Focused'
-                elif not ld_ok and content_ok:
-                    return '📖 Content Focused'
-                else:
-                    return '🚨 Priority Focus'
-
-            school_stats['Classification'] = school_stats.apply(classify_school, axis=1)
-
-            st.subheader("🖼️ 2x2 Portfolio Classification Matrix")
-            
-            pace_setters = school_stats[school_stats['Classification'] == '🌟 Pace Setters']['Institution'].tolist()
-            lesson_focused = school_stats[school_stats['Classification'] == '📘 Lesson Focused']['Institution'].tolist()
-            content_focused = school_stats[school_stats['Classification'] == '📖 Content Focused']['Institution'].tolist()
-            priority_focus = school_stats[school_stats['Classification'] == '🚨 Priority Focus']['Institution'].tolist()
-
-            col_top1, col_top2 = st.columns(2)
-            with col_top1:
-                st.success(f"🌟 **Pace Setters ({len(pace_setters)} Schools)**\n\n*Met Standards*\n\n" + (", ".join(pace_setters) if pace_setters else "None"))
-            with col_top2:
-                st.info(f"📘 **Lesson Focused ({len(lesson_focused)} Schools)**\n\n" + (", ".join(lesson_focused) if lesson_focused else "None"))
-
-            col_bot1, col_bot2 = st.columns(2)
-            with col_bot1:
-                st.warning(f"📖 **Content Focused ({len(content_focused)} Schools)**\n\n" + (", ".join(content_focused) if content_focused else "None"))
-            with col_bot2:
-                st.error(f"🚨 **Priority Focus ({len(priority_focus)} Schools)**\n\n" + (", ".join(priority_focus) if priority_focus else "None"))
-
-            display_school_stats = school_stats if t5_class_filter == "All Classifications" else school_stats[school_stats['Classification'] == t5_class_filter]
-
-            st.subheader("📋 Complete School Performance Leaderboard")
-            display_qtable = display_school_stats[['Institution', 'Roster_Teachers', 'Avg_Lesson_Prep_Mins', 'Avg_Content_Delivery_Mins', 'LP_Audio_Submissions', 'Activity_Videos', 'Writing_Samples', 'Phonics_Evidences', 'Portfolio_Artifacts', 'Classification']].rename(columns={
-                'Institution': 'School Name', 'Roster_Teachers': 'Active Teachers', 'Avg_Lesson_Prep_Mins': 'Prep (m/day)', 'Avg_Content_Delivery_Mins': 'Book Content (m/day)', 'LP_Audio_Submissions': 'LP/Audio Notes', 'Activity_Videos': 'Activity Videos', 'Writing_Samples': 'Writing Samples', 'Phonics_Evidences': 'Phonics Uploads', 'Portfolio_Artifacts': 'Portfolio Uploads'
-            })
-            st.dataframe(display_qtable, use_container_width=True)
-
-            col_t5_d1, col_t5_d2 = st.columns(2)
-            with col_t5_d1:
-                if st.button("⚙️ Compile Portfolio Overview PDF", key="prep_pdf_tab5_btn"):
-                    with st.spinner("Compiling Portfolio PDF..."):
-                        pdf_t5 = generate_pdf_report(
-                            title_text="🏛️ Academic Manager Portfolio Review",
-                            subtitle_text=f"Portfolio Performance Leaderboard ({selected_num_days} Working Days)",
-                            school_name="Multiple Portfolio Schools",
-                            summary_metrics={"Total Schools": len(display_school_stats), "Pace Setters": len(pace_setters), "Priority Focus": len(priority_focus)},
-                            dataframe=display_qtable
-                        ).getvalue()
-                        st.session_state["tab5_pdf_ready"] = pdf_t5
-
-                if "tab5_pdf_ready" in st.session_state:
-                    st.download_button("📄 Download Portfolio Overview Report (PDF)", data=st.session_state["tab5_pdf_ready"], file_name=f"Manager_Portfolio_Overview_{selected_month.replace(' ', '_')}.pdf", mime="application/pdf", key="btn_pdf_tab5")
-
-            with col_t5_d2:
-                if st.button("⚙️ Prepare Portfolio Leaderboard Excel", key="prep_xlsx_tab5_btn"):
-                    buf_t5_xlsx = BytesIO()
-                    with pd.ExcelWriter(buf_t5_xlsx, engine='openpyxl') as writer:
-                        display_qtable.to_excel(writer, index=False, sheet_name='Portfolio_Leaderboard')
-                    st.session_state["tab5_xlsx_ready"] = buf_t5_xlsx.getvalue()
-
-                if "tab5_xlsx_ready" in st.session_state:
-                    st.download_button("📥 Download Portfolio Leaderboard (Excel)", data=st.session_state["tab5_xlsx_ready"], file_name=f"Portfolio_Leaderboard_{selected_month.replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_xlsx_tab5")
-
-    # TAB 6: SCHOOL-LEVEL TEACHER PROGRESSION & EXECUTION TIERS
-    with tab6:
-        st.header("🏫 School-Level Teacher Progression & Execution Tiers")
-        
-        with st.expander("🎯 Progression Target Benchmark Settings", expanded=False):
-            t6_kcol1, t6_kcol2 = st.columns(2)
-            with t6_kcol1:
-                daily_ld_target_t6 = st.number_input("Lesson Prep Target (Mins/Day)", min_value=0.0, max_value=60.0, value=10.0, step=5.0, key="t6_ld_target")
-            with t6_kcol2:
-                daily_content_target_t6 = st.number_input("Content / Book Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t6_content_target")
-
-        calc_ld_kpi_t6 = calculate_kpi_target(daily_ld_target_t6, selected_num_days, True)
-        calc_content_kpi_t6 = calculate_kpi_target(daily_content_target_t6, selected_num_days, True)
-
-        all_schools_list_t6 = sorted(school_master_roster['Institution'].unique())
-        
-        if not all_schools_list_t6:
-            st.info("No schools found in roster.")
-        else:
-            t6_col_f1, t6_col_f2 = st.columns(2)
-            with t6_col_f1:
-                target_school_t6 = st.selectbox("Select School to Inspect:", options=all_schools_list_t6, key="t6_school_sel")
-                
-            school_t6_roster = school_master_roster[school_master_roster['Institution'] == target_school_t6]
-            school_t6_data = filtered_df[filtered_df['Institution'] == target_school_t6]
-
-            t6_ld = school_t6_data[school_t6_data['Type'] == 'lessonDelivery'].groupby('FullName')['Duration_Min'].sum().reset_index()
-            
-            t6_c_raw = school_t6_data[school_t6_data['Book'].str.len() > 0]
-            t6_c_df = t6_c_raw[~t6_c_raw['Book'].str.match(r'^Lesson Plan', case=False, na=False)]
-            t6_content = t6_c_df.groupby('FullName')['Duration_Min'].sum().reset_index()
-
-            t6_teachers = school_t6_roster.merge(t6_ld.rename(columns={'Duration_Min': 'Lesson_Mins'}), on='FullName', how='left').fillna(0.0)
-            t6_teachers = t6_teachers.merge(t6_content.rename(columns={'Duration_Min': 'Content_Mins'}), on='FullName', how='left').fillna(0.0)
-
-            def tier_teacher(row):
-                if selected_num_days == 0:
-                    return '🏖️ Scheduled Break / No Working Days'
-                ld_pct = (row['Lesson_Mins'] / calc_ld_kpi_t6) if calc_ld_kpi_t6 > 0 else 0.0
-                content_pct = (row['Content_Mins'] / calc_content_kpi_t6) if calc_content_kpi_t6 > 0 else 0.0
-                if ld_pct >= 1.0 and content_pct >= 1.0:
-                    return '🌟 Consistent Achiever (>= 100%)'
-                elif ld_pct < 0.40 and content_pct < 0.40:
-                    return '❌ Persistent Inactive (< 40%)'
-                else:
-                    return '⚠️ Fluctuating / Partial (40%-99%)'
-
-            t6_teachers['Execution_Tier'] = t6_teachers.apply(tier_teacher, axis=1)
-
-            with t6_col_f2:
-                t6_tier_filter = st.selectbox("Filter by Execution Tier:", ["All Tiers", "🌟 Consistent Achiever (>= 100%)", "⚠️ Fluctuating / Partial (40%-99%)", "❌ Persistent Inactive (< 40%)"], key="t6_tier_filter")
-
-            if t6_tier_filter != "All Tiers":
-                t6_teachers_filtered = t6_teachers[t6_teachers['Execution_Tier'] == t6_tier_filter]
-            else:
-                t6_teachers_filtered = t6_teachers
-
-            st.markdown(f"### 🏫 School Audit: **{target_school_t6}** | Active Roster: **{len(school_t6_roster)} Teachers**")
-
-            e1, e2, e3 = st.columns(3)
-            num_ach = len(t6_teachers[t6_teachers['Execution_Tier'].str.startswith('🌟')])
-            num_fluc = len(t6_teachers[t6_teachers['Execution_Tier'].str.startswith('⚠️')])
-            num_inact = len(t6_teachers[t6_teachers['Execution_Tier'].str.startswith('❌')])
-
-            e1.metric("🌟 Consistent Achievers", num_ach)
-            e2.metric("⚠️ Fluctuating / Partial", num_fluc)
-            e3.metric("❌ Persistent Inactive", num_inact)
-
-            fig_t6_bar = px.bar(
-                t6_teachers_filtered, x="FullName", y=["Lesson_Mins", "Content_Mins"],
-                title=f"Teacher Curriculum Delivery Breakdown for {target_school_t6} (Mins)",
-                labels={"FullName": "Teacher Name", "value": "Logged Minutes", "variable": "Feature"},
-                barmode="group", text_auto=".1f"
-            )
-            st.plotly_chart(fig_t6_bar, use_container_width=True)
-
-            display_t6_table = t6_teachers_filtered.rename(columns={'FullName': 'Teacher Name', 'Lesson_Mins': 'Lesson Prep (m)', 'Content_Mins': 'Book Content Delivery (m)', 'Execution_Tier': 'Execution Tier'})
-            st.dataframe(display_t6_table, use_container_width=True)
 
     # TAB 7: LIVE EVIDENCE SUBMISSIONS FEED & QUALITATIVE TRACKER
     with tab7:
