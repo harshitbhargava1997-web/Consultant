@@ -2213,6 +2213,52 @@ with st.sidebar.expander("📦 One-Time Data Import (Old App Data)"):
             else:
                 st.sidebar.error("No historical parquet or JSON files found in Supabase storage.")
 
+with st.sidebar.expander("🛟 Restore from R2 Backups (Disaster Recovery)"):
+    st.caption(
+        "Every new submission from the teacher app now also writes a JSON "
+        "copy of its row(s) to `backups/teacher_records/` in R2, independent "
+        "of Postgres. Use this after any accidental deletion to re-insert "
+        "whatever is missing — duplicates are skipped automatically via "
+        "Record_Hash, so it's always safe to re-run."
+    )
+    if not R2_DELETE_ENABLED:
+        st.warning("R2 delete/read credentials aren't configured in this app's secrets, so backups can't be listed here yet.")
+    elif st.button("🔁 Restore Missing Records from R2", key="btn_restore_r2_backups"):
+        with st.spinner("Listing and downloading R2 backup files..."):
+            restored_records = []
+            try:
+                paginator = r2_delete_client.get_paginator("list_objects_v2")
+                for page in paginator.paginate(Bucket=R2_DELETE_BUCKET_NAME, Prefix="backups/teacher_records/"):
+                    for obj in page.get("Contents", []):
+                        key = obj["Key"]
+                        if not key.endswith(".json"):
+                            continue
+                        try:
+                            raw = r2_delete_client.get_object(Bucket=R2_DELETE_BUCKET_NAME, Key=key)["Body"].read()
+                            parsed = json.loads(raw.decode("utf-8"))
+                            if isinstance(parsed, list):
+                                restored_records.extend(parsed)
+                            else:
+                                restored_records.append(parsed)
+                        except Exception as file_err:
+                            st.sidebar.warning(f"Skipped unreadable backup {key}: {file_err}")
+            except Exception as e:
+                st.sidebar.error(f"Could not list R2 backups: {e}")
+                restored_records = []
+
+            if restored_records:
+                restore_df = normalize_identity_columns(pd.DataFrame(restored_records))
+                inserted_count, duplicate_count = ingest_excel_to_postgresql([restore_df])
+                st.sidebar.success(
+                    f"🎉 Restore complete: {inserted_count} record(s) re-inserted, "
+                    f"{duplicate_count} already present and skipped."
+                )
+                fetch_master_db_from_supabase.clear()
+                build_teacher_roster_cached.clear()
+                st.rerun()
+            else:
+                st.sidebar.info("No R2 backup files found under backups/teacher_records/.")
+
 if not df.empty:
     st.sidebar.metric("Database Total Records", len(df))
 
