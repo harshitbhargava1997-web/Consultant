@@ -162,43 +162,31 @@ def _norm_key(value):
 
 
 def compute_record_hash(row):
-    """
-    Stable identity for one UserMetrics activity row.
-
-    IMPORTANT:
-    - Do NOT include mutable fields such as duration/evidence links in the key.
-    - Do include the consultant, teacher, school, activity type and activity
-      timestamp/context so a corrected re-upload updates the same activity
-      instead of creating another row.
-    """
     def _s(v):
-        if v is None:
+        if v is None or (isinstance(v, float) and pd.isna(v)) or pd.isna(v):
             return ""
-        try:
-            if pd.isna(v):
-                return ""
-        except Exception:
-            pass
         return _norm_key(v)
 
     def _t(v):
-        ts = pd.to_datetime(v, errors="coerce")
+        ts = pd.to_datetime(v, errors='coerce')
         return "" if pd.isna(ts) else ts.strftime("%Y-%m-%d %H:%M:%S")
 
+    def _n(v):
+        try:
+            if v is None or pd.isna(v):
+                return "0.00"
+            return f"{float(v):.2f}"
+        except (TypeError, ValueError):
+            return "0.00"
+
     parts = [
-        _s(row.get("Uploaded_By")),
-        _s(row.get("State_Zone")),
-        _s(row.get("FullName")),
-        _s(row.get("Institution")),
-        _s(row.get("Center")),
-        _s(row.get("Type")),
-        _s(row.get("Grade")),
-        _s(row.get("Subject")),
-        _s(row.get("Book")),
-        _t(row.get("StartTime")),
-        _t(row.get("EndTime")),
+        _s(row.get("Uploaded_By")), _s(row.get("FullName")), _s(row.get("Institution")),
+        _s(row.get("Center")), _s(row.get("Type")), _s(row.get("Grade")),
+        _s(row.get("Subject")), _s(row.get("Book")),
+        _t(row.get("StartTime")), _t(row.get("EndTime")), _n(row.get("Duration_Min")),
     ]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
 
 def normalize_identity_columns(df):
     if df is None:
@@ -370,8 +358,6 @@ def init_observation_db():
     except Exception:
         pass
 
-init_observation_db()
-
 
 def init_teacher_records_hash_column():
     try:
@@ -380,8 +366,6 @@ def init_teacher_records_hash_column():
             c.execute(text('CREATE INDEX IF NOT EXISTS idx_teacher_records_hash ON teacher_records ("Record_Hash");'))
     except Exception:
         pass
-
-init_teacher_records_hash_column()
 
 
 def backfill_teacher_records_hash():
@@ -407,7 +391,26 @@ def backfill_teacher_records_hash():
     except Exception:
         return 0
 
-backfill_teacher_records_hash()
+
+# --- ONE-TIME STARTUP MIGRATIONS ---
+# init_observation_db(), init_teacher_records_hash_column() and
+# backfill_teacher_records_hash() are idempotent schema/backfill checks, but
+# each one is a DB round trip (some doing a full-table scan). Streamlit
+# reruns this whole script on EVERY widget interaction, so calling them
+# unguarded at module level meant every click, dropdown change, or page
+# load paid for a CREATE TABLE check, two ALTER TABLE/CREATE INDEX checks,
+# and a "SELECT ... WHERE Record_Hash IS NULL" scan — even when nothing
+# needed to change. st.cache_resource makes this run exactly once per app
+# server process (shared across all users/sessions) instead of once per
+# rerun.
+@st.cache_resource(show_spinner=False)
+def _run_startup_db_migrations():
+    init_observation_db()
+    init_teacher_records_hash_column()
+    backfill_teacher_records_hash()
+    return True
+
+_run_startup_db_migrations()
 
 
 def save_observation_to_db(meta, rubrics, narratives, pdf_url="", evidence_links=""):
@@ -473,7 +476,6 @@ def update_observation_in_db(obs_id, meta, rubrics, narratives, pdf_url="", evid
     """)
     try:
         with conn.engine.begin() as c:
-            c.execute(text('ALTER TABLE classroom_observations ADD COLUMN IF NOT EXISTS evidence_links TEXT;'))
             c.execute(update_query, {
                 "obs_id": int(obs_id),
                 "school": meta.get("School", ""),
@@ -493,12 +495,14 @@ def update_observation_in_db(obs_id, meta, rubrics, narratives, pdf_url="", evid
                 "pdf_url": pdf_url,
                 "evidence_links": evidence_links
             })
+        fetch_observation_history.clear()
         return True
     except Exception as e:
         st.error(f"Error updating visit observation in database: {e}")
         return False
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_observation_history(teacher_name=None, school_name=None):
     query = 'SELECT * FROM classroom_observations'
     conditions = []
@@ -1965,135 +1969,79 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
 
 
 def ingest_excel_to_postgresql(processed_dfs):
-    """
-    Incrementally sync Excel rows into PostgreSQL.
-
-    Behaviour:
-    - New activity keys are inserted.
-    - Existing activity keys are UPDATED with the newest Excel values.
-    - Duplicate rows inside the same Excel batch are collapsed by Record_Hash.
-    - Existing database rows are not blindly skipped, which fixes stale
-      evidence/duration/etc. after a re-upload.
-    """
     if not processed_dfs:
         return 0, 0
-
     combined_df = pd.concat(processed_dfs, ignore_index=True)
     combined_df = normalize_identity_columns(combined_df)
-
+    
     db_cols = [
         "State_Zone", "Uploaded_By", "Institution", "Center",
         "FirstName", "LastName", "FullName", "Role", "Type",
         "Grade", "Subject", "Book", "StartTime", "EndTime",
         "Duration_Min", "Voice_Note_Link", "Lesson_Plan_Picture",
         "Video_Evidence_1", "Video_Evidence_2", "Video_Evidence_3",
-        "Writing_Sample_Link", "Phonics_Evidence_Link",
-        "Portfolio_Evidence_Link", "Assessment_Score_Pct",
-        "Student_Assessment_Link", "Event_Pictures_Link", "Record_Hash"
+        "Writing_Sample_Link", "Phonics_Evidence_Link", "Portfolio_Evidence_Link",
+        "Assessment_Score_Pct", "Record_Hash"
     ]
-
+    
     for col in db_cols:
         if col not in combined_df.columns:
             combined_df[col] = None
 
-    for col in ["State_Zone", "Uploaded_By", "Institution", "Center",
-                "FirstName", "LastName", "FullName", "Role", "Type",
-                "Grade", "Subject", "Book"]:
-        combined_df[col] = (
-            combined_df[col].fillna("").astype(str)
-            .str.replace(r"\s+", " ", regex=True).str.strip()
-        )
+    for dt_col in ['StartTime', 'EndTime']:
+        combined_df[dt_col] = pd.to_datetime(combined_df[dt_col], errors='coerce')
 
-    for dt_col in ["StartTime", "EndTime"]:
-        combined_df[dt_col] = pd.to_datetime(
-            combined_df[dt_col], errors="coerce"
-        )
+    if 'Duration_Min' in combined_df.columns:
+        combined_df['Duration_Min'] = pd.to_numeric(combined_df['Duration_Min'], errors='coerce').fillna(0.0).clip(lower=0.0)
 
-    combined_df["Duration_Min"] = (
-        pd.to_numeric(combined_df["Duration_Min"], errors="coerce")
-        .fillna(0.0).clip(lower=0.0)
-    )
+    if combined_df['StartTime'].isna().all():
+        combined_df['StartTime'] = pd.Timestamp.now()
 
-    if combined_df["StartTime"].isna().all():
-        st.error(
-            "The uploaded Excel file does not contain a usable StartTime/date "
-            "column. No records were written."
-        )
-        return 0, 0
+    combined_df['Record_Hash'] = combined_df.apply(compute_record_hash, axis=1)
 
-    combined_df["Record_Hash"] = combined_df.apply(compute_record_hash, axis=1)
+    cleaned_df = combined_df[db_cols].copy()
+    cleaned_df = cleaned_df.replace({np.nan: None})
+    total_incoming = len(cleaned_df)
 
-    # Keep the LAST occurrence from the uploaded batch. This means if the
-    # same row appears twice in one/multiple selected Excel files, the later
-    # copy is the authoritative version.
-    total_incoming = len(combined_df)
-    cleaned_df = (
-        combined_df[db_cols]
-        .replace({np.nan: None})
-        .drop_duplicates(subset=["Record_Hash"], keep="last")
-        .reset_index(drop=True)
-    )
-    duplicate_count = total_incoming - len(cleaned_df)
+    cleaned_df = cleaned_df.drop_duplicates(subset=['Record_Hash'], keep='last')
+    skipped_within_batch = total_incoming - len(cleaned_df)
 
     if cleaned_df.empty:
-        return 0, duplicate_count
+        return 0, 0
 
     engine = conn.engine
-    inserted_count = 0
-    updated_count = 0
-
     try:
-        with engine.begin() as db:
-            # Fetch all existing hashes once.
-            existing_rows = db.execute(text(
-                'SELECT ctid, "Record_Hash" FROM teacher_records '
-                'WHERE "Record_Hash" IS NOT NULL'
-            )).fetchall()
+        with engine.begin() as bulk_conn:
+            # Only check the hashes actually present in THIS batch against the
+            # DB, instead of pulling every distinct hash ever stored (that
+            # "SELECT DISTINCT ... teacher_records" scan got slower with every
+            # row the table ever accumulated, on every single upload).
+            existing_hashes = set()
+            batch_hashes = [h for h in cleaned_df['Record_Hash'].tolist() if h]
+            if batch_hashes:
+                try:
+                    existing_hashes = set(
+                        h for (h,) in bulk_conn.execute(
+                            text('SELECT "Record_Hash" FROM teacher_records WHERE "Record_Hash" = ANY(:hashes)'),
+                            {"hashes": batch_hashes}
+                        ).fetchall()
+                    )
+                except Exception:
+                    pass
 
-            existing_by_hash = {
-                row[1]: row[0] for row in existing_rows if row[1]
-            }
+            insert_df = cleaned_df[~cleaned_df['Record_Hash'].isin(existing_hashes)] if existing_hashes else cleaned_df
+            skipped_exact_duplicates = (total_incoming - len(insert_df))
 
-            # Explicit UPDATE/INSERT instead of "skip if hash exists".
-            # This is deliberately transactional so a re-upload cannot
-            # leave half the batch updated and half unprocessed.
-            update_cols = [c for c in db_cols if c != "Record_Hash"]
+            # We already know exactly how many rows we're appending, so skip
+            # the before/after COUNT(*) full-table scans and just use that.
+            inserted_count = 0
+            if not insert_df.empty:
+                insert_df.to_sql('teacher_records', con=bulk_conn, index=False, if_exists='append', method='multi', chunksize=1000)
+                inserted_count = len(insert_df)
 
-            update_sql = text(
-                'UPDATE teacher_records SET ' +
-                ', '.join(f'"{c}" = :{c}' for c in update_cols) +
-                ', "Record_Hash" = :Record_Hash '
-                'WHERE ctid = :_ctid'
-            )
-
-            insert_cols = ", ".join(f'"{c}"' for c in db_cols)
-            insert_params = ", ".join(f':{c}' for c in db_cols)
-            insert_sql = text(
-                f'INSERT INTO teacher_records ({insert_cols}) '
-                f'VALUES ({insert_params})'
-            )
-
-            for record in cleaned_df.to_dict("records"):
-                h = record["Record_Hash"]
-                params = {
-                    c: record.get(c) for c in db_cols
-                }
-
-                if h in existing_by_hash:
-                    params["_ctid"] = existing_by_hash[h]
-                    db.execute(update_sql, params)
-                    updated_count += 1
-                else:
-                    db.execute(insert_sql, params)
-                    inserted_count += 1
-
-        # Return inserted + updated information to the UI. The caller still
-        # gets the first two values it expects; duplicate_count remains the
-        # count of rows collapsed inside the upload batch.
-        return inserted_count, duplicate_count
-
+        return inserted_count, skipped_exact_duplicates
     except Exception as e:
-        st.error(f"Ingestion database error: {type(e).__name__}: {e}")
+        st.error(f"Ingestion database error: {e}")
         return 0, 0
 
 
@@ -2125,12 +2073,15 @@ if uploaded_files:
         new_processed_dfs = []
         for file in uploaded_files:
             try:
-                temp_dict = pd.read_excel(file, sheet_name=None)
+                # Only read the sheet we actually need instead of loading
+                # every sheet in the workbook (sheet_name=None parses ALL
+                # sheets up front, which is wasted work on multi-sheet files).
+                sheet_names = pd.ExcelFile(file).sheet_names
                 target_sheet = next(
-                    (s for s in temp_dict.keys() if "usermetric" in s.lower()), 
-                    list(temp_dict.keys())[0]
+                    (s for s in sheet_names if "usermetric" in s.lower()),
+                    sheet_names[0]
                 )
-                temp_df = temp_dict[target_sheet]
+                temp_df = pd.read_excel(file, sheet_name=target_sheet)
 
                 temp_df = normalize_identity_columns(temp_df)
                 temp_df['Uploaded_By'] = employee_name
@@ -2199,17 +2150,6 @@ if uploaded_files:
             inserted_count, duplicate_count = ingest_excel_to_postgresql(new_processed_dfs)
             fetch_master_db_from_supabase.clear()
             build_teacher_roster_cached.clear()
-
-            # Clear filter state after an upload so a previous selection from
-            # the old dataset cannot hide newly inserted/re-uploaded rows.
-            for _key in [
-                "gf_selected_states", "gf_selected_employees",
-                "gf_selected_schools", "_known_states",
-                "_known_employees", "_known_schools",
-                "_seen_schools_ever", "_filters_initialized"
-            ]:
-                st.session_state.pop(_key, None)
-
             if inserted_count == 0 and duplicate_count > 0:
                 st.sidebar.warning(
                     f"⚠️ 0 records inserted — all {duplicate_count} row(s) matched an existing Record_Hash "
@@ -2292,16 +2232,6 @@ if not df.empty:
                     '''))
                     after = c.execute(text('SELECT COUNT(*) FROM teacher_records')).scalar() or 0
                     removed = before - after
-
-                    # Once duplicates are collapsed, enforce the rule at the
-                    # database level so concurrent/rerun uploads cannot create
-                    # the same activity twice.
-                    c.execute(text(
-                        'CREATE UNIQUE INDEX IF NOT EXISTS '
-                        'uq_teacher_records_record_hash '
-                        'ON teacher_records ("Record_Hash") '
-                        'WHERE "Record_Hash" IS NOT NULL'
-                    ))
             except Exception as e:
                 st.sidebar.error(f"Dedup cleanup error: {e}")
 
@@ -2333,7 +2263,7 @@ if not df.empty:
                                 text('''
                                     DELETE FROM teacher_records
                                     WHERE LOWER(TRIM("Uploaded_By")) = LOWER(TRIM(:name))
-                                      AND LOWER(TRIM("State_Zone")) = LOWER(TRIM(:state))
+                                      AND TRIM("State_Zone") = TRIM(:state)
                                 '''),
                                 {"name": del_emp_name.strip(), "state": del_state_zone}
                             )
@@ -2341,13 +2271,6 @@ if not df.empty:
                             s.commit()
                         fetch_master_db_from_supabase.clear()
                         build_teacher_roster_cached.clear()
-                        for _key in [
-                            "gf_selected_states", "gf_selected_employees",
-                            "gf_selected_schools", "_known_states",
-                            "_known_employees", "_known_schools",
-                            "_seen_schools_ever", "_filters_initialized"
-                        ]:
-                            st.session_state.pop(_key, None)
                         if deleted_rows and deleted_rows > 0:
                             st.success(f"Successfully deleted {deleted_rows} record(s) for {del_emp_name} in {del_state_zone}!")
                         else:
@@ -2371,13 +2294,6 @@ if not df.empty:
                         s.commit()
                     fetch_master_db_from_supabase.clear()
                     build_teacher_roster_cached.clear()
-                    for _key in [
-                        "gf_selected_states", "gf_selected_employees",
-                        "gf_selected_schools", "_known_states",
-                        "_known_employees", "_known_schools",
-                        "_seen_schools_ever", "_filters_initialized"
-                    ]:
-                        st.session_state.pop(_key, None)
                     st.success(f"Successfully removed data for {target_del_school} from database!")
                     st.rerun()
                 except Exception as e:
@@ -3869,7 +3785,6 @@ else:
                         st.session_state.pop("edit_meta_cache", None)
                     else:
                         with conn.engine.begin() as c:
-                            c.execute(text('ALTER TABLE classroom_observations ADD COLUMN IF NOT EXISTS evidence_links TEXT;'))
                             c.execute(text("""
                                 INSERT INTO classroom_observations (
                                     school, teacher, class_section, subject, topic,
@@ -3900,6 +3815,7 @@ else:
                                 "pdf_url": uploaded_obs_url or "",
                                 "evidence_links": media_links_str
                             })
+                        fetch_observation_history.clear()
                         st.success(f"🎉 Observation Audit stored and compiled for **{active_eval_teacher}** at **{input_school}**!")
 
                     st.session_state["latest_obs_pdf_bytes"] = obs_pdf_buffer.getvalue()
