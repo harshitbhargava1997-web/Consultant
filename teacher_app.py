@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import re
 import uuid
+import json
+import io
 import concurrent.futures
 import urllib.parse
 from datetime import datetime, timezone
@@ -490,6 +492,34 @@ def insert_implementations_to_db(entries):
         .execute()
     )
     return response
+
+
+def backup_entries_to_r2(entries):
+    """
+    Write a plain JSON copy of these teacher_records rows to R2, completely
+    independent of the Postgres insert. This exists because teacher_records
+    was previously the ONLY place this data lived — a single accidental
+    `DELETE FROM teacher_records` (no WHERE clause) in the admin app wiped
+    every submission with no way to recover it. R2 already receives every
+    submission's media files, so it's a natural place to also keep a
+    durable, admin-delete-proof copy of the row data itself.
+
+    This is intentionally best-effort and non-blocking: a backup failure
+    must never fail or roll back an otherwise-successful submission. Call
+    this AFTER insert_implementations_to_db succeeds, inside its own
+    try/except, and only warn (don't raise) on failure.
+    """
+    if not entries:
+        return None
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    backup_key = f"backups/teacher_records/{today}/{uuid.uuid4().hex}.json"
+    payload = json.dumps(entries, default=str, indent=2).encode("utf-8")
+    r2_client.upload_fileobj(
+        io.BytesIO(payload),
+        R2_BUCKET_NAME,
+        backup_key,
+    )
+    return backup_key
 
 
 # ============================================================
@@ -1643,6 +1673,13 @@ if st.session_state.get(
 
         try:
             insert_implementations_to_db(database_entries)
+            # Best-effort backup — runs only after the real insert succeeds,
+            # and a failure here must never surface as a submission failure
+            # (the row is already safely in Postgres at this point).
+            try:
+                backup_entries_to_r2(database_entries)
+            except Exception:
+                pass
         except Exception as e:
             rollback_errors = delete_files_from_r2(all_uploaded_paths)
             st.error(
