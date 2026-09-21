@@ -1607,7 +1607,7 @@ def delete_evidence_item(record_id, column_name, object_key, url):
     return True, r2_warning
 
 
-def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_content_kpi, calc_lib_kpi, daily_ld_target, daily_content_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True, active_metric_mode="Content / Book Usage"):
+def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_content_kpi, calc_lib_kpi, daily_ld_target, daily_content_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True, active_metric_mode="Content / Book Usage", show_lesson_plan_report=True, show_evidence_section=True):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     story = []
@@ -1679,7 +1679,8 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         "Working Days Evaluated": f"{selected_num_days} Days"
     }
     if enable_quant_kpi:
-        school_summary_metrics["Met Lesson Prep KPI"] = f"{met_ld_count} / {total_teachers_count}"
+        if show_lesson_plan_report:
+            school_summary_metrics["Met Lesson Prep KPI"] = f"{met_ld_count} / {total_teachers_count}"
         if include_content:
             school_summary_metrics["Met Content (Book) KPI"] = f"{met_content_count} / {total_teachers_count}"
         if include_library:
@@ -1703,45 +1704,55 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     if enable_quant_kpi:
         story.append(Paragraph("<b>School-Level Feature Performance Summary & Guidelines</b>", sec_head_style))
         story.append(HRFlowable(width="100%", thickness=0.5, color=border_color, spaceAfter=6))
-        story.append(Paragraph(f"• <b>Lesson Plan Prep Standard:</b> {daily_ld_target:.0f} mins/day × {selected_num_days} working days ({calc_ld_kpi:.0f} mins total benchmark standard)", normal_style))
+        if show_lesson_plan_report:
+            story.append(Paragraph(f"• <b>Lesson Plan Prep Standard:</b> {daily_ld_target:.0f} mins/day × {selected_num_days} working days ({calc_ld_kpi:.0f} mins total benchmark standard)", normal_style))
         if include_content:
             story.append(Paragraph(f"• <b>Content / Book Usage Standard:</b> {daily_content_target:.0f} mins/day × {selected_num_days} working days ({calc_content_kpi:.0f} mins total benchmark standard)", normal_style))
         if include_library:
             story.append(Paragraph(f"• <b>Library Usage Standard:</b> {daily_lib_target:.0f} mins/day × {selected_num_days} working days ({calc_lib_kpi:.0f} mins total benchmark standard)", normal_style))
         story.append(Spacer(1, 10))
 
-    story.append(Paragraph("<b>1. Lesson Plan Preparation Consolidated Report</b>", sec_head_style))
-    ld_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Performance Indicator Status"]]
-    for t_name in teachers_list:
-        t_mins = ld_usage.get(t_name, 0.0)
-        t_avg = t_mins / selected_num_days if selected_num_days > 0 else 0.0
-        if not enable_quant_kpi or calc_ld_kpi == 0:
-            t_stat = "Activity Logged" if t_mins > 0 else "No Activity Logged"
-        elif t_mins >= calc_ld_kpi:
-            t_stat = f"Met Performance Indicator (>= {calc_ld_kpi:.0f}m)"
-        elif t_mins > 0.0:
-            t_stat = f"Below Performance Indicator (< {calc_ld_kpi:.0f}m)"
-        else:
-            t_stat = "Inactive (0 Mins)"
-        ld_summary_table_data.append([t_name, f"{t_mins:.1f}m", f"{t_avg:.1f}m/day", t_stat])
+    # Section numbers are computed dynamically instead of hardcoded, since
+    # any of Lesson Plan / Content / Library can now be individually
+    # switched off for the PDF — a fixed "1. / 2. / 3." would produce gaps
+    # or wrong numbers depending on which sections are actually included.
+    summary_sec_num = 1
 
-    ld_table_obj = Table(ld_summary_table_data, colWidths=[140, 110, 100, 190])
-    ld_table_obj.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), primary_color),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('GRID', (0, 0), (-1, -1), 0.4, border_color),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
-        ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-    ]))
-    story.append(ld_table_obj)
-    story.append(Spacer(1, 14))
+    if show_lesson_plan_report:
+        story.append(Paragraph(f"<b>{summary_sec_num}. Lesson Plan Preparation Consolidated Report</b>", sec_head_style))
+        summary_sec_num += 1
+        ld_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Performance Indicator Status"]]
+        for t_name in teachers_list:
+            t_mins = ld_usage.get(t_name, 0.0)
+            t_avg = t_mins / selected_num_days if selected_num_days > 0 else 0.0
+            if not enable_quant_kpi or calc_ld_kpi == 0:
+                t_stat = "Activity Logged" if t_mins > 0 else "No Activity Logged"
+            elif t_mins >= calc_ld_kpi:
+                t_stat = f"Met Performance Indicator (>= {calc_ld_kpi:.0f}m)"
+            elif t_mins > 0.0:
+                t_stat = f"Below Performance Indicator (< {calc_ld_kpi:.0f}m)"
+            else:
+                t_stat = "Inactive (0 Mins)"
+            ld_summary_table_data.append([t_name, f"{t_mins:.1f}m", f"{t_avg:.1f}m/day", t_stat])
+
+        ld_table_obj = Table(ld_summary_table_data, colWidths=[140, 110, 100, 190])
+        ld_table_obj.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.4, border_color),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(ld_table_obj)
+        story.append(Spacer(1, 14))
 
     if include_content:
-        story.append(Paragraph("<b>2. Content & Chapter Usage Consolidated Report</b>", sec_head_style))
+        story.append(Paragraph(f"<b>{summary_sec_num}. Content & Chapter Usage Consolidated Report</b>", sec_head_style))
+        summary_sec_num += 1
         content_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Textbooks/Chapters Opened", "Status"]]
         for t_name in teachers_list:
             t_content_mins = content_usage.get(t_name, 0.0)
@@ -1773,8 +1784,8 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         story.append(Spacer(1, 14))
 
     if include_library:
-        sec_num = "3" if include_content else "2"
-        story.append(Paragraph(f"<b>{sec_num}. Library Usage Overview </b>", sec_head_style))
+        story.append(Paragraph(f"<b>{summary_sec_num}. Library Usage Overview </b>", sec_head_style))
+        summary_sec_num += 1
         lib_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Status"]]
         for t_name in teachers_list:
             t_lib_mins = lib_usage.get(t_name, 0.0)
@@ -1804,7 +1815,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         story.append(lib_table_obj)
         story.append(Spacer(1, 14))
 
-    if enable_qual_kpi:
+    if enable_qual_kpi and show_evidence_section:
         story.append(Paragraph("<b>Classroom Submissions & Evidence Compliance</b>", sec_head_style))
         qual_summary_table_data = [["Teacher Name", "LP / Audio Notes", "Activity Videos", "Writing Samples", "Phonics Evidences", "Portfolio Artifacts", "Assessments", "Event Pics", "Status"]]
         
@@ -1909,15 +1920,17 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
 
         summary_metrics = {
             "Teacher": target_teacher,
-            "Lesson Prep": f"{t_day_ld:.1f}m"
         }
+        if show_lesson_plan_report:
+            summary_metrics["Lesson Prep"] = f"{t_day_ld:.1f}m"
         if include_content:
             summary_metrics["Content (Book)"] = f"{t_day_content:.1f}m"
         if include_library:
             summary_metrics["Library Usage"] = f"{t_day_lib:.1f}m"
-        summary_metrics["Phonics / Portfolio"] = f"{len(v_phonics)} / {len(v_portfolio)}"
-        summary_metrics["Assessments / Events"] = f"{len(v_assessment)} / {len(v_events)}"
-        summary_metrics["Activity Submissions"] = f"{total_artifacts}"
+        if show_evidence_section:
+            summary_metrics["Phonics / Portfolio"] = f"{len(v_phonics)} / {len(v_portfolio)}"
+            summary_metrics["Assessments / Events"] = f"{len(v_assessment)} / {len(v_events)}"
+            summary_metrics["Activity Submissions"] = f"{total_artifacts}"
 
         headers_row = [Paragraph(k, card_header) for k in summary_metrics.keys()]
         values_row = [Paragraph(str(v), card_value) for v in summary_metrics.values()]
@@ -1934,24 +1947,39 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         story.append(kpi_table)
         story.append(Spacer(1, 10))
 
-        sec1_items = [
-            f"Lesson Preparation Duration: {t_day_ld:.1f} Minutes" + (f" ({ld_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""),
-        ]
+        sec1_items = []
+        if show_lesson_plan_report:
+            sec1_items.append(f"Lesson Preparation Duration: {t_day_ld:.1f} Minutes" + (f" ({ld_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""))
         if include_content:
             sec1_items.append(f"Content Usage (Textbooks/Chapters) Duration: {t_day_content:.1f} Minutes" + (f" ({content_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else "") + f" across {teacher_books['Book'].nunique() if not teacher_books.empty else 0} unique textbook(s)/chapter(s).")
         if include_library:
             sec1_items.append(f"Library Usage Duration: {t_day_lib:.1f} Minutes" + (f" ({lib_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""))
 
-        sec1_items.append(f"Consultant Assessment: {ld_advice} in lesson preparation, " + (f"{content_advice} in textbook content delivery." if include_content else f"{lib_advice} in library integration."))
-
-        sections = {
-            "1. Quantitative Performance Indicator Overview": sec1_items
-        }
+        assessment_parts = []
+        if show_lesson_plan_report:
+            assessment_parts.append(f"{ld_advice} in lesson preparation")
         if include_content:
-            sections["2. Detailed Textbook & Chapter Breakdown"] = pdf_book_items
-            sections["3. Activity Evidence & Qualitative Artifacts"] = pdf_link_items if pdf_link_items else ["No activity or evidence submission links recorded in active window."]
-        else:
-            sections["2. Activity Evidence & Qualitative Artifacts"] = pdf_link_items if pdf_link_items else ["No activity or evidence submission links recorded in active window."]
+            assessment_parts.append(f"{content_advice} in textbook content delivery")
+        elif include_library:
+            assessment_parts.append(f"{lib_advice} in library integration")
+        if assessment_parts:
+            sec1_items.append(f"Consultant Assessment: " + ", ".join(assessment_parts) + ".")
+
+        # Section numbers are computed dynamically, same reasoning as the
+        # school-level summary above — Lesson Plan / Evidence can each be
+        # switched off independently, so a fixed "1. / 2. / 3." would be
+        # wrong whenever a section in the middle is skipped.
+        sections = {}
+        per_teacher_sec_num = 1
+        if sec1_items:
+            sections[f"{per_teacher_sec_num}. Quantitative Performance Indicator Overview"] = sec1_items
+            per_teacher_sec_num += 1
+        if include_content:
+            sections[f"{per_teacher_sec_num}. Detailed Textbook & Chapter Breakdown"] = pdf_book_items
+            per_teacher_sec_num += 1
+        if show_evidence_section:
+            sections[f"{per_teacher_sec_num}. Activity Evidence & Qualitative Artifacts"] = pdf_link_items if pdf_link_items else ["No activity or evidence submission links recorded in active window."]
+            per_teacher_sec_num += 1
 
         for heading, body_items in sections.items():
             story.append(Paragraph(f"<b>{heading}</b>", sec_head_style))
@@ -2496,48 +2524,30 @@ else:
             format_func=lambda x: x.strftime('%Y-%m-%d')
         )
 
-    # --- GRANULARITY & CUSTOM DATE RANGE SELECTOR ---
+    # --- GLOBAL DATE FILTER (Custom Range only) ---
+    # Previously offered 4 granularity modes (Full Month / Specific Week /
+    # Single Day / Custom Range) via a radio button. Simplified to a single
+    # always-on custom date range picker per requirements — every value this
+    # used to produce (filtered_df, selected_num_days, filter_description_text,
+    # c_start/c_end) is still produced the same way, so nothing downstream
+    # (report generation, CRM box, WhatsApp summary, etc.) needed to change.
     st.sidebar.subheader("🔍 Review View Level")
-    available_month_weeks = sorted(month_filtered_df['Month_Week_Label'].dropna().unique())
-    available_dates = sorted(month_filtered_df['Date'].dropna().unique(), reverse=True)
-    
-    view_mode = st.sidebar.radio("Granularity:", ["Full Month Summary", "Specific Week of Month", "Single Day Review", "Custom Date Range"])
-    
-    if month_filtered_df.empty and view_mode != "Custom Date Range":
-        filtered_df = month_filtered_df
-        selected_num_days = 0
-        filter_description_text = f"Full Month: {selected_month} - 0 Records / 0 Working Days"
-    elif view_mode == "Full Month Summary":
-        filtered_df = month_filtered_df
-        selected_num_days = get_working_days(selected_month_start, selected_month_end, user_excluded_dates, exclude_sundays=exclude_sundays_flag)
-        filter_description_text = f"Full Month: {selected_month} - {selected_num_days} Working Days ({selected_month_start} to {selected_month_end})"
-    elif view_mode == "Specific Week of Month":
-        selected_week_label = st.sidebar.selectbox("Select Week:", options=available_month_weeks)
-        filtered_df = month_filtered_df[month_filtered_df['Month_Week_Label'] == selected_week_label]
-        w_start = filtered_df['Date'].min() if not filtered_df.empty else selected_month
-        w_end = filtered_df['Date'].max() if not filtered_df.empty else selected_month
-        selected_num_days = get_working_days(w_start, w_end, user_excluded_dates, exclude_sundays=exclude_sundays_flag)
-        filter_description_text = f"{selected_week_label} - {selected_num_days} Working Days"
-    elif view_mode == "Single Day Review":
-        selected_date = st.sidebar.selectbox("Select Day:", options=available_dates)
-        filtered_df = month_filtered_df[month_filtered_df['Date'] == selected_date]
-        selected_num_days = get_working_days(selected_date, selected_date, user_excluded_dates, exclude_sundays=exclude_sundays_flag)
-        filter_description_text = f"Single Date: {selected_date} - {selected_num_days} Working Days"
+    view_mode = "Custom Date Range"  # kept as a constant so get_period_bounds_for_view below is unchanged
+
+    min_avail = school_filtered_df['Date'].dropna().min() if not school_filtered_df['Date'].dropna().empty else pd.Timestamp.now().date()
+    max_avail = school_filtered_df['Date'].dropna().max() if not school_filtered_df['Date'].dropna().empty else pd.Timestamp.now().date()
+
+    custom_date_range = st.sidebar.date_input("Select Custom Date Range:", value=(min_avail, max_avail), min_value=min_avail, max_value=max_avail)
+    if isinstance(custom_date_range, (tuple, list)) and len(custom_date_range) == 2:
+        c_start, c_end = custom_date_range
+    elif isinstance(custom_date_range, (tuple, list)) and len(custom_date_range) == 1:
+        c_start = c_end = custom_date_range[0]
     else:
-        min_avail = school_filtered_df['Date'].dropna().min() if not school_filtered_df['Date'].dropna().empty else pd.Timestamp.now().date()
-        max_avail = school_filtered_df['Date'].dropna().max() if not school_filtered_df['Date'].dropna().empty else pd.Timestamp.now().date()
-        
-        custom_date_range = st.sidebar.date_input("Select Custom Date Range:", value=(min_avail, max_avail), min_value=min_avail, max_value=max_avail)
-        if isinstance(custom_date_range, (tuple, list)) and len(custom_date_range) == 2:
-            c_start, c_end = custom_date_range
-        elif isinstance(custom_date_range, (tuple, list)) and len(custom_date_range) == 1:
-            c_start = c_end = custom_date_range[0]
-        else:
-            c_start = c_end = custom_date_range
-            
-        filtered_df = school_filtered_df[(school_filtered_df['Date'] >= c_start) & (school_filtered_df['Date'] <= c_end)]
-        selected_num_days = get_working_days(c_start, c_end, user_excluded_dates, exclude_sundays=exclude_sundays_flag)
-        filter_description_text = f"Custom Range: {c_start} to {c_end} - {selected_num_days} Working Days"
+        c_start = c_end = custom_date_range
+
+    filtered_df = school_filtered_df[(school_filtered_df['Date'] >= c_start) & (school_filtered_df['Date'] <= c_end)]
+    selected_num_days = get_working_days(c_start, c_end, user_excluded_dates, exclude_sundays=exclude_sundays_flag)
+    filter_description_text = f"Custom Range: {c_start} to {c_end} - {selected_num_days} Working Days"
 
     # 4. Global Teacher Filter
     available_teachers = sorted([str(t) for t in school_master_roster['FullName'].unique() if str(t).strip()])
@@ -2656,6 +2666,8 @@ else:
 
         col_t1_d1, col_t1_d2 = st.columns(2)
         with col_t1_d1:
+            t1_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t1_show_lp_section")
+            t1_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t1_show_evidence_section")
             if st.button("⚙️ Compile Tab 1 PDF Report", key="prep_pdf_tab1_btn"):
                 with st.spinner("Compiling PDF report..."):
                     pdf_bytes = generate_comprehensive_school_pdf_report(
@@ -2673,7 +2685,9 @@ else:
                         selected_num_days=selected_num_days,
                         enable_quant_kpi=enable_quant_kpi_t1,
                         enable_qual_kpi=True,
-                        active_metric_mode="Both"
+                        active_metric_mode="Both",
+                        show_lesson_plan_report=t1_show_lp,
+                        show_evidence_section=t1_show_evidence
                     ).getvalue()
                     st.session_state["tab1_pdf_ready"] = pdf_bytes
 
@@ -2780,6 +2794,8 @@ else:
 
         col_t2_d1, col_t2_d2 = st.columns(2)
         with col_t2_d1:
+            t2_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t2_show_lp_section")
+            t2_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t2_show_evidence_section")
             if st.button("⚙️ Compile Tab 2 PDF Report (Library Only)", key="prep_pdf_tab2_btn"):
                 with st.spinner("Compiling Library PDF report..."):
                     pdf_bytes = generate_comprehensive_school_pdf_report(
@@ -2797,7 +2813,9 @@ else:
                         selected_num_days=selected_num_days,
                         enable_quant_kpi=enable_quant_kpi_t2,
                         enable_qual_kpi=True,
-                        active_metric_mode="Library Usage"
+                        active_metric_mode="Library Usage",
+                        show_lesson_plan_report=t2_show_lp,
+                        show_evidence_section=t2_show_evidence
                     ).getvalue()
                     st.session_state["tab2_pdf_ready"] = pdf_bytes
 
@@ -2960,6 +2978,8 @@ else:
                         key="btn_xlsx_tab3"
                     )
             with col_d2:
+                t3_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t3_show_lp_section")
+                t3_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t3_show_evidence_section")
                 if st.button("⚙️ Compile Tab 3 PDF Report (Content Only)", key="prep_pdf_tab3_btn"):
                     with st.spinner("Compiling Content PDF..."):
                         pdf_t3 = generate_comprehensive_school_pdf_report(
@@ -2977,7 +2997,9 @@ else:
                             selected_num_days=selected_num_days,
                             enable_quant_kpi=enable_quant_kpi_t3,
                             enable_qual_kpi=True,
-                            active_metric_mode="Content / Book Usage"
+                            active_metric_mode="Content / Book Usage",
+                            show_lesson_plan_report=t3_show_lp,
+                            show_evidence_section=t3_show_evidence
                         ).getvalue()
                         st.session_state["tab3_pdf_ready"] = pdf_t3
 
@@ -3018,6 +3040,12 @@ else:
                 target_lp_combo_count_t4 = st.number_input("Min. LP / Audio Notes", min_value=1, max_value=20, value=3, step=1, key="t4_lp_cnt", disabled=not enable_qual_kpi_t4) if enable_qual_kpi_t4 else 0
                 target_phonics_count_t4 = st.number_input("Min. Phonics Evidence", min_value=1, max_value=20, value=2, step=1, key="t4_ph_cnt", disabled=not enable_qual_kpi_t4) if enable_qual_kpi_t4 else 0
                 target_portfolio_count_t4 = st.number_input("Min. Portfolio Artifacts", min_value=1, max_value=20, value=1, step=1, key="t4_pf_cnt", disabled=not enable_qual_kpi_t4) if enable_qual_kpi_t4 else 0
+
+        t4_pcol1, t4_pcol2 = st.columns(2)
+        with t4_pcol1:
+            t4_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t4_show_lp_section")
+        with t4_pcol2:
+            t4_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t4_show_evidence_section")
 
         calc_ld_kpi_t4 = calculate_kpi_target(daily_ld_target_t4, selected_num_days, enable_quant_kpi_t4)
         calc_content_kpi_t4 = calculate_kpi_target(daily_content_target_t4, selected_num_days, enable_quant_kpi_t4)
@@ -3104,7 +3132,9 @@ else:
                             target_portfolio_count=target_portfolio_count_t4,
                             enable_quant_kpi=enable_quant_kpi_t4,
                             enable_qual_kpi=enable_qual_kpi_t4,
-                            active_metric_mode=primary_view_metric
+                            active_metric_mode=primary_view_metric,
+                            show_lesson_plan_report=t4_show_lp,
+                            show_evidence_section=t4_show_evidence
                         ).getvalue()
                         st.session_state[f"pdf_360_{target_teacher}"] = single_pdf
 
@@ -3141,7 +3171,9 @@ else:
                             target_portfolio_count=target_portfolio_count_t4,
                             enable_quant_kpi=enable_quant_kpi_t4,
                             enable_qual_kpi=enable_qual_kpi_t4,
-                            active_metric_mode=primary_view_metric
+                            active_metric_mode=primary_view_metric,
+                            show_lesson_plan_report=t4_show_lp,
+                            show_evidence_section=t4_show_evidence
                         ).getvalue()
                         st.session_state[f"bulk_pdf_{teacher_school}"] = bulk_pdf
 
@@ -3374,7 +3406,9 @@ else:
                         target_portfolio_count=target_portfolio_count_t4,
                         enable_quant_kpi=enable_quant_kpi_t4,
                         enable_qual_kpi=enable_qual_kpi_t4,
-                        active_metric_mode=primary_view_metric
+                        active_metric_mode=primary_view_metric,
+                        show_lesson_plan_report=t4_show_lp,
+                        show_evidence_section=t4_show_evidence
                     )
                     hosted_school_pdf_url = upload_pdf_to_supabase(school_pdf_buf, teacher_school)
                     st.session_state[f"hosted_pdf_url_{teacher_school}"] = hosted_school_pdf_url
