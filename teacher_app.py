@@ -1322,6 +1322,12 @@ st.markdown("---")
 st.header(
     "📖 Daily Classroom Implementation"
 )
+st.caption(
+    "Logging period-wise? Fill in a period below, then use "
+    "\"＋ Add Another Period\" for each additional one. Logging "
+    "the whole day together? Just fill this once and pick "
+    "\"All Subjects Together\" as the subject."
+)
 
 all_groups = []
 for group_number in range(
