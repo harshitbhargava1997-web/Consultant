@@ -75,6 +75,14 @@ GRADE_OPTIONS = [
     "Grade 5"
 ]
 
+SECTION_OPTIONS = [
+    "A",
+    "B",
+    "C",
+    "D",
+    "Not Applicable"
+]
+
 SUBJECT_OPTIONS = [
     "All Subjects Together",
     "Phonics / Literacy",
@@ -99,7 +107,7 @@ IMPLEMENTATION_MATERIAL_OPTIONS = [
     "Student Written Work / Writing Practice",
     "Phonics / Phonetics Implementation",
     "Student Assessment",
-    "Teacher Portfolio",
+    "Student Portfolio",
     "Event Pictures"
 ]
 
@@ -927,20 +935,26 @@ def render_implementation_group(
 
     st.markdown("---")
     st.subheader(
-        f"Class Implementation {group_number}"
+        f"Period {group_number}"
     )
 
     # ========================================================
-    # GRADE + SUBJECT
+    # GRADE + SECTION + SUBJECT
     # ========================================================
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         grade = st.selectbox(
-            "Grade",
+            "Class",
             GRADE_OPTIONS,
             key=f"grade_{group_number}"
         )
     with col2:
+        section = st.selectbox(
+            "Section",
+            SECTION_OPTIONS,
+            key=f"section_{group_number}"
+        )
+    with col3:
         subject = st.selectbox(
             "Subject",
             SUBJECT_OPTIONS,
@@ -970,7 +984,7 @@ def render_implementation_group(
         st.markdown(
             """
             **What**
-            Grade, Subject, Lesson Plan No. &
+            Class, Section, Subject, Lesson Plan No. &
             Topic/Chapter
             **Why — Skill / Learning Objective**
             What do I want students to learn or be able
@@ -1214,10 +1228,10 @@ def render_implementation_group(
                     }
                 )
         elif selected_area == (
-            "Teacher Portfolio"
+            "Student Portfolio"
         ):
             files = st.file_uploader(
-                "Upload Teacher Portfolio",
+                "Upload Student Portfolio",
                 type=[
                     "jpg",
                     "jpeg",
@@ -1230,7 +1244,7 @@ def render_implementation_group(
                 ],
                 accept_multiple_files=True,
                 key=(
-                    f"teacher_portfolio_files_"
+                    f"student_portfolio_files_"
                     f"{group_number}_"
                     f"{area_id}"
                 )
@@ -1293,6 +1307,7 @@ def render_implementation_group(
     return {
         "group_number": group_number,
         "grade": grade,
+        "section": section,
         "subject": subject,
         "lesson_name": lesson_name,
         "recorded_voice": recorded_voice,
@@ -1329,14 +1344,14 @@ if (
 ):
     st.markdown("---")
     st.button(
-        "＋ Add Another Class",
+        "＋ Add Another Period",
         key="add_another_class",
         on_click=add_another_class
     )
 else:
     st.caption(
         f"Maximum of {MAX_IMPLEMENTATION_GROUPS} "
-        "classes can be added at one time."
+        "periods can be added at one time."
     )
 
 # ============================================================
@@ -1413,7 +1428,7 @@ if st.session_state.get(
         if invalid_groups:
             st.error(
                 "Please enter Lesson Plan No. & "
-                "Topic / Chapter for Class Implementation "
+                "Topic / Chapter for Period "
                 f"{', '.join(map(str, invalid_groups))}."
             )
             st.stop()
@@ -1440,7 +1455,7 @@ if st.session_state.get(
             "writing": "student_work",
             "phonics": "phonics",
             "assessment": "student_assessments",
-            "portfolio": "teacher_portfolio",
+            "portfolio": "student_portfolio",
             "event_pictures": "event_pictures"
         }
         for group in all_groups:
@@ -1617,6 +1632,12 @@ if st.session_state.get(
             # ----------------------------------------------------
             submission_moment = datetime.now(timezone.utc)
 
+            # ----------------------------------------------------
+            # NOTE: "Section" is a new field. The teacher_records
+            # table in Supabase must have a "Section" text column
+            # for this insert to succeed — add it there first if
+            # it doesn't already exist.
+            # ----------------------------------------------------
             entry = {
                 "State_Zone": selected_state,
                 "Uploaded_By": selected_consultant,
@@ -1628,6 +1649,7 @@ if st.session_state.get(
                 "Role": selected_person_role,
                 "Type": "Classroom Reflection",
                 "Grade": group["grade"],
+                "Section": group["section"],
                 "Subject": group["subject"],
                 "Book": group["lesson_name"],
                 "StartTime": submission_moment.isoformat(),
