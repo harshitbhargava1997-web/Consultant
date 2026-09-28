@@ -9,3 +9,4 @@ supabase
 google-genai
 reportlab
 boto3
+psycopg[binary]
