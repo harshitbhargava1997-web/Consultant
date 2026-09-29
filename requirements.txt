@@ -1,4 +1,4 @@
-# Validated with Python 3.12. Keep these files next to the app entrypoints.
+# Validated with Python. Keep these files next to the app entrypoints.
 streamlit==1.64.0
 pandas==2.2.3
 numpy==2.3.5
