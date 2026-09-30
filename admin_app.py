@@ -2078,7 +2078,8 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     return buffer
 
 
-def ingest_excel_to_postgresql(processed_dfs, source="UserMetrics / legacy import"):
+def ingest_excel_to_postgresql(processed_dfs, source="UserMetrics / legacy import", skip_invalid=False):
+    st.session_state.pop('last_import_result', None)
     if not processed_dfs:
         return 0, 0
     combined = normalize_identity_columns(pd.concat(processed_dfs, ignore_index=True))
@@ -2089,10 +2090,35 @@ def ingest_excel_to_postgresql(processed_dfs, source="UserMetrics / legacy impor
     if combined.columns.duplicated().any():
         raise ValueError("Duplicate mapped columns in import; resolve the source headers first.")
     combined['Duration_Min'] = pd.to_numeric(combined['Duration_Min'], errors='coerce')
+    input_rows = len(combined)
+    if input_rows == 0:
+        st.session_state['last_import_result'] = {'source': source, 'status': 'No data rows', 'input_rows': 0, 'inserted_rows': 0, 'skipped_duplicates': 0, 'invalid_rows': 0}
+        return 0, 0
+    details = []
     errors = validate_import(combined)
     if errors:
-        st.session_state['last_import_result'] = {'source': source, 'status': 'Rejected - no rows written', 'invalid_rows': len(errors), 'examples': errors[:20]}
-        raise ValueError(f"Import rejected: {len(errors)} row(s) have invalid identity/date/duration. See Data Quality for details.")
+        details = []
+        for error in errors:
+            record = combined.loc[int(error['Row'])]
+            details.append({
+                'File': str(record.get('_source_file', source)),
+                'Excel row': str(record.get('_excel_row', int(error['Row']) + 2)),
+                'Issues': error['Issues'],
+                'School': str(record.get('Institution', '')),
+                'Teacher': str(record.get('FullName', '')),
+                'Type': str(record.get('Type', '')),
+                'Original start time': str(record.get('_raw_start', record.get('StartTime', ''))),
+                'Original duration': str(record.get('_raw_duration', record.get('Duration_Min', ''))),
+                'Original numeric minutes': str(record.get('_raw_minutes', '')),
+                'Parsed start time': str(record.get('StartTime', '')),
+                'Parsed minutes': str(record.get('Duration_Min', '')),
+            })
+        st.session_state['last_import_result'] = {'source': source, 'status': 'Needs review - no rows written', 'input_rows': input_rows, 'inserted_rows': 0, 'skipped_duplicates': 0, 'invalid_rows': len(errors), 'examples': details[:20], 'rejected_rows': details}
+        if not skip_invalid:
+            raise ValueError(f"Import rejected: {len(errors)} row(s) have invalid identity/date/duration. See Data Quality for details.")
+        combined = combined.drop(index=[int(error['Row']) for error in errors]).copy()
+        if combined.empty:
+            return 0, 0
     combined['Record_Hash'] = combined.apply(compute_record_hash, axis=1)
     total = len(combined)
     combined = combined.drop_duplicates('Record_Hash', keep='last')
@@ -2132,10 +2158,99 @@ def ingest_excel_to_postgresql(processed_dfs, source="UserMetrics / legacy impor
         count = len(inserted)
         if c.execute(text("SELECT to_regclass('public.portal_import_runs')")).scalar():
             c.execute(text('INSERT INTO portal_import_runs(id,source,input_rows,inserted_rows,skipped_rows,actor) VALUES (:id,:source,:total,:inserted,:skipped,:actor)'),
-                      dict(id=str(uuid.uuid4()), source=source,total=total,inserted=count,skipped=total-count,actor=employee_name))
-    st.session_state['last_import_result'] = {'source':source,'status':'Committed','input_rows':total,'inserted_rows':count,'skipped_duplicates':total-count}
+                      dict(id=str(uuid.uuid4()), source=source,total=input_rows,inserted=count,skipped=input_rows-count,actor=employee_name))
+    st.session_state['last_import_result'] = {'source':source,'status':'Committed with rows needing review' if details else 'Committed','input_rows':input_rows,'inserted_rows':count,'skipped_duplicates':total-count,'invalid_rows':len(details),'examples':details[:20],'rejected_rows':details}
     return count, total-count
 
+
+def prepare_usermetrics_file(file, consultant, state_zone):
+    """Parse one export without changing source files or inventing missing values."""
+    file.seek(0)
+    with pd.ExcelFile(file) as workbook:
+        sheet = next((s for s in workbook.sheet_names if 'usermetric' in s.lower()), workbook.sheet_names[0])
+        frame = pd.read_excel(workbook, sheet_name=sheet)
+    frame.columns = [str(c).strip() for c in frame.columns]
+    duration_headers = {c.lower(): c for c in ['Duration (HH:MM:SS)', 'Duration (Minutes)', 'Duration_Min']}
+    frame = frame.rename(columns={c: duration_headers.get(c.lower(), c) for c in frame.columns})
+    if frame.columns.duplicated().any():
+        raise ValueError('Duplicate column headers; correct this workbook before importing it.')
+    frame = normalize_identity_columns(frame)
+    if frame.columns.duplicated().any():
+        raise ValueError('Duplicate mapped column headers; correct this workbook before importing it.')
+    frame['_source_file'] = file.name
+    frame['_excel_row'] = range(2, len(frame) + 2)
+    frame['_raw_start'] = frame.get('StartTime', '')
+    frame['_raw_duration'] = frame.get('Duration (HH:MM:SS)', '')
+    frame['_raw_minutes'] = frame.get('Duration (Minutes)', frame.get('Duration_Min', ''))
+    frame['Uploaded_By'] = consultant
+    frame['State_Zone'] = state_zone
+    for col in ['Grade', 'Subject', 'Book', 'Type']:
+        frame[col] = frame[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip() if col in frame else ''
+    supported = ['Duration (HH:MM:SS)', 'Duration (Minutes)', 'Duration_Min']
+    if not any(c in frame for c in supported):
+        raise ValueError('No supported duration column: expected Duration (HH:MM:SS), Duration (Minutes), or Duration_Min.')
+    # Keep the original HH:MM:SS convention; use explicit source minutes only
+    # when that cell is blank/unreadable. Never replace missing duration with 0.
+    duration = pd.Series(float('nan'), index=frame.index)
+    if supported[0] in frame:
+        duration = frame[supported[0]].map(lambda v: parse_source_duration(v) if pd.notna(v) and str(v).strip() else float('nan'))
+    for col in supported[1:]:
+        if col in frame:
+            duration = duration.fillna(pd.to_numeric(frame[col], errors='coerce'))
+    frame['Duration_Min'] = duration
+    for col in ['StartTime', 'EndTime']:
+        if col in frame:
+            # Parse cells individually: a differently formatted first row must
+            # not force otherwise valid rows into NaT.
+            frame[col] = frame[col].map(lambda v: pd.to_datetime(v, errors='coerce'))
+    return frame
+
+
+def import_usermetrics_files(files, consultant, state_zone):
+    """Import valid files/rows while keeping a visible record of exclusions."""
+    st.session_state.pop('last_import_result', None)
+    frames, file_errors = [], []
+    for file in files:
+        try:
+            frames.append(prepare_usermetrics_file(file, consultant, state_zone))
+        except Exception as exc:
+            file_errors.append(f'{file.name}: {exc}')
+    source = ', '.join(file.name for file in files)
+    result = {'source': source, 'status': 'No readable files', 'input_rows': 0,
+              'inserted_rows': 0, 'skipped_duplicates': 0, 'invalid_rows': 0}
+    if frames:
+        try:
+            ingest_excel_to_postgresql(frames, source=source, skip_invalid=True)
+            result = dict(st.session_state.get('last_import_result', result))
+        except Exception as exc:
+            result = dict(st.session_state.get('last_import_result', result))
+            result.update(status='Database write failed', inserted_rows=0, skipped_duplicates=0, error=str(exc))
+    result['file_errors'] = file_errors
+    st.session_state['last_import_result'] = result
+    st.session_state['last_metrics_import_result'] = result
+    return result
+
+
+def render_last_metrics_import():
+    result = st.session_state.get('last_metrics_import_result')
+    if not result:
+        return
+    with st.sidebar.expander('Last UserMetrics import', expanded=True):
+        if result.get('status') == 'Database write failed':
+            st.error('The database write failed. No success is reported; check the error below before retrying.')
+            st.write(result.get('error', ''))
+        else:
+            st.info(f"Saved {result.get('inserted_rows', 0)} rows | Already present/duplicate: {result.get('skipped_duplicates', 0)} | Rows needing review: {result.get('invalid_rows', 0)}")
+        for error in result.get('file_errors', []):
+            st.warning(f'Skipped file: {error}')
+        skipped = result.get('rejected_rows', [])
+        if skipped:
+            st.warning('Rows needing review were not imported. Correct the source rows and upload again; duplicate checks remain active.')
+            st.dataframe(pd.DataFrame(skipped), use_container_width=True)
+            st.download_button('Download rows needing review (CSV)', pd.DataFrame(skipped).to_csv(index=False).encode('utf-8-sig'),
+                               'rows_needing_review.csv', 'text/csv', key='download_metrics_review', on_click='ignore')
+        if skipped or result.get('file_errors'):
+            st.caption('Review details are kept in this browser session. Download them before closing or starting another import.')
 
 
 # Page layout title
@@ -2145,6 +2260,7 @@ st.markdown("Track **School Portfolio Management**, **School WoW Velocity**, **T
 
 # --- 2. MULTI-EMPLOYEE HIERARCHY & DATA UPLOAD MANAGER ---
 st.sidebar.header("📁 Multi-Employee Data Ingestion Portal")
+st.sidebar.caption("Valid-row import build: 2026-09-30")
 
 employee_name = st.sidebar.text_input("Enter Consultant Name:", value="Harshit Bhargava")
 employee_state = st.sidebar.selectbox("Select State / Zone (India Region):", [
@@ -2163,87 +2279,13 @@ uploaded_files = st.sidebar.file_uploader(
 
 if uploaded_files:
     if st.sidebar.button("🚀 Process & Ingest Files Now", type="primary"):
-        new_processed_dfs = []
-        file_read_errors = []
-        for file in uploaded_files:
-            try:
-                # Only read the sheet we actually need instead of loading
-                # every sheet in the workbook (sheet_name=None parses ALL
-                # sheets up front, which is wasted work on multi-sheet files).
-                sheet_names = pd.ExcelFile(file).sheet_names
-                target_sheet = next(
-                    (s for s in sheet_names if "usermetric" in s.lower()),
-                    sheet_names[0]
-                )
-                temp_df = pd.read_excel(file, sheet_name=target_sheet)
-
-                temp_df = normalize_identity_columns(temp_df)
-                temp_df['Uploaded_By'] = employee_name
-                temp_df['State_Zone'] = employee_state
-
-                if temp_df['Institution'].eq('').all():
-                    temp_df['Institution'] = ''
-                else:
-                    temp_df['Institution'] = temp_df['Institution']
-
-                for col in ['Grade', 'Subject', 'Book']:
-                    if col not in temp_df.columns:
-                        temp_df[col] = ''
-                    else:
-                        temp_df[col] = temp_df[col].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
-
-                def parse_duration_minutes(value):
-                    return parse_source_duration(value)
-
-                if 'Duration (HH:MM:SS)' in temp_df.columns:
-                    temp_df['Duration_Min'] = temp_df['Duration (HH:MM:SS)'].apply(parse_duration_minutes)
-                elif 'Duration (Minutes)' in temp_df.columns:
-                    temp_df['Duration_Min'] = pd.to_numeric(temp_df['Duration (Minutes)'], errors='coerce')
-                elif 'Duration_Min' in temp_df.columns:
-                    temp_df['Duration_Min'] = pd.to_numeric(temp_df['Duration_Min'], errors='coerce')
-                else:
-                    raise ValueError('No supported duration column found. Expected Duration (HH:MM:SS), Duration (Minutes), or Duration_Min.')
-
-                if 'Type' in temp_df.columns:
-                    temp_df['Type'] = temp_df['Type'].fillna('').astype(str)
-                else:
-                    temp_df['Type'] = ''
-
-                for dt_col in ['StartTime', 'EndTime']:
-                    if dt_col in temp_df.columns:
-                        temp_df[dt_col] = pd.to_datetime(temp_df[dt_col], errors='coerce')
-
-                for qual_col in ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Assessment_Score_Pct']:
-                    if qual_col not in temp_df.columns:
-                        temp_df[qual_col] = None
-
-                new_processed_dfs.append(temp_df)
-            except Exception as e:
-                file_read_errors.append(f"{file.name}: {e}")
-                st.sidebar.error(f"Error reading {file.name}: {e}")
-
-        if file_read_errors:
-            st.session_state["last_import_result"] = {"status":"Rejected - no files imported", "file_errors":file_read_errors}
-            st.sidebar.error("The upload batch was not imported. Correct the listed file errors and try again.")
-            st.stop()
-        if new_processed_dfs:
-            try:
-                inserted_count, duplicate_count = ingest_excel_to_postgresql(new_processed_dfs, source=', '.join(f.name for f in uploaded_files))
-            except Exception as e:
-                st.sidebar.error(str(e))
-                st.stop()
+        result = import_usermetrics_files(uploaded_files, employee_name, employee_state)
+        if result.get('status', '').startswith('Committed'):
             fetch_master_db_from_supabase.clear()
             build_teacher_roster_cached.clear()
-            if inserted_count == 0 and duplicate_count > 0:
-                st.sidebar.warning(
-                    f"⚠️ 0 records inserted — all {duplicate_count} row(s) matched an existing Record_Hash "
-                    "already in the database. If you just deleted this consultant's data and expected a fresh "
-                    "insert, the delete likely didn't remove the old rows (check the delete confirmation message "
-                    "above for a row count / mismatch warning)."
-                )
-            else:
-                st.sidebar.success(f"🎉 Database sync complete: {inserted_count} record(s) inserted successfully!")
             st.rerun()
+
+render_last_metrics_import()
 
 df = fetch_master_db_from_supabase()
 
