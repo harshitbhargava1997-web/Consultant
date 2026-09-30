@@ -168,9 +168,26 @@ def validate_import(df):
 
 
 def report_fingerprint(df, configuration):
+    def canonical(value):
+        # Teacher-day maps use (school, teacher) tuples as dictionary keys.
+        # JSON's default=str handles values, but cannot handle tuple keys.
+        # Encode key/value pairs without discarding the school identity.
+        if isinstance(value, dict):
+            pairs = [[canonical(key), canonical(item)] for key, item in value.items()]
+            pairs.sort(key=lambda pair: json.dumps(pair[0], sort_keys=True, default=str))
+            return {'mapping': pairs}
+        if isinstance(value, tuple):
+            return {'tuple': [canonical(item) for item in value]}
+        if isinstance(value, list):
+            return [canonical(item) for item in value]
+        if isinstance(value, (set, frozenset)):
+            items = [canonical(item) for item in value]
+            return {'set': sorted(items, key=lambda item: json.dumps(item, sort_keys=True, default=str))}
+        return value
+
     stable = df.reindex(sorted(df.columns), axis=1).astype(str)
     rows = pd.util.hash_pandas_object(stable, index=False).sort_values().values.tobytes()
-    settings = json.dumps(configuration, sort_keys=True, default=str).encode()
+    settings = json.dumps(canonical(configuration), sort_keys=True, default=str).encode()
     return hashlib.sha256(rows + settings).hexdigest()
 
 
