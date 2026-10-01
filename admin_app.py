@@ -770,6 +770,21 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
                 contents=contents_payload
             )
             return response.text
+        except errors.APIError as e:
+            err_text = str(e).lower()
+            if getattr(e, "code", None) == 429 and (
+                "quota exceeded" in err_text
+                or "resource_exhausted" in err_text
+                or "perday" in err_text
+                or "free_tier_requests" in err_text
+            ):
+                return (
+                    "⚠️ Gemini daily API quota is exhausted for this project/model. "
+                    "The rest of the app remains available. AI generation will resume "
+                    "after the quota resets or when a key/project with available quota is configured."
+                )
+            time.sleep(1)
+            continue
         except Exception:
             time.sleep(1)
             continue
@@ -840,11 +855,33 @@ def generate_structured_observation_ai(audio_file_obj=None, text_transcript="", 
                 return json.loads(response.text), None
             except errors.APIError as e:
                 last_exception = e
-                if getattr(e, "code", None) in [503, 429] or "503" in str(e):
+                err_text = str(e).lower()
+                err_code = getattr(e, "code", None)
+
+                # A daily/project quota exhaustion will not recover by retrying
+                # a few seconds later. Stop immediately and show a useful message.
+                quota_exhausted = (
+                    err_code == 429
+                    and (
+                        "quota exceeded" in err_text
+                        or "resource_exhausted" in err_text
+                        or "perday" in err_text
+                        or "free_tier_requests" in err_text
+                    )
+                )
+                if quota_exhausted:
+                    return None, (
+                        "Gemini daily API quota has been exhausted for the configured "
+                        f"model ({model_name}). The rest of the admin app is still usable. "
+                        "AI generation will work again when Google resets the quota, or "
+                        "after you use an API project/key with available quota or billing."
+                    )
+
+                # Retry genuinely temporary rate-limit or service-availability errors.
+                if err_code in [429, 503] or "503" in err_text:
                     time.sleep(2 ** attempt)
                     continue
-                else:
-                    break
+                break
             except Exception as e:
                 last_exception = e
                 time.sleep(1.5)
