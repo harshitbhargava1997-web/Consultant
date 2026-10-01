@@ -745,6 +745,89 @@ def build_teacher_roster_cached(df):
     return candidate.reset_index(drop=True)
 
 
+
+# --- PERSISTENT GEMINI API USAGE TRACKER ---
+AI_USAGE_TZ = ZoneInfo("Asia/Kolkata")
+AI_USAGE_PREFIX = "ai_usage"
+
+
+def _ai_usage_day():
+    return datetime.now(AI_USAGE_TZ).strftime("%Y-%m-%d")
+
+
+def log_ai_usage(action, model, status, error_text=""):
+    """Persist one record per actual Gemini API attempt in Supabase Storage.
+
+    This deliberately uses a separate ai_usage/ folder in the existing bucket,
+    so it does not modify teacher/school data or require a database migration.
+    Tracking failures never interrupt the main application.
+    """
+    try:
+        now = datetime.now(AI_USAGE_TZ)
+        safe_action = re.sub(r"[^a-zA-Z0-9_-]", "_", str(action))[:40] or "unknown"
+        safe_status = re.sub(r"[^a-zA-Z0-9_-]", "_", str(status))[:20] or "unknown"
+        remote_path = (
+            f"{AI_USAGE_PREFIX}/{now.strftime('%Y-%m-%d')}/"
+            f"{now.strftime('%H%M%S%f')}__{safe_action}__{safe_status}__{uuid.uuid4().hex[:8]}.json"
+        )
+        payload = {
+            "timestamp_ist": now.isoformat(),
+            "action": str(action),
+            "model": str(model),
+            "status": str(status),
+            "error": str(error_text)[:1000],
+        }
+        supabase.storage.from_(BUCKET_NAME).upload(
+            path=remote_path,
+            file=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            file_options={"upsert": "false", "content-type": "application/json"},
+        )
+        get_ai_usage_today.clear()
+    except Exception:
+        # Usage tracking must never break AI generation or the rest of the app.
+        pass
+
+
+@st.cache_data(ttl=10, show_spinner=False)
+def get_ai_usage_today(day_str=None):
+    """Return today's app-side Gemini attempt counts from Supabase Storage."""
+    day_str = day_str or _ai_usage_day()
+    counts = {"total": 0, "success": 0, "failed": 0, "quota": 0, "temporary": 0}
+    try:
+        items = supabase.storage.from_(BUCKET_NAME).list(
+            f"{AI_USAGE_PREFIX}/{day_str}", {"limit": 1000}
+        ) or []
+        for item in items:
+            name = str(item.get("name", "")) if isinstance(item, dict) else str(item)
+            if not name.endswith(".json"):
+                continue
+            counts["total"] += 1
+            parts = name.split("__")
+            status = parts[2] if len(parts) >= 4 else ""
+            if status in counts:
+                counts[status] += 1
+            elif status:
+                counts["failed"] += 1
+        return counts, None
+    except Exception as e:
+        return counts, str(e)
+
+
+def render_ai_usage_panel():
+    counts, usage_err = get_ai_usage_today()
+    st.markdown("##### 🤖 Gemini API Usage — Today")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total API Attempts", counts["total"])
+    c2.metric("Successful", counts["success"])
+    c3.metric("Failed / Temporary", counts["failed"] + counts["temporary"])
+    c4.metric("Quota Exhausted", counts["quota"])
+    st.caption(
+        f"App-side usage log for {_ai_usage_day()} (IST). Each actual call to Gemini is counted, including retries."
+    )
+    if usage_err:
+        st.caption("Usage tracker is currently unavailable; AI generation itself can still work normally.")
+
+
 def get_gemini_summary(context_prompt, audio_file_obj=None):
     if not ai_client:
         return "⚠️ Gemini API key not found in Streamlit secrets."
@@ -769,6 +852,7 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
                 model=m,
                 contents=contents_payload
             )
+            log_ai_usage("summary", m, "success")
             return response.text
         except errors.APIError as e:
             err_text = str(e).lower()
@@ -778,14 +862,17 @@ def get_gemini_summary(context_prompt, audio_file_obj=None):
                 or "perday" in err_text
                 or "free_tier_requests" in err_text
             ):
+                log_ai_usage("summary", m, "quota", str(e))
                 return (
                     "⚠️ Gemini daily API quota is exhausted for this project/model. "
                     "The rest of the app remains available. AI generation will resume "
                     "after the quota resets or when a key/project with available quota is configured."
                 )
+            log_ai_usage("summary", m, "temporary", str(e))
             time.sleep(1)
             continue
-        except Exception:
+        except Exception as e:
+            log_ai_usage("summary", m, "failed", str(e))
             time.sleep(1)
             continue
             
@@ -852,6 +939,7 @@ def generate_structured_observation_ai(audio_file_obj=None, text_transcript="", 
                         "response_schema": ClassroomObservationAIOutput,
                     }
                 )
+                log_ai_usage("observation", model_name, "success")
                 return json.loads(response.text), None
             except errors.APIError as e:
                 last_exception = e
@@ -870,6 +958,7 @@ def generate_structured_observation_ai(audio_file_obj=None, text_transcript="", 
                     )
                 )
                 if quota_exhausted:
+                    log_ai_usage("observation", model_name, "quota", str(e))
                     return None, (
                         "Gemini daily API quota has been exhausted for the configured "
                         f"model ({model_name}). The rest of the admin app is still usable. "
@@ -879,11 +968,14 @@ def generate_structured_observation_ai(audio_file_obj=None, text_transcript="", 
 
                 # Retry genuinely temporary rate-limit or service-availability errors.
                 if err_code in [429, 503] or "503" in err_text:
+                    log_ai_usage("observation", model_name, "temporary", str(e))
                     time.sleep(2 ** attempt)
                     continue
+                log_ai_usage("observation", model_name, "failed", str(e))
                 break
             except Exception as e:
                 last_exception = e
+                log_ai_usage("observation", model_name, "failed", str(e))
                 time.sleep(1.5)
 
     return None, f"Temporarily unable to process request: {last_exception}"
@@ -3800,6 +3892,8 @@ else:
     with tab8:
         st.header("📋 Classroom Observation Form & Longitudinal Audit Trail")
         st.caption("Punch real-time classroom visit observations, auto-populate rubrics and narratives with Gemini voice debriefs, attach visit evidence, and generate reports.")
+
+        render_ai_usage_panel()
 
         subtab_form, subtab_history = st.tabs(["📝 New Classroom Observation Visit", "📊 Teacher Visit History & Outcomes"])
 
