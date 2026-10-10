@@ -39,9 +39,11 @@ export async function POST(request) {
   if(ctx.error)return response({error:ctx.error},ctx.status);
   if(ctx.user.app_metadata?.must_change_password)return response({error:"Change your initial password first."},403);
   const body=await request.json();
-  // Only teacher onboarding is delegated. All other admin actions remain platform-admin-only.
-  if(body.action!=="createUser" && !ctx.isAdmin)
-   return response({error:"Platform Super Admin permission required."},403);
+  // Creating a school is reserved exclusively for the Platform Super Admin.
+  if(body.action==="createSchool" && !ctx.isAdmin)
+   return response({error:"Only the Platform Super Admin may create schools."},403);
+  if(!["createSchool","createUser"].includes(body.action))
+   return response({error:"Unknown action."},400);
   const admin=adminClient();
   if(body.action==="createSchool"){
    const name=String(body.name||"").trim();
@@ -58,14 +60,22 @@ export async function POST(request) {
    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||fullName.length<2||fullName.length>160||
       !["owner","principal","coordinator","teacher"].includes(role)||
       !/^[0-9a-f-]{36}$/i.test(schoolId))return response({error:"Valid user, role and school required."},400);
-   // Use server-side membership checks. Never trust the school or role selected by the browser.
+   // Tenant-scope the service-role action; UI controls alone cannot enforce permissions.
+   let isAssignedConsultant=false;
    if(!ctx.isAdmin){
-    if(role!=="teacher")return response({error:"School leaders may create or assign teachers only."},403);
-    const {data:manager,error:managerError}=await admin.from("literacy_memberships")
-      .select("role").eq("school_id",schoolId).eq("user_id",ctx.user.id).maybeSingle();
-    if(managerError)throw managerError;
-    if(!manager||!["owner","principal","coordinator"].includes(manager.role))
-     return response({error:"School owner, principal or coordinator access required for this school."},403);
+    const [memberResult,consultantResult]=await Promise.all([
+     admin.from("literacy_memberships").select("role")
+      .eq("school_id",schoolId).eq("user_id",ctx.user.id).maybeSingle(),
+     admin.from("literacy_consultant_assignments").select("school_id")
+      .eq("school_id",schoolId).eq("consultant_user_id",ctx.user.id).maybeSingle()
+    ]);
+    if(memberResult.error||consultantResult.error)return response({error:"School permission check failed."},503);
+    isAssignedConsultant=!!consultantResult.data;
+    const isLeader=["owner","principal","coordinator"].includes(memberResult.data?.role);
+    if(!isAssignedConsultant&&!isLeader)
+     return response({error:"Only school leaders or assigned Consultants can manage accounts for this school."},403);
+    if(!isAssignedConsultant&&role!=="teacher")
+     return response({error:"School leaders may create or assign teachers only."},403);
    }
    const {data:school,error:schoolError}=await admin.from("literacy_schools").select("id").eq("id",schoolId).maybeSingle();
    if(schoolError)throw schoolError;
@@ -79,7 +89,7 @@ export async function POST(request) {
    }
    // Protect existing owner/principal/coordinator memberships from being overwritten
    // by delegated teacher creation, including same-email reassignments.
-   if(!ctx.isAdmin && existing){
+   if(!ctx.isAdmin && !isAssignedConsultant && existing){
     const {data:currentMembership,error:memberError}=await admin.from("literacy_memberships")
       .select("role").eq("school_id",schoolId).eq("user_id",existing.id).maybeSingle();
     if(memberError)throw memberError;
