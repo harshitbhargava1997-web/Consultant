@@ -10,12 +10,13 @@ const TYPES=[
 function counts(results){
  return results.reduce((a,row)=>{a[row.status]=(a[row.status]||0)+1;return a;},{});
 }
-export default function BulkWorkspace({session,schoolId,schoolName,isAdmin,onImported}){
+export default function BulkWorkspace({session,schoolId,schoolName,isAdmin,canUploadStaff,canManageRoles,onImported}){
  const [kind,setKind]=useState("stakeholders");
  const [rows,setRows]=useState([]),[fileName,setFileName]=useState("");
  const [results,setResults]=useState([]),[busy,setBusy]=useState(false),[notice,setNotice]=useState("");
  const fileInput=useRef(null);
  const item=TYPES.find(t=>t.id===kind);
+ useEffect(()=>{if(!canUploadStaff)setKind("students");},[canUploadStaff]);
  useEffect(()=>{
   setRows([]);setResults([]);setNotice("");setFileName("");
   if(fileInput.current)fileInput.current.value="";
@@ -56,9 +57,9 @@ export default function BulkWorkspace({session,schoolId,schoolName,isAdmin,onImp
     setNotice("Processed "+saved.length+" of "+rows.length+" rows...");
    }
    const errors=saved.filter(r=>r.status==="error").length;
-   setNotice("Upload finished: "+(saved.length-errors)+" saved or assigned; "+errors+" need attention. Download the results to review each row.");
+   setNotice("Upload finished: "+(saved.length-errors)+" saved or assigned; "+errors+" need attention. Review the results shown below.");
    if(onImported)await onImported();
-  }catch(error){setNotice("Upload stopped after "+saved.length+" rows: "+error.message+". Download the results before retrying.");}
+  }catch(error){setNotice("Upload stopped after "+saved.length+" rows: "+error.message+". Review the processed rows before retrying.");}
   finally{
    setResults([...saved]);setRows([]);setFileName("");
    if(fileInput.current)fileInput.current.value="";
@@ -66,7 +67,7 @@ export default function BulkWorkspace({session,schoolId,schoolName,isAdmin,onImp
   }
  }
  async function exportData(){
-  if(!schoolId||busy)return;
+  if(!isAdmin||!schoolId||busy)return;
   setBusy(true);setNotice("");
   try{
    const data=await callApi(item.exportAction);
@@ -78,12 +79,12 @@ export default function BulkWorkspace({session,schoolId,schoolName,isAdmin,onImp
  async function template(){
   if(busy)return;
   setBusy(true);setNotice("");
-  try{await downloadTemplate(kind,isAdmin);setNotice("Excel template downloaded. Read its Instructions sheet before uploading.");}
+  try{await downloadTemplate(kind,canManageRoles);setNotice("Excel template downloaded. Read its Instructions sheet before uploading.");}
   catch(error){setNotice(error.message);}
   finally{setBusy(false);}
  }
  async function resultsExport(){
-  if(!results.length)return;
+  if(!isAdmin||!results.length)return;
   setBusy(true);
   try{await downloadImportResults(kind,results,schoolName);}
   catch(error){setNotice(error.message);}
@@ -92,12 +93,12 @@ export default function BulkWorkspace({session,schoolId,schoolName,isAdmin,onImp
  const totals=counts(results);
  return <div className="bulk-stack">
   <section className="panel">
-   <div className="panel-head"><h2>Bulk upload & download</h2><span className="eyebrow">EXCEL · SCHOOL-SCOPED</span></div>
-   <p className="bulk-intro">Register and export school staff or students in Excel format. All uploads are restricted to the selected school, and upload results identify each unsuccessful row.</p>
+   <div className="panel-head"><h2>{isAdmin?"Bulk upload & export":"Bulk upload"}</h2><span className="eyebrow">EXCEL · SCHOOL-SCOPED</span></div>
+   <p className="bulk-intro">Upload staff or students using a blank Excel template. Imports are restricted to the selected school and show the outcome of each row. Only the Platform Super Admin can export existing records.</p>
    <div className="bulk-choice" role="group" aria-label="Choose data type">
-    {TYPES.map(t=><button key={t.id} type="button" className={"btn "+(t.id===kind?"primary":"outline")} disabled={busy} aria-pressed={t.id===kind} onClick={()=>setKind(t.id)}>{t.name}</button>)}
+    {TYPES.filter(t=>canUploadStaff||t.id==="students").map(t=><button key={t.id} type="button" className={"btn "+(t.id===kind?"primary":"outline")} disabled={busy} aria-pressed={t.id===kind} onClick={()=>setKind(t.id)}>{t.name}</button>)}
    </div>
-   <div className="notice small"><AlertCircle size={17}/><span>Selected school: <strong>{schoolName||"Choose a school from the top bar"}</strong>. Only the Platform Super Admin can import owner, principal or coordinator roles. School leaders may import teachers and students for their own school.</span></div>
+   <div className="notice small"><AlertCircle size={17}/><span>Selected school: <strong>{schoolName||"Choose a school from the top bar"}</strong>. Super Admins and assigned Consultants can import stakeholder roles; school leaders can import teachers and students; teachers can upload students into assigned classes only. Existing data exports are restricted to the Super Admin.</span></div>
   </section>
   <div className="two-col">
    <section className="panel">
@@ -112,15 +113,22 @@ export default function BulkWorkspace({session,schoolId,schoolName,isAdmin,onImp
     {rows.length>0&&<div className="bulk-selected"><CheckCircle2 size={17}/><span>{fileName}: <strong>{rows.length} records</strong> ready for import</span></div>}
     <button type="button" className="btn primary" disabled={busy||!schoolId||!rows.length} onClick={upload}><UploadCloud size={16}/>{busy?"Processing…":"Confirm & upload records"}</button>
    </section>
-   <section className="panel">
+   {isAdmin&&<section className="panel">
     <div className="panel-head"><h2><Download size={19}/> Download school data</h2></div>
     <p className="helper">Export current {kind==="stakeholders"?"stakeholder names, login emails and roles":"student names, admission numbers, grades, sections and academic years"} for the selected school. No passwords are exported.</p>
     <button className="btn outline" disabled={busy||!schoolId} onClick={exportData}><Download size={16}/> Export {kind==="stakeholders"?"stakeholders":"student roster"} (.xlsx)</button>
+   </section>}
+   <section className="panel">
+    <div className="panel-head"><h2>Upload results</h2></div>
     <div className="bulk-summary">
-     <strong>Import results</strong>
-     <span>{results.length?results.length+" rows processed":"No import in this session"}</span>
+     <strong>{results.length?results.length+" rows processed":"No import in this session"}</strong>
      {results.length>0&&<><span>{(totals.created||0)+(totals.assigned||0)+(totals.saved||0)} successful · {totals.error||0} errors</span>
-      <button className="btn outline" disabled={busy} onClick={resultsExport}><Download size={16}/> Download row-by-row results</button></>}
+     {isAdmin&&<button className="btn outline" disabled={busy} onClick={resultsExport}><Download size={16}/> Download import results</button>}
+     {(totals.error||0)>0&&<div className="rows" role="status">
+      {results.filter(r=>r.status==="error").slice(0,80).map((r,i)=><p className="helper" key={i}>Row {r.row_number}: {r.detail}</p>)}
+      {(totals.error||0)>80&&<p className="helper">Additional failed rows: {(totals.error||0)-80}. Upload smaller files for easier review.</p>}
+     </div>}
+     </>}
     </div>
    </section>
   </div>
