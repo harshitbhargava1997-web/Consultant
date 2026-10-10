@@ -8,7 +8,7 @@ const kinds=[
  {value:"follow_up",label:"Review & follow-up"},
  {value:"classroom_support",label:"Classroom support / observation"}
 ];
-const today=()=>new Date().toLocaleDateString("en-CA");
+const today=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,"0"),String(d.getDate()).padStart(2,"0")].join("-");};
 const newActivity=()=>({kind:"teacher_training",activityDate:today(),topic:"",durationMinutes:60,participantRoles:"Teachers",summary:"",nextAction:""});
 async function api(session,method,path,body){
  const res=await fetch("/api/consultants"+path,{
