@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";
 function response(data, status=200) { return NextResponse.json(data, {status, headers:{"Cache-Control":"no-store"}}); }
@@ -53,6 +52,7 @@ export async function POST(request) {
    const fullName=String(body.fullName||"").trim();
    const schoolId=String(body.schoolId||"");
    const role=String(body.role||"");
+   const initialPassword=typeof body.initialPassword==="string"?body.initialPassword:"";
    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||fullName.length<2||fullName.length>160||
       !["owner","principal","coordinator","teacher"].includes(role)||
       !/^[0-9a-f-]{36}$/i.test(schoolId))return response({error:"Valid user, role and school required."},400);
@@ -65,13 +65,19 @@ export async function POST(request) {
     existing=(data.users||[]).find(u=>u.email?.toLowerCase()===email);
     if((data.users||[]).length<200)break;page++;
    }
-   let password=null;
-   if(!existing){
-    password=randomBytes(20).toString("base64url")+"aA1!";
+   const isNewAccount=!existing;
+   if(isNewAccount){
+    // Only the Super Admin sets initial credentials. Never persist or echo the plaintext password.
+    // Existing accounts are assigned to additional schools without changing their credentials.
+    if(initialPassword.length<12||initialPassword.length>128||
+       !/[a-z]/.test(initialPassword)||!/[A-Z]/.test(initialPassword)||
+       !/[0-9]/.test(initialPassword)||!(/[^A-Za-z0-9]/.test(initialPassword))){
+      return response({error:"For a new account, enter an initial password of 12–128 characters with uppercase, lowercase, a number and a symbol."},400);
+    }
     const {data,error}=await admin.auth.admin.createUser({
-      email,password,email_confirm:true,
+      email,password:initialPassword,email_confirm:true,
       user_metadata:{full_name:fullName},
-      app_metadata:{must_change_password:true}
+      app_metadata:{must_change_password:false}
     });
     if(error)throw error;
     existing=data.user;
@@ -80,8 +86,10 @@ export async function POST(request) {
      .upsert({school_id:schoolId,user_id:existing.id,display_name:fullName,role},
        {onConflict:"school_id,user_id"});
    if(membershipError)throw membershipError;
-   return response({created:!!password,email,temporaryPassword:password,
-     message:password?"Temporary password shown once. Require secure delivery and mailbox verification.":"Existing account assigned; password unchanged."});
+   return response({created:isNewAccount,email,
+     message:isNewAccount
+       ?"User created using the initial password you supplied. Share it privately; they may use Forgot password to change it. Confirm email ownership separately."
+       :"Existing account assigned to this school; its password was not changed."});
   }
   if(body.action==="completePasswordChange"){
    return response({error:"Use the password change endpoint."},400);
