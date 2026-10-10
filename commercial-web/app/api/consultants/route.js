@@ -24,17 +24,40 @@ async function context(request){
 }
 async function assigned(ctx,schoolId){
  if(ctx.isAdmin)return true;
- if(!ctx.profile)return false;
  const {data,error}=await ctx.admin.from("literacy_consultant_assignments")
   .select("school_id").eq("consultant_user_id",ctx.user.id).eq("school_id",schoolId).maybeSingle();
  if(error)throw error;
  return !!data;
 }
-async function schoolManager(ctx,schoolId){
- const {data,error}=await ctx.admin.from("literacy_memberships")
-  .select("role").eq("user_id",ctx.user.id).eq("school_id",schoolId).maybeSingle();
+async function permission(ctx,schoolId,feature){
+ if(ctx.isAdmin)return true;
+ if(!uuid(schoolId))return false;
+ const [a,m]=await Promise.all([
+  ctx.admin.from("literacy_consultant_assignments").select("school_id")
+   .eq("school_id",schoolId).eq("consultant_user_id",ctx.user.id).maybeSingle(),
+  ctx.admin.from("literacy_memberships").select("role")
+   .eq("school_id",schoolId).eq("user_id",ctx.user.id).maybeSingle()
+ ]);
+ if(a.error||m.error)throw Error("Unable to verify permissions.");
+ const role=a.data?"consultant":m.data?.role;
+ if(!role)return false;
+ const {data,error}=await ctx.admin.from("literacy_role_permissions")
+  .select("enabled").eq("role",role).eq("feature",feature).maybeSingle();
  if(error)throw error;
- return ["owner","principal","coordinator"].includes(data?.role);
+ return data?.enabled===true;
+}
+async function managerSchools(ctx){
+ if(ctx.isAdmin)return [];
+ const [a,m]=await Promise.all([
+  ctx.admin.from("literacy_consultant_assignments").select("school_id")
+   .eq("consultant_user_id",ctx.user.id).limit(2000),
+  ctx.admin.from("literacy_memberships").select("school_id")
+   .eq("user_id",ctx.user.id).limit(2000)
+ ]);
+ if(a.error||m.error)throw Error("Unable to check school scope.");
+ const ids=[...new Set([...(a.data||[]).map(x=>x.school_id),...(m.data||[]).map(x=>x.school_id)])];
+ const access=await Promise.all(ids.map(async id=>(await permission(ctx,id,"consultants.manage"))?id:null));
+ return access.filter(Boolean);
 }
 async function schoolOverview(ctx,schoolId){
  const {data:classes,error:classError}=await ctx.admin.from("literacy_classes")
