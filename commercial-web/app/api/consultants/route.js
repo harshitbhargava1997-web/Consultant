@@ -79,11 +79,12 @@ export async function GET(request){
     return send({error:"School access not permitted."},403);
    return send({overview:await schoolOverview(ctx,schoolId)});
   }
-  const {data:allAssignments,error:assignError}=await ctx.admin.from("literacy_consultant_assignments")
+  let assignmentQuery=ctx.admin.from("literacy_consultant_assignments")
    .select("consultant_user_id,school_id,assigned_at")
    .order("assigned_at",{ascending:false}).limit(2000);
+  if(!ctx.isAdmin)assignmentQuery=assignmentQuery.eq("consultant_user_id",ctx.user.id);
+  const {data:assignments,error:assignError}=await assignmentQuery;
   if(assignError)throw assignError;
-  const assignments=ctx.isAdmin?allAssignments:(allAssignments||[]).filter(a=>a.consultant_user_id===ctx.user.id);
   if(!ctx.isAdmin)return send({isConsultant:!!ctx.profile,consultantSchools:assignments.map(a=>a.school_id)});
   const {data:roster,error:rosterError}=await ctx.admin.from("literacy_consultants")
    .select("user_id,display_name,created_at").order("created_at",{ascending:false}).limit(1000);
