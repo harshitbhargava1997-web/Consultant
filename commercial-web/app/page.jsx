@@ -2,7 +2,7 @@
 import {useEffect,useMemo,useState} from "react";
 import {browserClient,LEVELS,RATINGS,MANAGERS,skillProgress,parseCsv} from "../lib/supabase";
 import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNoAxesCombined,
- BookMarked,Eye,Menu,LogOut,Plus,Search,ChevronRight,RefreshCw,LockKeyhole,
+ BookMarked,Eye,Menu,X,LogOut,Plus,Search,ChevronRight,RefreshCw,LockKeyhole,
  CircleCheck,ArrowRight,AlertCircle,GraduationCap,FileUp} from "lucide-react";
 
 const navigation=[
@@ -27,6 +27,9 @@ export default function Home(){
  const [session,setSession]=useState(null),[checked,setChecked]=useState(false);
  const [identity,setIdentity]=useState({admin:false,memberships:[],schools:[]});
  const [schoolId,setSchoolId]=useState(""),[page,setPage]=useState("overview");
+ const [isMobile,setIsMobile]=useState(false);
+ const [mobileNavOpen,setMobileNavOpen]=useState(false);
+ const [desktopNavCollapsed,setDesktopNavCollapsed]=useState(false);
  const [classes,setClasses]=useState([]),[students,setStudents]=useState([]),[assessments,setAssessments]=useState([]),[competencies,setCompetencies]=useState([]),[members,setMembers]=useState([]);
  const [message,setMessage]=useState(""),[busy,setBusy]=useState(false),[signMode,setSignMode]=useState("signin");
  const [email,setEmail]=useState(""),[password,setPassword]=useState("");
@@ -53,6 +56,19 @@ export default function Home(){
    :members.filter(m=>m.role==="teacher" && teacherClasses.some(tc=>tc.class_id===classObj?.id && tc.teacher_user_id===m.user_id))
       .map(m=>({id:m.user_id,name:m.display_name||"Teacher"}));
 
+ useEffect(()=>{
+  const media=window.matchMedia("(max-width: 760px)");
+  const update=()=>{setIsMobile(media.matches);setMobileNavOpen(false);};
+  update();
+  media.addEventListener("change",update);
+  return ()=>media.removeEventListener("change",update);
+ },[]);
+ useEffect(()=>{
+  if(!mobileNavOpen)return;
+  const handleEscape=e=>{if(e.key==="Escape")setMobileNavOpen(false);};
+  window.addEventListener("keydown",handleEscape);
+  return ()=>window.removeEventListener("keydown",handleEscape);
+ },[mobileNavOpen]);
  useEffect(()=>{
   if(!client){setChecked(true);return;}
   let mounted=true;
@@ -227,7 +243,11 @@ export default function Home(){
   setReportData({student,cls,results,progress:skillProgress(relevant,results,cls?.grade||"Nursery"),relevant});
   setBusy(false);
  }
- async function logout(){await client?.auth.signOut();setSession(null);setPage("overview");}
+ async function logout(){await client?.auth.signOut();setSession(null);setPage("overview");setMobileNavOpen(false);}
+ function toggleNavigation(){
+  if(isMobile)setMobileNavOpen(open=>!open);
+  else setDesktopNavCollapsed(collapsed=>!collapsed);
+ }
 
  if(!checked)return <main className="splash"><span className="loader"/> Loading secure workspace…</main>;
  if(!client)return <main className="setup"><div className="setup-logo"><GraduationCap size={29}/></div><span className="eyebrow">VISION SCHOOL PLATFORM</span><h1>A connected home for every school.</h1><p>Teacher implementation, literacy assessments and learning progress in one workspace.</p><div className="notice"><LockKeyhole size={19}/><span>Deployment is in setup mode. Configure Supabase public environment variables to enable secure sign-in. No student data is exposed.</span></div><a href="https://github.com/harshitbhargava1997-web/Consultant/tree/commercial-staging/commercial-web" target="_blank" rel="noreferrer" className="btn primary">View staging source <ArrowRight size={16}/></a></main>;
@@ -235,8 +255,11 @@ export default function Home(){
  if(session.user?.app_metadata?.must_change_password)return <main className="auth-outer"><div className="auth-card"><span className="eyebrow">ACCOUNT SECURITY</span><h1>Set your personal password</h1><p>Replace the temporary password before continuing.</p><Notice message={message}/><form onSubmit={changeInitialPassword}><label>New password<input type="password" minLength={12} value={newPassword} onChange={e=>setNewPassword(e.target.value)} required/></label><Btn type="submit" kind="primary wide" disabled={busy}>Update password</Btn></form><button className="link-button" onClick={logout}>Sign out</button></div></main>;
 
  const availableNav=navigation.filter(n=>(!n.admin||identity.admin)&&(!n.school||!!schoolId));
- return <div className="layout"><aside className="sidebar"><div className="brand"><span className="brand-mark"><GraduationCap size={23}/></span><span>VISION <small>School Platform</small></span></div><div className="side-caption">WORKSPACE</div><nav>{availableNav.map(item=>{const Icon=item.icon;return <button key={item.id} onClick={()=>{setPage(item.id);setMessage("");}} className={"nav-item "+(page===item.id?"active":"")}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={15}/>}</button>;})}</nav><div className="sidebar-bottom"><div className="profile-dot">{(session.user.email||"U").slice(0,1).toUpperCase()}</div><div className="profile-name"><strong>{session.user.email?.split("@")[0]}</strong><small>{identity.admin?"Platform Admin":role||"Member"}</small></div><button className="icon-btn" aria-label="Sign out" title="Sign out" onClick={logout}><LogOut size={18}/></button></div></aside>
- <main className="main"><header className="topbar"><div className="topbar-title"><button className="mobile-menu" aria-label="Menu" onClick={()=>document.querySelector(".sidebar")?.classList.toggle("mobile-open")}><Menu size={20}/></button><span>VISION / <b>{navigation.find(n=>n.id===page)?.label||"Overview"}</b></span></div><div className="topbar-right"><select aria-label="Active school" value={schoolId} onChange={e=>{setSchoolId(e.target.value);setPage("overview");}}><option value="">Select a school</option>{identity.schools.filter(s=>identity.admin||identity.memberships.some(m=>m.school_id===s.id)).map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select><span className="avatar">{(session.user.email||"U").slice(0,1).toUpperCase()}</span></div></header><div className="content"><div className="page-heading"><div><span className="eyebrow">{school?.name||"PLATFORM WORKSPACE"}</span><h1>{navigation.find(n=>n.id===page)?.label||"Overview"}</h1><p>{page==="overview"?"An integrated view of school operations and foundational learning.":"Secure workspace · "+(identity.admin?"Super Admin":role||"Assigned member")}</p></div>{schoolId&&<Btn kind="outline" disabled={busy} onClick={refresh}><RefreshCw size={15}/> Refresh</Btn>}</div><Notice message={message}/>
+ return <div className={"layout"+(desktopNavCollapsed?" sidebar-collapsed":"")}>
+  {mobileNavOpen&&<button type="button" className="nav-backdrop" aria-label="Close navigation" onClick={()=>setMobileNavOpen(false)}/>}
+  <aside id="vision-sidebar" className={"sidebar"+(mobileNavOpen?" mobile-open":"")}>
+   <div className="brand"><span className="brand-mark"><GraduationCap size={23}/></span><span>VISION <small>School Platform</small></span><button type="button" className="sidebar-close" aria-label="Close menu" onClick={()=>setMobileNavOpen(false)}><X size={20}/></button></div><div className="side-caption">WORKSPACE</div><nav>{availableNav.map(item=>{const Icon=item.icon;return <button key={item.id} onClick={()=>{setPage(item.id);setMessage("");setMobileNavOpen(false);}} className={"nav-item "+(page===item.id?"active":"")}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={15}/>}</button>;})}</nav><div className="sidebar-bottom"><div className="profile-dot">{(session.user.email||"U").slice(0,1).toUpperCase()}</div><div className="profile-name"><strong>{session.user.email?.split("@")[0]}</strong><small>{identity.admin?"Platform Admin":role||"Member"}</small></div><button className="icon-btn" aria-label="Sign out" title="Sign out" onClick={logout}><LogOut size={18}/></button></div></aside>
+ <main className="main"><header className="topbar"><div className="topbar-title"><button type="button" className="mobile-menu" aria-label={(isMobile?mobileNavOpen:!desktopNavCollapsed)?"Close navigation menu":"Open navigation menu"} aria-controls="vision-sidebar" aria-expanded={isMobile?mobileNavOpen:!desktopNavCollapsed} onClick={toggleNavigation}>{isMobile?mobileNavOpen?<X size={21}/>:<Menu size={21}/>:desktopNavCollapsed?<Menu size={21}/>:<X size={21}/>}</button><span>VISION / <b>{navigation.find(n=>n.id===page)?.label||"Overview"}</b></span></div><div className="topbar-right"><select aria-label="Active school" value={schoolId} onChange={e=>{setSchoolId(e.target.value);setPage("overview");}}><option value="">Select a school</option>{identity.schools.filter(s=>identity.admin||identity.memberships.some(m=>m.school_id===s.id)).map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select><span className="avatar">{(session.user.email||"U").slice(0,1).toUpperCase()}</span></div></header><div className="content"><div className="page-heading"><div><span className="eyebrow">{school?.name||"PLATFORM WORKSPACE"}</span><h1>{navigation.find(n=>n.id===page)?.label||"Overview"}</h1><p>{page==="overview"?"An integrated view of school operations and foundational learning.":"Secure workspace · "+(identity.admin?"Super Admin":role||"Assigned member")}</p></div>{schoolId&&<Btn kind="outline" disabled={busy} onClick={refresh}><RefreshCw size={15}/> Refresh</Btn>}</div><Notice message={message}/>
  {page==="overview"&&<><div className="stats"><div className="stat"><span>Schools assigned</span><strong>{identity.memberships.length}</strong><small>Active memberships</small></div><div className="stat"><span>Classes</span><strong>{visibleClasses.length}</strong><small>Accessible classes</small></div><div className="stat"><span>Students</span><strong>{students.filter(s=>visibleClasses.some(c=>c.id===s.class_id)).length}</strong><small>Registered learners</small></div><div className="stat"><span>Assessment sessions</span><strong>{assessments.filter(a=>visibleClasses.some(c=>c.id===a.class_id)).length}</strong><small>Last 500 loaded</small></div></div><div className="two-col"><Box title="Your learning workflow"><div className="workflow">{["Set up school and staff","Create classes and student rosters","Assess cumulative competencies","Review literacy level and interventions"].map((t,i)=><div key={t} className="workflow-row"><span>{i+1}</span>{t}<CircleCheck size={16}/></div>)}</div></Box><Box title="Product readiness"><div className="readiness"><p><CircleCheck size={17}/> Unified authentication and role-aware interface</p><p><CircleCheck size={17}/> Cumulative student assessment and reports</p><p><AlertCircle size={17}/> Legacy evidence migration requires secure ID mapping</p><p><AlertCircle size={17}/> Production security review and end-to-end testing pending</p></div></Box></div></>}
  {page==="schools"&&identity.admin&&<div className="two-col"><Box title="Registered schools">{identity.schools.length?<div className="rows">{identity.schools.map(s=><div className="record" key={s.id}><School size={17}/><strong>{s.name}</strong></div>)}</div>:<Empty title="No schools yet" detail="Create your first school to begin."/>}</Box><Box title="Register a school"><form onSubmit={addSchool} className="stack"><label>School name<input required maxLength={180} value={newSchool} onChange={e=>setNewSchool(e.target.value)} placeholder="Full registered school name"/></label><Btn kind="primary" type="submit" disabled={busy}><Plus size={16}/> Create school</Btn></form></Box></div>}
  {page==="users"&&identity.admin&&<div className="two-col"><Box title="Create school user"><form onSubmit={addUser} className="stack"><label>School<select required value={newUser.school} onChange={e=>setNewUser({...newUser,school:e.target.value})}><option value="">Choose school</option>{identity.schools.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label><label>Full name<input required minLength={2} value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})}/></label><label>Login email<input type="email" required value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})}/></label><label>Role<select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})}>{["owner","principal","coordinator","teacher"].map(r=><option key={r} value={r}>{r}</option>)}</select></label><div className="notice small">A strong temporary password is generated for new users. Show it once, deliver privately, and require an immediate change. Confirm email ownership separately.</div><Btn kind="primary" type="submit" disabled={busy}>Create / assign user</Btn></form></Box><Box title="Account provisioning">{temporary?<div className="credentials"><h3>{temporary.created?"New account created":"Existing account assigned"}</h3><p>Login: {temporary.email}</p>{temporary.temporaryPassword&&<><strong>One-time temporary password</strong><code>{temporary.temporaryPassword}</code><p>Copy and deliver securely. It will not be shown again.</p></>}</div>:<Empty title="Ready to onboard staff" detail="Assign each school owner, principal, coordinator or teacher to their school."/>}</Box></div>}
