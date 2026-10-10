@@ -23,6 +23,14 @@ st.set_page_config(
     page_icon="📝",
     layout="centered"
 )
+# Assessment navigation keeps the original implementation workflow untouched.
+from assessment_module import render_assessment_module
+assessment_view = st.sidebar.radio("Application", ["Existing portal", "Literacy assessments"], key="lit_navigation")
+if assessment_view == "Literacy assessments":
+    render_assessment_module()
+    st.stop()
+
+
 
 # ============================================================
 # CONSTANTS
