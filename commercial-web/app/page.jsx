@@ -5,14 +5,14 @@ import BulkWorkspace from "./BulkWorkspace";
 import CurriculumEditor from "./CurriculumEditor";
 import ConsultantWorkspace,{ConsultantManagement} from "./ConsultantWorkspace";
 import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNoAxesCombined,
- BookMarked,Eye,Menu,X,LogOut,Plus,Search,ChevronRight,RefreshCw,LockKeyhole,
+ BookMarked,Eye,Menu,X,LogOut,Plus,Trash2,Search,ChevronRight,RefreshCw,LockKeyhole,
  CircleCheck,ArrowRight,AlertCircle,GraduationCap,FileUp} from "lucide-react";
 
 const navigation=[
  {id:"overview",label:"Overview",icon:LayoutDashboard},
  {id:"schools",label:"Schools",icon:School,admin:true},
  {id:"users",label:"User management",icon:Users,manager:true},
- {id:"bulk",label:"Bulk upload & export",icon:FileUp,manager:true,school:true},
+ {id:"bulk",label:"Bulk upload",icon:FileUp,importer:true,school:true},
  {id:"consultants",label:"Consultant assignments",icon:Users,admin:true},
  {id:"consultant",label:"Consultant support",icon:GraduationCap,consultant:true,school:true},
  {id:"classes",label:"Classes & students",icon:BookMarked,school:true},
@@ -214,11 +214,30 @@ export default function Home(){
   const {error}=await client.from("literacy_classes").insert({...classForm,school_id:schoolId});
   setBusy(false);if(error)setMessage(error.message);else{setMessage("Class created.");await refresh();}
  }
+ async function manageStudent(action,values){
+  const response=await fetch("/api/students",{
+   method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},
+   body:JSON.stringify({action,schoolId,classId:classObj.id,...values})
+  });
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok)throw Error(result.error||"Student record could not be updated.");
+  return result;
+ }
  async function addStudent(e){
-  e.preventDefault();if(!classObj||!isManager)return;setBusy(true);
-  const {error}=await client.from("literacy_students").insert({class_id:classObj.id,student_name:studentName.trim(),
-   admission_number:"AS-"+crypto.randomUUID().slice(0,12).toUpperCase()});
-  setBusy(false);if(error)setMessage(error.message);else{setStudentName("");setMessage("Student registered with an independent ID.");await refresh();}
+  e.preventDefault();if(!classObj)return;
+  setBusy(true);setMessage("");
+  try{
+   const result=await manageStudent("add",{studentName:studentName.trim()});
+   setStudentName("");await refresh();setMessage(result.message);
+  }catch(error){setMessage(error.message);}finally{setBusy(false);}
+ }
+ async function removeStudent(student){
+  if(!classObj||!window.confirm("Remove "+student.student_name+" from the active class roster? Assessment history will be retained."))return;
+  setBusy(true);setMessage("");
+  try{
+   const result=await manageStudent("remove",{studentId:student.id});
+   await refresh();setMessage(result.message);
+  }catch(error){setMessage(error.message);}finally{setBusy(false);}
  }
  async function assignTeacher(e){
   e.preventDefault(); if(!isManager||!classObj||!selectedTeacher)return;
@@ -287,6 +306,7 @@ export default function Home(){
  const availableNav=navigation.filter(n=>
   (!n.admin||identity.admin||consultantAssigned)&&
   (!n.manager||(isManager&&!!schoolId))&&
+  (!n.importer||(!!schoolId&&(isManager||role==="teacher")))&&
   (!n.consultant||identity.admin||isManager)&&
   (!n.school||!!schoolId)
  );
@@ -325,19 +345,21 @@ export default function Home(){
    :<p className="helper">Consultants may manage stakeholders in their assigned schools. Only the Super Admin may create new schools.</p>}
  </Box>
 </div>}
- {page==="bulk"&&schoolId&&isManager&&<BulkWorkspace
+ {page==="bulk"&&schoolId&&(isManager||role==="teacher")&&<BulkWorkspace
   session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"}
-  isAdmin={canManageAllRoles} onImported={refresh}/>}
+  isAdmin={identity.admin} canUploadStaff={isManager}
+  canManageRoles={canManageAllRoles} onImported={refresh}/>}
 
  {page==="consultants"&&(identity.admin||consultantAssigned)&&<ConsultantManagement session={session} schools={identity.schools.filter(x=>identity.admin||identity.consultantSchools.includes(x.id))}/>} 
  {page==="consultant"&&schoolId&&(identity.admin||isManager||identity.isConsultant)&&
   <ConsultantWorkspace session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"}
    isConsultant={!identity.admin&&consultantAssigned}/>}
 
- {page==="classes"&&schoolId&&<><div className="two-col"><Box title="Your classes"><div className="rows">{visibleClasses.length?visibleClasses.map(c=><button key={c.id} className={"record row-button "+(classObj?.id===c.id?"selected":"")} onClick={()=>setActiveClass(c.id)}><BookMarked size={17}/><strong>{c.grade} · {c.section}</strong><small>{c.academic_year}</small></button>):<Empty title="No classes yet" detail="A school leader can create a class."/>}</div></Box><Box title="Register class">{isManager?<form className="stack" onSubmit={addClass}><label>Grade<select value={classForm.grade} onChange={e=>setClassForm({...classForm,grade:e.target.value})}>{LEVELS.map(g=><option key={g}>{g}</option>)}</select></label><label>Section<input value={classForm.section} required onChange={e=>setClassForm({...classForm,section:e.target.value})}/></label><label>Academic year<input value={classForm.academic_year} required onChange={e=>setClassForm({...classForm,academic_year:e.target.value})}/></label><Btn type="submit" kind="primary" disabled={busy}>Create class</Btn></form>:<Empty title="Read-only access" detail="Class creation is reserved for school leadership."/>}</Box></div>{isManager&&classObj&&<Box title="Assign teacher to class"><form onSubmit={assignTeacher} className="inline-form"><select value={selectedTeacher} onChange={e=>setSelectedTeacher(e.target.value)} required><option value="">Select a teacher</option>{members.filter(m=>m.role==="teacher").map(m=><option key={m.user_id} value={m.user_id}>{m.display_name||m.user_id}</option>)}</select><Btn type="submit" kind="primary" disabled={busy||!selectedTeacher}>Assign teacher</Btn></form><p className="helper">Only assigned teachers can submit student assessments for this class.</p></Box>}{classObj&&<Box title={"Students · "+classObj.grade+" "+classObj.section}><div className="students-head">{isManager&&<><form onSubmit={addStudent} className="inline-form"><input placeholder="Student full name" required value={studentName} onChange={e=>setStudentName(e.target.value)}/><Btn kind="primary" type="submit" disabled={busy}><Plus size={15}/> Add student</Btn></form><label className="upload-label">Import student CSV <input type="file" accept=".csv,text/csv" onChange={uploadRoster} disabled={busy}/></label></>}</div><div className="table-wrap"><table><thead><tr><th>Student</th><th>Assessment ID</th></tr></thead><tbody>{students.filter(s=>s.class_id===classObj.id&&s.active!==false).map(s=><tr key={s.id}><td>{s.student_name}</td><td className="mono">{s.admission_number}</td></tr>)}</tbody></table></div></Box>}</>}
+ {page==="classes"&&schoolId&&<><div className="two-col"><Box title="Your classes"><div className="rows">{visibleClasses.length?visibleClasses.map(c=><button key={c.id} className={"record row-button "+(classObj?.id===c.id?"selected":"")} onClick={()=>setActiveClass(c.id)}><BookMarked size={17}/><strong>{c.grade} · {c.section}</strong><small>{c.academic_year}</small></button>):<Empty title="No classes yet" detail="A school leader can create a class."/>}</div></Box><Box title="Register class">{isManager?<form className="stack" onSubmit={addClass}><label>Grade<select value={classForm.grade} onChange={e=>setClassForm({...classForm,grade:e.target.value})}>{LEVELS.map(g=><option key={g}>{g}</option>)}</select></label><label>Section<input value={classForm.section} required onChange={e=>setClassForm({...classForm,section:e.target.value})}/></label><label>Academic year<input value={classForm.academic_year} required onChange={e=>setClassForm({...classForm,academic_year:e.target.value})}/></label><Btn type="submit" kind="primary" disabled={busy}>Create class</Btn></form>:<Empty title="Read-only access" detail="Class creation is reserved for school leadership."/>}</Box></div>{isManager&&classObj&&<Box title="Assign teacher to class"><form onSubmit={assignTeacher} className="inline-form"><select value={selectedTeacher} onChange={e=>setSelectedTeacher(e.target.value)} required><option value="">Select a teacher</option>{members.filter(m=>m.role==="teacher").map(m=><option key={m.user_id} value={m.user_id}>{m.display_name||m.user_id}</option>)}</select><Btn type="submit" kind="primary" disabled={busy||!selectedTeacher}>Assign teacher</Btn></form><p className="helper">Only assigned teachers can submit student assessments for this class.</p></Box>}{classObj&&<Box title={"Students · "+classObj.grade+" "+classObj.section}><div className="students-head">{(isManager||role==="teacher")&&<><form onSubmit={addStudent} className="inline-form"><input placeholder="Student full name" required value={studentName} onChange={e=>setStudentName(e.target.value)}/><Btn kind="primary" type="submit" disabled={busy}><Plus size={15}/> Add student</Btn></form>{isManager&&<label className="upload-label">Import student CSV <input type="file" accept=".csv,text/csv" onChange={uploadRoster} disabled={busy}/></label>}</>}</div><div className="table-wrap"><table><thead><tr><th>Student</th><th>Assessment ID</th><th>Actions</th></tr></thead><tbody>{students.filter(s=>s.class_id===classObj.id&&s.active!==false).map(s=><tr key={s.id}><td>{s.student_name}</td><td className="mono">{s.admission_number}</td>
+<td><button type="button" className="btn outline" disabled={busy} onClick={()=>removeStudent(s)} aria-label={"Remove "+s.student_name+" from class"}><Trash2 size={14}/> Remove</button></td></tr>)}</tbody></table></div></Box>}</>}
  {page==="assess"&&schoolId&&<Box title="Cumulative competency assessment">{!visibleClasses.length?<Empty title="No classes assigned" detail="Create classes or assign a teacher to begin."/>:<form onSubmit={submitAssessment} className="stack"><div className="three-col"><label>Class<select value={classObj?.id||""} onChange={e=>setActiveClass(e.target.value)}>{visibleClasses.map(c=><option value={c.id} key={c.id}>{c.grade} · {c.section}</option>)}</select></label><label>Assessment type<select value={assessmentSubject} onChange={e=>setAssessmentSubject(e.target.value)}><option value="student">Student</option>{isManager&&<option value="teacher">Teacher</option>}</select></label><label>{assessmentSubject==="student"?"Student":"Teacher"}<select required value={assessmentTarget} onChange={e=>setAssessmentTarget(e.target.value)}><option value="">Select person</option>{targets.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label></div><div className="skills-head"><h3>Competencies from Nursery to {grade}</h3><span>{criterionList.length} published skills</span></div>{criterionList.length?criterionList.map((c,i)=><div className="skill" key={c.id}><div><small>{c.grade} · {c.code}</small><strong>{c.title}</strong><p>{c.description}</p></div><select aria-label={"Rating for "+c.title} value={ratingForm[c.id]||"Not Assessed"} onChange={e=>setRatingForm({...ratingForm,[c.id]:e.target.value})}>{RATINGS.map(r=><option key={r}>{r}</option>)}</select></div>):<Empty title="No published competencies" detail="Publish competency records before assessing learners."/>}<label>Observations and recommended intervention<textarea value={ratingNotes} onChange={e=>setRatingNotes(e.target.value)} rows={3}/></label><Btn kind="primary" type="submit" disabled={busy||!assessmentTarget||!criterionList.length}>Save assessment <ArrowRight size={16}/></Btn></form>}</Box>}
- {page==="competencies"&&schoolId&&canManageAllRoles&&<CurriculumEditor competencies={competencies} session={session} onSaved={refresh}/>}
- {page==="competencies"&&schoolId&&<Box title="Published literacy progression"><div className="level-grid">{LEVELS.map(l=><div key={l} className="level"><strong>{l}</strong><span>{competencies.filter(c=>c.active&&c.grade===l).length} competencies</span></div>)}</div><div className="rows">{competencies.filter(c=>c.active).sort((a,b)=>formatGrade(a.grade)-formatGrade(b.grade)||a.sequence-b.sequence).map(c=><div key={c.id} className="record"><BookOpen size={16}/><strong>{c.title}</strong><small>{c.grade}</small></div>)}</div><div className="helper">Shared curriculum edits by Super Admins and Consultants affect every school; all changes are versioned and audited.</div></Box>}
+ {page==="competencies"&&schoolId&&identity.admin&&<CurriculumEditor competencies={competencies} session={session} onSaved={refresh}/>}
+ {page==="competencies"&&schoolId&&<Box title="Published literacy progression"><div className="level-grid">{LEVELS.map(l=><div key={l} className="level"><strong>{l}</strong><span>{competencies.filter(c=>c.active&&c.grade===l).length} competencies</span></div>)}</div><div className="rows">{competencies.filter(c=>c.active).sort((a,b)=>formatGrade(a.grade)-formatGrade(b.grade)||a.sequence-b.sequence).map(c=><div key={c.id} className="record"><BookOpen size={16}/><strong>{c.title}</strong><small>{c.grade}</small></div>)}</div><div className="helper">Only the Platform Super Admin can create, edit or publish competencies. Consultants and school stakeholders can view published learning progressions.</div></Box>}
  {page==="reports"&&schoolId&&<Box title="Individual literacy progression"><label>Student<select value={reportStudent} onChange={e=>loadReport(e.target.value)}><option value="">Select student</option>{students.filter(s=>visibleClasses.some(c=>c.id===s.class_id)).map(s=><option key={s.id} value={s.id}>{s.student_name}</option>)}</select></label>{reportData&&<><div className="stats report-stats"><div className="stat"><span>Enrolled grade</span><strong>{reportData.cls?.grade}</strong></div><div className="stat"><span>Demonstrated level</span><strong>{reportData.progress.highest||"Not established"}</strong></div></div><div className="rows">{reportData.progress.byLevel.map(l=><div key={l.level} className="progress-row"><strong>{l.level}</strong><div className="progress-bar"><span style={{width:l.independence+"%"}}/></div><small>{l.assessed}/{l.count} assessed · {l.independence}% independent</small></div>)}</div><p className="helper">Provisional threshold: 80% assessed and 80% independent at each consecutive level. This is a screening indicator, not a diagnosis.</p></>}</Box>}
  {["implementation","observations"].includes(page)&&<Box title={page==="implementation"?"Teacher implementation evidence":"Classroom observations"}><Empty title="Historical integration is being prepared" detail="The existing Streamlit workflow remains operational. This commercial workspace will connect only after school IDs, access policies and secure evidence storage are migrated and tested."/></Box>}
  {!schoolId&&!identity.admin&&<Empty title="No school membership found" detail="Ask your Platform Super Admin to assign your account to a school."/>}
