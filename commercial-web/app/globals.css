@@ -47,3 +47,76 @@
 .consultant-activity p{font-size:12px;color:#465b68;white-space:pre-wrap;line-height:1.5;margin:9px 0 0}
 .consultant-activity p b{color:var(--teal)}
 @media(max-width:760px){.consultant-activity-top{flex-direction:column;align-items:flex-start}.curriculum-status input{margin:0}}
+
+
+/* Literacy Assessor: evaluation, evidence and longitudinal student history */
+.assessor-stack{display:flex;flex-direction:column;gap:19px}
+.assessor-panel{margin-bottom:0}
+.assessor-panel .panel-head h2{display:flex;align-items:center;gap:8px}
+.assessor-stack .panel .helper{line-height:1.6}
+.assessor-stack .three-col{margin:15px 0 4px}
+.assessor-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:12px 0 14px}
+.assessor-kpis>div{padding:15px;border-radius:11px;background:#f3f8f7;border:1px solid #e2efeb;min-height:95px;display:flex;flex-direction:column;justify-content:center;gap:10px}
+.assessor-kpis small{font-size:11px;color:#577274;line-height:1.4}
+.assessor-kpis strong{font-size:21px;font-weight:750;color:#154d50;line-height:1.2}
+.assessor-mini-progress{display:flex;flex-direction:column;gap:9px;margin:12px 0 2px}
+.assessor-progress-row{display:grid;grid-template-columns:90px minmax(0,1fr) 100px;gap:12px;align-items:center;font-size:11px}
+.assessor-progress-row small{color:#6b7886;text-align:right}
+.assessor-progress-row .progress-bar{height:7px}
+.assessor-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 10px}
+.assessor-search{display:flex;flex-direction:row;align-items:center;gap:8px;min-width:220px;flex:1;background:#fff;border:1px solid var(--border);padding:0 13px;border-radius:9px;color:#65748a}
+.assessor-search:focus-within{border-color:#1b9b91}
+.assessor-search input{border:0;box-shadow:none;min-width:0;background:transparent}
+.assessor-search input:focus{box-shadow:none}
+.assessor-form{margin-top:14px;display:flex;flex-direction:column;gap:17px}
+.assessor-bucket{border:1px solid var(--border);border-radius:13px;overflow:hidden;background:#fff}
+.assessor-bucket-heading{background:#f2f7f8;color:#244d54;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:13px 16px;font-size:12px;font-weight:800}
+.assessor-bucket-heading small{font-size:11px;font-weight:500;color:#6b7d87}
+.assessor-skill{padding:17px 16px 15px;border-top:1px solid #e9edf0}
+.assessor-skill-heading{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}
+.assessor-skill-heading>div{min-width:0;flex:1}
+.assessor-skill-heading small{display:block;color:#748292;font-size:10px;margin-bottom:5px;letter-spacing:.3px}
+.assessor-skill-heading strong{display:block;font-size:13px;color:#19314a;line-height:1.45}
+.assessor-skill-heading p{color:#677586;font-size:12px;line-height:1.55;margin:6px 0 0}
+.assessor-prior{background:#eef6fa;color:#45667a;border-radius:7px;padding:7px 9px;font-size:11px;white-space:normal;max-width:205px}
+.assessor-rate-group{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 3px}
+.assessor-rate{border:1px solid #dce5e8;background:#fff;color:#566676;border-radius:8px;padding:9px 12px;font-size:11px;font-weight:700}
+.assessor-rate:hover:not(:disabled){background:#f3f8f8}
+.assessor-rate.assessor-selected{color:#fff;background:#167b75;border-color:#167b75}
+.assessor-rate:first-child.assessor-selected{background:#526879;border-color:#526879}
+.assessor-evidence{margin-top:12px;max-width:680px}
+.assessor-evidence input{font-size:12px}
+.assessor-notes{margin:4px 0}
+.assessor-save-row{border-top:1px solid var(--border);padding:16px 0 0;display:flex;align-items:center;justify-content:space-between;gap:15px}
+.assessor-save-row p{margin:0;color:#5c6878;font-size:12px}
+.assessor-save-row p strong{font-size:14px;color:#1c3b4c}
+.assessor-save-row p small{display:block;margin-top:6px;color:#78899a}
+.assessor-history{border:1px solid var(--border);border-radius:11px;overflow:hidden;margin:10px 0}
+.assessor-session:not(:first-child){border-top:1px solid var(--border)}
+.assessor-session-head{width:100%;border:0;background:#fff;text-align:left;padding:15px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.assessor-session-head:hover{background:#f6faf8}
+.assessor-session-head>span{display:flex;gap:11px;align-items:center;flex-wrap:wrap;font-size:12px}
+.assessor-session-head>span strong{font-size:13px;color:#19314a}
+.assessor-session-head>span>span{background:#edf5f4;color:#166a66;padding:5px 9px;border-radius:12px;font-size:10px}
+.assessor-session-head small{font-size:11px;color:#738092}
+.assessor-session-body{padding:15px;background:#f8fbfa;border-top:1px solid var(--border);font-size:12px;color:#4a6170}
+.assessor-session-body p{white-space:pre-wrap;line-height:1.6;margin:0 0 9px}
+.assessor-history-ratings{display:flex;flex-direction:column;gap:7px}
+.assessor-history-ratings>div{display:flex;justify-content:space-between;gap:14px;padding:10px;background:#fff;border:1px solid #edf0f1;border-radius:8px}
+.assessor-history-ratings>div>span{min-width:0}
+.assessor-history-ratings strong{display:block;color:#263e4f;font-size:11px}
+.assessor-history-ratings small{color:#6a7b87;display:block;margin-top:4px;font-size:11px}
+.assessor-history-ratings em{font-style:normal;white-space:nowrap;font-size:11px;color:#167b75}
+.assessor-feedback{margin:0}
+@media(max-width:760px){
+ .assessor-kpis{grid-template-columns:1fr}
+ .assessor-kpis>div{min-height:65px;padding:12px}
+ .assessor-kpis strong{font-size:18px}
+ .assessor-progress-row{grid-template-columns:65px minmax(0,1fr) 80px;gap:7px}
+ .assessor-skill-heading{flex-direction:column;gap:10px}
+ .assessor-prior{max-width:100%}
+ .assessor-rate{flex:1;min-width:105px}
+ .assessor-save-row{align-items:stretch;flex-direction:column}
+ .assessor-save-row .btn{width:100%}
+ .assessor-session-head{flex-direction:column;align-items:flex-start}
+}
