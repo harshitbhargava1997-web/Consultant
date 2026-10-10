@@ -8,7 +8,7 @@ import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNo
 const navigation=[
  {id:"overview",label:"Overview",icon:LayoutDashboard},
  {id:"schools",label:"Schools",icon:School,admin:true},
- {id:"users",label:"User management",icon:Users,admin:true},
+ {id:"users",label:"User management",icon:Users,manager:true},
  {id:"classes",label:"Classes & students",icon:BookMarked,school:true},
  {id:"assess",label:"Assessments",icon:ClipboardCheck,school:true},
  {id:"competencies",label:"Competency library",icon:BookOpen,school:true},
@@ -183,14 +183,18 @@ export default function Home(){
    !/[0-9]/.test(newUser.initialPassword)||!(/[^A-Za-z0-9]/.test(newUser.initialPassword)))){
    setMessage("Use 12–128 characters with uppercase, lowercase, a number and a symbol.");return;
   }
+  const onboardingSchool=identity.admin?newUser.school:schoolId;
+  const onboardingRole=identity.admin?newUser.role:"teacher";
+  if(!onboardingSchool){setMessage("Select a school before adding a teacher.");return;}
   setBusy(true);setMessage("");setTemporary(null);
   try{
    const data=await callAdmin("createUser",{
-    fullName:newUser.name,email:newUser.email,role:newUser.role,schoolId:newUser.school,
+    fullName:newUser.name,email:newUser.email,role:onboardingRole,schoolId:onboardingSchool,
     initialPassword:newUser.initialPassword
    });
    setTemporary(data);setMessage(data.message);
    setNewUser(current=>({...current,name:"",email:"",initialPassword:"",confirmPassword:""}));
+   if(onboardingSchool===schoolId)await refresh();
   }catch(err){setMessage(err.message);}
   finally{setBusy(false);}
  }
@@ -269,7 +273,7 @@ export default function Home(){
  if(!session)return <main className="auth-outer"><div className="auth-brand"><span className="brand-mark"><GraduationCap size={24}/></span><span>VISION <small>School Platform</small></span></div><div className="auth-card"><div className="eyebrow">SECURE SCHOOL WORKSPACE</div><h1>{signMode==="forgot"?"Reset your password":"Welcome back"}</h1><p>One account for every role, school and learning workflow.</p><Notice message={message}/><form onSubmit={handleLogin}><label>Email address<input type="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@school.edu"/></label>{signMode==="signin"&&<label>Password<input type="password" required value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter password"/></label>}<Btn type="submit" kind="primary wide" disabled={busy}>{busy?"Please wait…":signMode==="forgot"?"Email reset link":"Sign in"} <ArrowRight size={16}/></Btn></form><button className="link-button" onClick={()=>{setSignMode(signMode==="forgot"?"signin":"forgot");setMessage("");}}>{signMode==="forgot"?"Back to sign in":"Forgot password?"}</button></div><div className="auth-note">Built for school leaders, teachers and academic assessors</div></main>;
  if(session.user?.app_metadata?.must_change_password)return <main className="auth-outer"><div className="auth-card"><span className="eyebrow">ACCOUNT SECURITY</span><h1>Set your personal password</h1><p>Replace the temporary password before continuing.</p><Notice message={message}/><form onSubmit={changeInitialPassword}><label>New password<input type="password" minLength={12} value={newPassword} onChange={e=>setNewPassword(e.target.value)} required/></label><Btn type="submit" kind="primary wide" disabled={busy}>Update password</Btn></form><button className="link-button" onClick={logout}>Sign out</button></div></main>;
 
- const availableNav=navigation.filter(n=>(!n.admin||identity.admin)&&(!n.school||!!schoolId));
+ const availableNav=navigation.filter(n=>(!n.admin||identity.admin)&&(!n.manager||(identity.admin||(isManager&&!!schoolId)))&&(!n.school||!!schoolId));
  return <div className={"layout"+(desktopNavCollapsed?" sidebar-collapsed":"")}>
   {mobileNavOpen&&<button type="button" className="nav-backdrop" aria-label="Close navigation" onClick={()=>setMobileNavOpen(false)}/>}
   <aside id="vision-sidebar" className={"sidebar"+(mobileNavOpen?" mobile-open":"")}>
@@ -277,23 +281,32 @@ export default function Home(){
  <main className="main"><header className="topbar"><div className="topbar-title"><button type="button" className="mobile-menu" aria-label={(isMobile?mobileNavOpen:!desktopNavCollapsed)?"Close navigation menu":"Open navigation menu"} aria-controls="vision-sidebar" aria-expanded={isMobile?mobileNavOpen:!desktopNavCollapsed} onClick={toggleNavigation}>{isMobile?mobileNavOpen?<X size={21}/>:<Menu size={21}/>:desktopNavCollapsed?<Menu size={21}/>:<X size={21}/>}</button><span>VISION / <b>{navigation.find(n=>n.id===page)?.label||"Overview"}</b></span></div><div className="topbar-right"><select aria-label="Active school" value={schoolId} onChange={e=>{setSchoolId(e.target.value);setPage("overview");}}><option value="">Select a school</option>{identity.schools.filter(s=>identity.admin||identity.memberships.some(m=>m.school_id===s.id)).map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select><span className="avatar">{(session.user.email||"U").slice(0,1).toUpperCase()}</span></div></header><div className="content"><div className="page-heading"><div><span className="eyebrow">{school?.name||"PLATFORM WORKSPACE"}</span><h1>{navigation.find(n=>n.id===page)?.label||"Overview"}</h1><p>{page==="overview"?"An integrated view of school operations and foundational learning.":"Secure workspace · "+(identity.admin?"Super Admin":role||"Assigned member")}</p></div>{schoolId&&<Btn kind="outline" disabled={busy} onClick={refresh}><RefreshCw size={15}/> Refresh</Btn>}</div><Notice message={message}/>
  {page==="overview"&&<><div className="stats"><div className="stat"><span>Schools assigned</span><strong>{identity.memberships.length}</strong><small>Active memberships</small></div><div className="stat"><span>Classes</span><strong>{visibleClasses.length}</strong><small>Accessible classes</small></div><div className="stat"><span>Students</span><strong>{students.filter(s=>visibleClasses.some(c=>c.id===s.class_id)).length}</strong><small>Registered learners</small></div><div className="stat"><span>Assessment sessions</span><strong>{assessments.filter(a=>visibleClasses.some(c=>c.id===a.class_id)).length}</strong><small>Last 500 loaded</small></div></div><div className="two-col"><Box title="Your learning workflow"><div className="workflow">{["Set up school and staff","Create classes and student rosters","Assess cumulative competencies","Review literacy level and interventions"].map((t,i)=><div key={t} className="workflow-row"><span>{i+1}</span>{t}<CircleCheck size={16}/></div>)}</div></Box><Box title="Product readiness"><div className="readiness"><p><CircleCheck size={17}/> Unified authentication and role-aware interface</p><p><CircleCheck size={17}/> Cumulative student assessment and reports</p><p><AlertCircle size={17}/> Legacy evidence migration requires secure ID mapping</p><p><AlertCircle size={17}/> Production security review and end-to-end testing pending</p></div></Box></div></>}
  {page==="schools"&&identity.admin&&<div className="two-col"><Box title="Registered schools">{identity.schools.length?<div className="rows">{identity.schools.map(s=><div className="record" key={s.id}><School size={17}/><strong>{s.name}</strong></div>)}</div>:<Empty title="No schools yet" detail="Create your first school to begin."/>}</Box><Box title="Register a school"><form onSubmit={addSchool} className="stack"><label>School name<input required maxLength={180} value={newSchool} onChange={e=>setNewSchool(e.target.value)} placeholder="Full registered school name"/></label><Btn kind="primary" type="submit" disabled={busy}><Plus size={16}/> Create school</Btn></form></Box></div>}
- {page==="users"&&identity.admin&&<div className="two-col">
- <Box title="Create or assign school user">
+ {page==="users"&&(identity.admin||(isManager&&schoolId))&&<div className="two-col">
+ <Box title={identity.admin?"Create or assign school user":"Add teacher to your school"}>
   <form onSubmit={addUser} className="stack">
-   <label>School<select required value={newUser.school} onChange={e=>setNewUser({...newUser,school:e.target.value})}><option value="">Choose school</option>{identity.schools.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-   <label>Full name<input required minLength={2} value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})}/></label>
+   {identity.admin
+    ?<label>School<select required value={newUser.school} onChange={e=>setNewUser({...newUser,school:e.target.value})}><option value="">Choose school</option>{identity.schools.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+    :<label>Assigned school<input value={school?.name||""} readOnly aria-label="Your assigned school"/></label>}
+   <label>Full name<input required minLength={2} maxLength={160} value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})}/></label>
    <label>Login email<input type="email" required value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})}/></label>
-   <label>Role<select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})}>{["owner","principal","coordinator","teacher"].map(r=><option key={r} value={r}>{r}</option>)}</select></label>
+   {identity.admin
+    ?<label>Role<select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})}>{["owner","principal","coordinator","teacher"].map(r=><option key={r} value={r}>{r}</option>)}</select></label>
+    :<label>Role<input value="Teacher" readOnly aria-label="Teacher role"/></label>}
    <label>Initial password (set manually)<input type="password" minLength={12} maxLength={128} autoComplete="new-password" placeholder="Choose a strong initial password" value={newUser.initialPassword} onChange={e=>setNewUser({...newUser,initialPassword:e.target.value})}/></label>
    <label>Confirm initial password<input type="password" minLength={12} maxLength={128} autoComplete="new-password" placeholder="Enter the same password" value={newUser.confirmPassword} onChange={e=>setNewUser({...newUser,confirmPassword:e.target.value})}/></label>
-   <p className="helper">For new school owners, principals, coordinators and teachers, enter 12–128 characters including uppercase, lowercase, a number and a symbol. For an existing user, leave both password fields blank to assign another school without changing their login.</p>
-   <div className="notice small">Give the initial password privately to the intended account holder. Stakeholders can later change it using “Forgot password” on the sign-in page. Confirm that the email belongs to the intended user before providing access.</div>
-   <Btn kind="primary" type="submit" disabled={busy}>{busy?"Please wait…":"Create / assign user"}</Btn>
+   <p className="helper">For a new account, enter 12–128 characters including uppercase, lowercase, a number and a symbol. Leave both password fields blank when assigning an existing account; its password will not change.</p>
+   <div className="notice small">Share the initial password privately and confirm the account holder's email address. Teachers can use “Forgot password” to change it. Only the Platform Super Admin can create school owners, principals or coordinators.</div>
+   <Btn kind="primary" type="submit" disabled={busy}>{busy?"Please wait…":identity.admin?"Create / assign user":"Add teacher"}</Btn>
   </form>
  </Box>
- <Box title="Account provisioning">
-  {temporary?<div className="credentials"><h3>{temporary.created?"New account created":"Existing account assigned"}</h3><p>Login: {temporary.email}</p><p>{temporary.created?"The initial password you entered has been set. It is not shown or stored in this form after creation.":"The user's existing password was left unchanged."}</p></div>
-   :<Empty title="Ready to onboard staff" detail="Set a password manually for each new owner, principal, coordinator or teacher, then share it securely."/>}
+ <Box title="School teachers and account provisioning">
+  {!identity.admin&&<div className="rows">
+   {members.filter(m=>m.role==="teacher").length
+     ?members.filter(m=>m.role==="teacher").map(m=><div className="record" key={m.user_id}><Users size={17}/><strong>{m.display_name||"Teacher"}</strong></div>)
+     :<Empty title="No teachers assigned yet" detail="Add a teacher to register them with this school."/>}
+  </div>}
+  {temporary?<div className="credentials"><h3>{temporary.created?"New account created":"Existing account assigned"}</h3><p>Login: {temporary.email}</p><p>{temporary.created?"The initial password you entered has been set and cleared from the form.":"The user's existing password was left unchanged."}</p></div>
+   :<p className="helper">School leaders can register teachers for their own school. The Super Admin controls all other account roles.</p>}
  </Box>
 </div>}
  {page==="classes"&&schoolId&&<><div className="two-col"><Box title="Your classes"><div className="rows">{visibleClasses.length?visibleClasses.map(c=><button key={c.id} className={"record row-button "+(classObj?.id===c.id?"selected":"")} onClick={()=>setActiveClass(c.id)}><BookMarked size={17}/><strong>{c.grade} · {c.section}</strong><small>{c.academic_year}</small></button>):<Empty title="No classes yet" detail="A school leader can create a class."/>}</div></Box><Box title="Register class">{isManager?<form className="stack" onSubmit={addClass}><label>Grade<select value={classForm.grade} onChange={e=>setClassForm({...classForm,grade:e.target.value})}>{LEVELS.map(g=><option key={g}>{g}</option>)}</select></label><label>Section<input value={classForm.section} required onChange={e=>setClassForm({...classForm,section:e.target.value})}/></label><label>Academic year<input value={classForm.academic_year} required onChange={e=>setClassForm({...classForm,academic_year:e.target.value})}/></label><Btn type="submit" kind="primary" disabled={busy}>Create class</Btn></form>:<Empty title="Read-only access" detail="Class creation is reserved for school leadership."/>}</Box></div>{isManager&&classObj&&<Box title="Assign teacher to class"><form onSubmit={assignTeacher} className="inline-form"><select value={selectedTeacher} onChange={e=>setSelectedTeacher(e.target.value)} required><option value="">Select a teacher</option>{members.filter(m=>m.role==="teacher").map(m=><option key={m.user_id} value={m.user_id}>{m.display_name||m.user_id}</option>)}</select><Btn type="submit" kind="primary" disabled={busy||!selectedTeacher}>Assign teacher</Btn></form><p className="helper">Only assigned teachers can submit student assessments for this class.</p></Box>}{classObj&&<Box title={"Students · "+classObj.grade+" "+classObj.section}><div className="students-head">{isManager&&<><form onSubmit={addStudent} className="inline-form"><input placeholder="Student full name" required value={studentName} onChange={e=>setStudentName(e.target.value)}/><Btn kind="primary" type="submit" disabled={busy}><Plus size={15}/> Add student</Btn></form><label className="upload-label">Import student CSV <input type="file" accept=".csv,text/csv" onChange={uploadRoster} disabled={busy}/></label></>}</div><div className="table-wrap"><table><thead><tr><th>Student</th><th>Assessment ID</th></tr></thead><tbody>{students.filter(s=>s.class_id===classObj.id&&s.active!==false).map(s=><tr key={s.id}><td>{s.student_name}</td><td className="mono">{s.admission_number}</td></tr>)}</tbody></table></div></Box>}</>}
