@@ -1,0 +1,30 @@
+code,grade,strand,title,description,sequence
+NUR001,Nursery,Phonemic awareness,Sound-action association,Demonstrates the associated action when hearing a taught sound,1
+NUR002,Nursery,Phonemic awareness,Sound production,Produces the taught sound with its action,2
+NUR003,Nursery,Print awareness,Sound-symbol recognition,Identifies the symbol associated with a taught sound,3
+LKG001,LKG,Blending,VC blending,Blends vowel-consonant patterns,1
+LKG002,LKG,Blending,CVC blending,Blends consonant-vowel-consonant patterns,2
+LKG003,LKG,Word recognition,Sight words,Recognizes taught sight words,3
+LKG004,LKG,Word recognition,Phonetic and tricky words,Reads taught phonetic and tricky words,4
+LKG005,LKG,Reading,Sentence reading,Reads developmentally appropriate sentences,5
+LKG006,LKG,Comprehension,Comprehension,Demonstrates understanding of taught text,6
+LKG007,LKG,Writing,Writing,Demonstrates age-appropriate writing,7
+UKG001,UKG,Phonics,Digraph recognition,Recognizes taught consonant and vowel digraphs,1
+UKG002,UKG,Blending,Digraph blending,Blends taught digraphs in words,2
+UKG003,UKG,Blending,CVC blending,Blends CVC words,3
+UKG004,UKG,Word recognition,Sight words,Reads taught sight words,4
+UKG005,UKG,Reading,Sentence reading,Reads taught sentences,5
+UKG006,UKG,Comprehension,Comprehension,Demonstrates understanding of taught text,6
+UKG007,UKG,Writing,Writing,Demonstrates age-appropriate writing,7
+UKG008,UKG,Phonics,Consonant blends,Recognizes and uses taught consonant blends,8
+G1_001,Grade 1,Phonics,Trigraphs,Recognizes taught trigraphs,1
+G1_002,Grade 1,Phonics,Diphthongs,Recognizes taught diphthongs,2
+G1_003,Grade 1,Vowels,Long and short vowels,Distinguishes taught long and short vowel sounds,3
+G1_004,Grade 1,Vowels,Magic e,Reads taught magic-e words,4
+G1_005,Grade 1,Phonics,R-controlled sounds,Recognizes taught R-controlled sounds,5
+G1_006,Grade 1,Phonics,Hard and soft C/G,Distinguishes hard and soft C/G,6
+G1_007,Grade 1,Decoding,Syllable understanding,Segments and combines syllables,7
+G1_008,Grade 1,Decoding,Basic decoding,Decodes taught word patterns,8
+G2_001,Grade 2,Syllable types,Open syllables,Identifies and reads open syllables,1
+G2_002,Grade 2,Syllable types,Closed syllables,Identifies and reads closed syllables,2
+G2_003,Grade 2,Literacy,Decoding and encoding,Reads and spells taught word patterns,3
