@@ -72,7 +72,7 @@ function ProgressSummary({skills,previous,student}){
   </div>}
  </section>;
 }
-export default function AssessorWorkspace({client,schoolId,classes,students,competencies,onSaved}){
+export default function AssessorWorkspace({client,schoolId,classes,students,competencies,canCreate=true,canViewHistory=true,onSaved}){
  const [classId,setClassId]=useState(""),[studentId,setStudentId]=useState("");
  const [scope,setScope]=useState("cumulative"),[stage,setStage]=useState("baseline");
  const [assessmentDate,setAssessmentDate]=useState(localToday);
@@ -109,7 +109,7 @@ export default function AssessorWorkspace({client,schoolId,classes,students,comp
  useEffect(()=>{setRatings({});setEvidence({});setObservations("");setNextAction("");setMessage("");setError("");
   setExpanded("");},[studentId]);
  useEffect(()=>{
-  if(!client||!activeClass?.id||!studentId||!eligibleStudents.some(s=>s.id===studentId)){
+  if(!canViewHistory||!client||!activeClass?.id||!studentId||!eligibleStudents.some(s=>s.id===studentId)){
    setSessions([]);setResults([]);setLoadingHistory(false);return;
   }
   let alive=true;setLoadingHistory(true);setError("");
@@ -141,13 +141,14 @@ export default function AssessorWorkspace({client,schoolId,classes,students,comp
    finally{if(alive)setLoadingHistory(false);}
   })();
   return()=>{alive=false;};
- },[client,schoolId,activeClass?.id,studentId,historyVersion]);
+ },[canViewHistory,client,schoolId,activeClass?.id,studentId,historyVersion]);
  function rate(id,rating){
   setRatings(previous=>({...previous,[id]:rating}));
   if(rating==="Not Assessed")setEvidence(previous=>({...previous,[id]:""}));
  }
  async function saveAssessment(e){
   e.preventDefault();setMessage("");setError("");
+  if(!canCreate){setError("This role cannot submit assessments.");return;}
   if(!activeClass||!chosenStudent){setError("Select a class and student first.");return;}
   if(!selectedCount){setError("Rate at least one observed competency before saving.");return;}
   if(assessmentDate>localToday()){setError("The assessment date cannot be in the future.");return;}
@@ -194,8 +195,8 @@ export default function AssessorWorkspace({client,schoolId,classes,students,comp
    {classes.length>0&&!eligibleStudents.length&&<p className="helper">No active students in this class. Use Classes & students to register or bulk-upload a roster first.</p>}
   </section>
   {chosenStudent&&<>
-   <ProgressSummary skills={availableSkills} previous={previous} student={chosenGrade}/>
-   <section className="panel assessor-panel">
+   {canViewHistory&&<ProgressSummary skills={availableSkills} previous={previous} student={chosenGrade}/>}
+   {canCreate&&<section className="panel assessor-panel">
     <div className="panel-head"><h2><ClipboardCheck size={18}/> Assess observable learning</h2>
      <span className="eyebrow">{selectedCount} NEW RATINGS</span></div>
     <div className="three-col">
@@ -255,8 +256,8 @@ export default function AssessorWorkspace({client,schoolId,classes,students,comp
       </button>
      </div>
     </form>}
-   </section>
-   <section className="panel assessor-panel">
+   </section>}
+   {canViewHistory&&<section className="panel assessor-panel">
     <div className="panel-head"><h2><Clock3 size={18}/> Assessment history & follow-up</h2><span className="eyebrow">LATEST 12 SESSIONS</span></div>
     {loadingHistory?<p className="helper">Loading previous assessment evidence…</p>:
      sessions.length?<div className="assessor-history">
@@ -285,7 +286,7 @@ export default function AssessorWorkspace({client,schoolId,classes,students,comp
       })}
      </div>:<p className="helper">No recorded assessments for this student yet. Begin with a Baseline session to establish a starting point.</p>}
     {historyTruncated&&<p className="helper">Some older competency details exceed the recent-history limit. Use the student progress report for cumulative trends.</p>}
-   </section>
+   </section>}
   </>}
   {(error||message)&&<div className={"notice assessor-feedback"} role="status">{error||message}</div>}
  </div>;
