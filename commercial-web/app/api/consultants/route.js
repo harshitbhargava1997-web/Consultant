@@ -79,18 +79,35 @@ export async function GET(request){
     return send({error:"School access not permitted."},403);
    return send({overview:await schoolOverview(ctx,schoolId)});
   }
+  // A consultant's management directory contains only its assigned schools.
+  let consultantSchools=[];
+  if(!ctx.isAdmin&&ctx.profile){
+   const {data:own,error:ownError}=await ctx.admin.from("literacy_consultant_assignments")
+    .select("school_id").eq("consultant_user_id",ctx.user.id).limit(2000);
+   if(ownError)throw ownError;
+   consultantSchools=(own||[]).map(a=>a.school_id);
+  }
+  if(!ctx.isAdmin&&!ctx.profile)return send({isConsultant:false,consultantSchools:[]});
   let assignmentQuery=ctx.admin.from("literacy_consultant_assignments")
-   .select("consultant_user_id,school_id,assigned_at")
-   .order("assigned_at",{ascending:false}).limit(2000);
-  if(!ctx.isAdmin)assignmentQuery=assignmentQuery.eq("consultant_user_id",ctx.user.id);
-  const {data:assignments,error:assignError}=await assignmentQuery;
-  if(assignError)throw assignError;
-  if(!ctx.isAdmin)return send({isConsultant:!!ctx.profile,consultantSchools:assignments.map(a=>a.school_id)});
-  const {data:roster,error:rosterError}=await ctx.admin.from("literacy_consultants")
-   .select("user_id,display_name,created_at").order("created_at",{ascending:false}).limit(1000);
+    .select("consultant_user_id,school_id,assigned_at")
+    .order("assigned_at",{ascending:false}).limit(2000);
+  if(!ctx.isAdmin){
+   // A Consultant with no schools does not see or manage other consultants.
+   if(!consultantSchools.length)return send({isConsultant:true,consultantSchools:[],consultants:[],assignments:[]});
+   assignmentQuery=assignmentQuery.in("school_id",consultantSchools);
+  }
+  const {data:assignments,error:assignmentError}=await assignmentQuery;
+  if(assignmentError)throw assignmentError;
+  let rosterQuery=ctx.admin.from("literacy_consultants")
+    .select("user_id,display_name,created_at,created_by")
+    .order("created_at",{ascending:false}).limit(1000);
+  const {data:roster,error:rosterError}=await rosterQuery;
   if(rosterError)throw rosterError;
-  return send({isConsultant:!!ctx.profile,isAdmin:true,consultants:roster||[],assignments:assignments||[],
-   consultantSchools:[]});
+  const allowedIds=new Set((assignments||[]).map(a=>a.consultant_user_id));
+  const visibleRoster=ctx.isAdmin?roster:(roster||[]).filter(c=>allowedIds.has(c.user_id)||c.created_by===ctx.user.id||c.user_id===ctx.user.id);
+  return send({isConsultant:!!ctx.profile,isAdmin:ctx.isAdmin,
+    consultantSchools,consultants:visibleRoster.map(({created_by,...c})=>c),
+    assignments:assignments||[]});
  }catch(e){return send({error:e.message||"Unable to load consultant data."},500);}
 }
 export async function POST(request){
@@ -102,7 +119,19 @@ export async function POST(request){
   const body=JSON.parse(raw);
   const action=text(body.action);
   if(["createConsultant","assignConsultant","removeAssignment"].includes(action)){
-   if(!ctx.isAdmin)return send({error:"Platform Super Admin permission required."},403);
+   if(!ctx.isAdmin){
+    if(!ctx.profile)return send({error:"Consultant management requires a Super Admin or Consultant account."},403);
+    if(action==="createConsultant"){
+     const {data:own,error:ownErr}=await ctx.admin.from("literacy_consultant_assignments")
+      .select("school_id").eq("consultant_user_id",ctx.user.id).limit(1);
+     if(ownErr)throw ownErr;
+     if(!own?.length)return send({error:"A school assignment is required to register Consultants."},403);
+    }else{
+     const targetSchool=text(body.schoolId);
+     if(!uuid(targetSchool)||!await assigned(ctx,targetSchool))
+      return send({error:"You may manage Consultant assignments only in your assigned schools."},403);
+    }
+   }
    if(action==="createConsultant"){
     const email=text(body.email).toLowerCase(),name=text(body.displayName),
      password=typeof body.password==="string"?body.password:"";
