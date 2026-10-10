@@ -18,3 +18,20 @@
  .sidebar-close:hover,.sidebar-close:focus-visible{background:rgba(255,255,255,.12)}
  .brand{padding-left:6px;padding-right:2px;font-size:15px;gap:8px}
 }
+
+
+/* Excel bulk onboarding */
+.bulk-stack{display:flex;flex-direction:column;gap:18px}
+.bulk-stack .panel{margin-bottom:0}
+.bulk-stack .panel-head h2{display:flex;align-items:center;gap:8px}
+.bulk-intro{font-size:13px;color:var(--muted);line-height:1.65}
+.bulk-choice{display:flex;flex-wrap:wrap;gap:9px;margin:15px 0}
+.bulk-upload{background:#f7faf9;border:1px dashed #98c4bc;padding:18px;border-radius:12px;margin:19px 0}
+.bulk-upload label{font-size:12px;font-weight:700}
+.bulk-upload input{background:transparent;border:0;padding:10px 0 0;font-size:12px}
+.bulk-selected{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--teal);padding:10px 0 15px}
+.bulk-summary{border-top:1px solid var(--border);margin-top:25px;padding-top:18px;display:flex;flex-direction:column;gap:11px;color:#647487;font-size:12px}
+.bulk-summary strong{color:var(--ink);font-size:13px}
+.bulk-summary .btn{align-self:flex-start}
+.bulk-stack .btn{white-space:normal;text-align:center}
+@media(max-width:760px){.bulk-stack .panel{padding:18px}.bulk-choice .btn{flex:1}.bulk-stack .btn{min-height:42px}}
