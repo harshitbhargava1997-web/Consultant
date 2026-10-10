@@ -14,3 +14,6 @@ openpyxl==3.1.5
 psycopg2-binary==2.9.13
 pyarrow==25.0.1
 psycopg[binary]==3.3.6
+streamlit>=1.35,<2
+pandas>=2.0,<3
+supabase>=2.0,<3
