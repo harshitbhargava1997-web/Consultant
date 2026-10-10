@@ -100,11 +100,48 @@ export async function downloadTemplate(kind,admin){
  }
  return trigger(book,kind+"_upload_template.xlsx");
 }
+// Some valid Excel workbooks use x:-prefixed SpreadsheetML elements. ExcelJS 4.x
+// can fail with an internal "sheets" undefined error on that serialization.
+// Normalize XML element prefixes before a second parse, without changing cell data.
+async function normalizeSpreadsheetML(arrayBuffer){
+ const JSZip=(await import("jszip")).default;
+ const archive=await JSZip.loadAsync(arrayBuffer);
+ const spreadsheetML="http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+ let changed=0;
+ const paths=Object.keys(archive.files).filter(name=>name.startsWith("xl/")&&name.endsWith(".xml"));
+ if(paths.length>100)throw Error("Excel workbook has too many XML parts.");
+ for(const name of paths){
+  const entry=archive.files[name];
+  if(entry.dir)continue;
+  const source=await entry.async("string");
+  if(source.length>5_000_000)throw Error("Excel workbook XML part is too large.");
+  const prefix='xmlns:x="'+spreadsheetML+'"';
+  if(!source.includes(prefix))continue;
+  const fixed=source.replaceAll(prefix,'xmlns="'+spreadsheetML+'"')
+   .replace(/<(\\/?)x:/g,"<$1");
+  archive.file(name,fixed);
+  changed++;
+ }
+ if(!changed)return null;
+ return archive.generateAsync({type:"uint8array",compression:"DEFLATE"});
+}
 export async function readWorkbook(file,kind){
  if(!file?.name?.toLowerCase().endsWith(".xlsx"))throw Error("Upload an .xlsx Excel workbook.");
  if(file.size>2*1024*1024)throw Error("Excel file must be under 2 MB.");
- const ExcelJS=await excel();const book=new ExcelJS.Workbook();
- await book.xlsx.load(await file.arrayBuffer());
+ const ExcelJS=await excel();
+ let book=new ExcelJS.Workbook();
+ const bytes=await file.arrayBuffer();
+ try{
+  await book.xlsx.load(bytes);
+ }catch(originalError){
+  let normalized=null;
+  try{normalized=await normalizeSpreadsheetML(bytes);}
+  catch{throw new Error("This workbook could not be parsed. Please re-save it as an .xlsx file in Microsoft Excel or Google Sheets.");}
+  if(!normalized)throw new Error("This workbook could not be parsed. Please re-save it as an .xlsx file in Microsoft Excel or Google Sheets.");
+  book=new ExcelJS.Workbook();
+  try{await book.xlsx.load(normalized);}
+  catch{throw new Error("This workbook could not be parsed. Please re-save it as an .xlsx file in Microsoft Excel or Google Sheets.");}
+ }
  const headers=kind==="stakeholders"?STAKEHOLDER_FIELDS:STUDENT_FIELDS;
  const sheet=book.getWorksheet(kind==="stakeholders"?"Stakeholders":"Students");
  if(!sheet)throw Error("Spreadsheet worksheet missing. Please use the downloadable Vision template.");
