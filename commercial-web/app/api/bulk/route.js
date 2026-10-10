@@ -29,15 +29,19 @@ async function authorized(request,schoolId){
    .select("user_id").eq("user_id",user.id).maybeSingle();
  if(adminError)return {error:"Unable to verify platform permissions.",status:503};
  const isAdmin=!!administrator;
- const {data:membership,error:membershipError}=await admin.from("literacy_memberships")
-   .select("role").eq("school_id",schoolId).eq("user_id",user.id).maybeSingle();
- if(membershipError)return {error:"Unable to verify school permissions.",status:503};
- if(!isAdmin&&!MANAGERS.includes(membership?.role))
-  return {error:"School owner, principal or coordinator access is required.",status:403};
+ const [memberResult,consultantResult]=await Promise.all([
+   admin.from("literacy_memberships").select("role").eq("school_id",schoolId).eq("user_id",user.id).maybeSingle(),
+   admin.from("literacy_consultant_assignments").select("school_id")
+    .eq("school_id",schoolId).eq("consultant_user_id",user.id).maybeSingle()
+ ]);
+ if(memberResult.error||consultantResult.error)return {error:"Unable to verify school permissions.",status:503};
+ const isAssignedConsultant=!!consultantResult.data;
+ if(!isAdmin&&!isAssignedConsultant&&!MANAGERS.includes(memberResult.data?.role))
+  return {error:"School owner, principal, coordinator or assigned Consultant access is required.",status:403};
  const {data:school,error:schoolError}=await admin.from("literacy_schools")
    .select("id,name").eq("id",schoolId).maybeSingle();
  if(schoolError||!school)return {error:"Assigned school not found.",status:404};
- return {admin,user,isAdmin,school};
+ return {admin,user,isAdmin,isAssignedConsultant,school};
 }
 async function authUsers(admin){
  const byEmail=new Map(),byId=new Map();
@@ -83,13 +87,13 @@ async function importPeople(ctx,rows){
   if(name.length<2||name.length>160||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!ROLES.includes(role)){
    results.push(rowResult(row,"error","A valid full_name, email and role are required."));continue;
   }
-  if(!ctx.isAdmin&&role!=="teacher"){
+  if(!ctx.isAdmin&&!ctx.isAssignedConsultant&&role!=="teacher"){
    results.push(rowResult(row,"error","Only Platform Super Admins can add non-teacher roles."));continue;
   }
   if(seen.has(email)){results.push(rowResult(row,"error","Duplicate email in this upload batch."));continue;}
   seen.add(email);
   let user=directory.byEmail.get(email);
-  if(user&&!ctx.isAdmin&&assigned.has(user.id)&&assigned.get(user.id)!=="teacher"){
+  if(user&&!ctx.isAdmin&&!ctx.isAssignedConsultant&&assigned.has(user.id)&&assigned.get(user.id)!=="teacher"){
    results.push(rowResult(row,"error","This user already has a higher school role."));continue;
   }
   if(!user&&!strong(password)){
