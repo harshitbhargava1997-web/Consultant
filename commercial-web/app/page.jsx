@@ -2,6 +2,8 @@
 import {useEffect,useMemo,useState} from "react";
 import {browserClient,LEVELS,RATINGS,MANAGERS,skillProgress,parseCsv} from "../lib/supabase";
 import BulkWorkspace from "./BulkWorkspace";
+import CurriculumEditor from "./CurriculumEditor";
+import ConsultantWorkspace,{ConsultantManagement} from "./ConsultantWorkspace";
 import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNoAxesCombined,
  BookMarked,Eye,Menu,X,LogOut,Plus,Search,ChevronRight,RefreshCw,LockKeyhole,
  CircleCheck,ArrowRight,AlertCircle,GraduationCap,FileUp} from "lucide-react";
@@ -11,6 +13,8 @@ const navigation=[
  {id:"schools",label:"Schools",icon:School,admin:true},
  {id:"users",label:"User management",icon:Users,manager:true},
  {id:"bulk",label:"Bulk upload & export",icon:FileUp,manager:true,school:true},
+ {id:"consultants",label:"Consultant assignments",icon:Users,admin:true},
+ {id:"consultant",label:"Consultant support",icon:GraduationCap,consultant:true,school:true},
  {id:"classes",label:"Classes & students",icon:BookMarked,school:true},
  {id:"assess",label:"Assessments",icon:ClipboardCheck,school:true},
  {id:"competencies",label:"Competency library",icon:BookOpen,school:true},
@@ -27,7 +31,7 @@ function Box({title,action,children}){return <section className="panel"><div cla
 export default function Home(){
  const client=useMemo(()=>browserClient(),[]);
  const [session,setSession]=useState(null),[checked,setChecked]=useState(false);
- const [identity,setIdentity]=useState({admin:false,memberships:[],schools:[]});
+ const [identity,setIdentity]=useState({admin:false,isConsultant:false,consultantSchools:[],memberships:[],schools:[]});
  const [schoolId,setSchoolId]=useState(""),[page,setPage]=useState("overview");
  const [isMobile,setIsMobile]=useState(false);
  const [mobileNavOpen,setMobileNavOpen]=useState(false);
@@ -45,7 +49,7 @@ export default function Home(){
  const [newPassword,setNewPassword]=useState("");
  const school=identity.schools.find(s=>s.id===schoolId);
  const membership=identity.memberships.find(m=>m.school_id===schoolId);
- const role=identity.admin?"owner":(membership?.role||"");
+ const role=identity.admin?"owner":(membership?.role||(identity.isConsultant?"consultant":""));
  const isManager=identity.admin||MANAGERS.includes(role);
  const assignedIds=identity.assignedIds||[];
  const visibleClasses=role==="teacher"?classes.filter(c=>assignedIds.includes(c.id)):classes;
@@ -79,21 +83,24 @@ export default function Home(){
   return ()=>{mounted=false;subscription.unsubscribe();};
  },[client]);
  useEffect(()=>{
-  if(!session||!client){setIdentity({admin:false,memberships:[],schools:[]});return;}
+  if(!session||!client){setIdentity({admin:false,isConsultant:false,consultantSchools:[],memberships:[],schools:[]});return;}
   let alive=true;
   (async()=>{
    try{
-    const [{data:mem,error:memErr},{data:sch,error:schErr},adminRes]=await Promise.all([
+    const [{data:mem,error:memErr},{data:sch,error:schErr},adminRes,consultantRes]=await Promise.all([
      client.from("literacy_memberships").select("school_id,role,user_id,display_name").eq("user_id",session.user.id),
      client.from("literacy_schools").select("id,name").order("name"),
-     fetch("/api/admin",{headers:{Authorization:"Bearer "+session.access_token}}).then(r=>r.json()).catch(()=>({}))
+     fetch("/api/admin",{headers:{Authorization:"Bearer "+session.access_token}}).then(r=>r.json()).catch(()=>({})),
+     fetch("/api/consultants",{headers:{Authorization:"Bearer "+session.access_token}}).then(r=>r.json()).catch(()=>({}))
     ]);
     if(memErr)throw memErr;if(schErr)throw schErr;
     const memberships=mem||[];
     if(!alive)return;
-    setIdentity({admin:adminRes.isAdmin===true,memberships,schools:sch||[]});
-    const ids=memberships.map(x=>x.school_id);
-    setSchoolId(old=>(adminRes.isAdmin===true ? (sch||[]).some(s=>s.id===old) : ids.includes(old)) ? old : (adminRes.isAdmin===true ? (sch?.[0]?.id||"") : (ids[0]||"")));
+    const consultantSchools=Array.isArray(consultantRes.consultantSchools)?consultantRes.consultantSchools:[];
+    const permitted=adminRes.isAdmin===true?(sch||[]).map(s=>s.id):[...new Set([...memberships.map(x=>x.school_id),...consultantSchools])];
+    setIdentity({admin:adminRes.isAdmin===true,isConsultant:consultantRes.isConsultant===true,
+     consultantSchools,memberships,schools:sch||[]});
+    setSchoolId(old=>permitted.includes(old)?old:(permitted[0]||""));
    }catch(e){if(alive)setMessage("Unable to load school access: "+e.message);}
   })();
   return()=>{alive=false;};
@@ -105,7 +112,7 @@ export default function Home(){
    const [c,m,co,a,tc]=await Promise.all([
     client.from("literacy_classes").select("id,school_id,grade,section,academic_year").eq("school_id",schoolId).order("grade"),
     client.from("literacy_memberships").select("user_id,role,display_name").eq("school_id",schoolId),
-    client.from("literacy_competencies").select("id,grade,code,title,description,sequence,active").eq("active",true),
+    client.from("literacy_competencies").select("id,grade,code,strand,title,description,sequence,active,version"),
     client.from("literacy_assessments").select("id,school_id,class_id,subject_type,student_id,assessment_date,created_at").eq("school_id",schoolId).order("created_at",{ascending:false}).limit(500),
     client.from("literacy_teacher_classes").select("class_id,teacher_user_id").eq("teacher_user_id",session.user.id)
    ]);
@@ -133,7 +140,7 @@ export default function Home(){
    client.from("literacy_classes").select("id").eq("school_id",schoolId),
    client.from("literacy_assessments").select("id,school_id,class_id,subject_type,student_id,assessment_date,created_at").eq("school_id",schoolId).order("created_at",{ascending:false}).limit(500),
    client.from("literacy_memberships").select("user_id,role,display_name").eq("school_id",schoolId),
-   client.from("literacy_competencies").select("id,grade,code,title,description,sequence,active").eq("active",true)
+   client.from("literacy_competencies").select("id,grade,code,strand,title,description,sequence,active,version")
   ]);
   const cl=c.data||[];setClasses(cl);setAssessments(a.data||[]);setMembers(m.data||[]);setCompetencies(co.data||[]);
   if(cl.length){
@@ -275,12 +282,16 @@ export default function Home(){
  if(!session)return <main className="auth-outer"><div className="auth-brand"><span className="brand-mark"><GraduationCap size={24}/></span><span>VISION <small>School Platform</small></span></div><div className="auth-card"><div className="eyebrow">SECURE SCHOOL WORKSPACE</div><h1>{signMode==="forgot"?"Reset your password":"Welcome back"}</h1><p>One account for every role, school and learning workflow.</p><Notice message={message}/><form onSubmit={handleLogin}><label>Email address<input type="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@school.edu"/></label>{signMode==="signin"&&<label>Password<input type="password" required value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter password"/></label>}<Btn type="submit" kind="primary wide" disabled={busy}>{busy?"Please wait…":signMode==="forgot"?"Email reset link":"Sign in"} <ArrowRight size={16}/></Btn></form><button className="link-button" onClick={()=>{setSignMode(signMode==="forgot"?"signin":"forgot");setMessage("");}}>{signMode==="forgot"?"Back to sign in":"Forgot password?"}</button></div><div className="auth-note">Built for school leaders, teachers and academic assessors</div></main>;
  if(session.user?.app_metadata?.must_change_password)return <main className="auth-outer"><div className="auth-card"><span className="eyebrow">ACCOUNT SECURITY</span><h1>Set your personal password</h1><p>Replace the temporary password before continuing.</p><Notice message={message}/><form onSubmit={changeInitialPassword}><label>New password<input type="password" minLength={12} value={newPassword} onChange={e=>setNewPassword(e.target.value)} required/></label><Btn type="submit" kind="primary wide" disabled={busy}>Update password</Btn></form><button className="link-button" onClick={logout}>Sign out</button></div></main>;
 
- const availableNav=navigation.filter(n=>(!n.admin||identity.admin)&&(!n.manager||(identity.admin||(isManager&&!!schoolId)))&&(!n.school||!!schoolId));
+ const availableNav=navigation.filter(n=>
+  (!n.admin||identity.admin)&&(!n.manager||(identity.admin||(isManager&&!!schoolId)))&&
+  (!n.consultant||(identity.admin||isManager||identity.isConsultant))&&(!n.school||!!schoolId)&&
+  (!identity.isConsultant||identity.admin||isManager||["overview","consultant"].includes(n.id))
+ );
  return <div className={"layout"+(desktopNavCollapsed?" sidebar-collapsed":"")}>
   {mobileNavOpen&&<button type="button" className="nav-backdrop" aria-label="Close navigation" onClick={()=>setMobileNavOpen(false)}/>}
   <aside id="vision-sidebar" className={"sidebar"+(mobileNavOpen?" mobile-open":"")}>
    <div className="brand"><span className="brand-mark"><GraduationCap size={23}/></span><span>VISION <small>School Platform</small></span><button type="button" className="sidebar-close" aria-label="Close menu" onClick={()=>setMobileNavOpen(false)}><X size={20}/></button></div><div className="side-caption">WORKSPACE</div><nav>{availableNav.map(item=>{const Icon=item.icon;return <button key={item.id} onClick={()=>{setPage(item.id);setMessage("");setMobileNavOpen(false);}} className={"nav-item "+(page===item.id?"active":"")}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={15}/>}</button>;})}</nav><div className="sidebar-bottom"><div className="profile-dot">{(session.user.email||"U").slice(0,1).toUpperCase()}</div><div className="profile-name"><strong>{session.user.email?.split("@")[0]}</strong><small>{identity.admin?"Platform Admin":role||"Member"}</small></div><button className="icon-btn" aria-label="Sign out" title="Sign out" onClick={logout}><LogOut size={18}/></button></div></aside>
- <main className="main"><header className="topbar"><div className="topbar-title"><button type="button" className="mobile-menu" aria-label={(isMobile?mobileNavOpen:!desktopNavCollapsed)?"Close navigation menu":"Open navigation menu"} aria-controls="vision-sidebar" aria-expanded={isMobile?mobileNavOpen:!desktopNavCollapsed} onClick={toggleNavigation}>{isMobile?mobileNavOpen?<X size={21}/>:<Menu size={21}/>:desktopNavCollapsed?<Menu size={21}/>:<X size={21}/>}</button><span>VISION / <b>{navigation.find(n=>n.id===page)?.label||"Overview"}</b></span></div><div className="topbar-right"><select aria-label="Active school" value={schoolId} onChange={e=>{setSchoolId(e.target.value);setPage("overview");}}><option value="">Select a school</option>{identity.schools.filter(s=>identity.admin||identity.memberships.some(m=>m.school_id===s.id)).map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select><span className="avatar">{(session.user.email||"U").slice(0,1).toUpperCase()}</span></div></header><div className="content"><div className="page-heading"><div><span className="eyebrow">{school?.name||"PLATFORM WORKSPACE"}</span><h1>{navigation.find(n=>n.id===page)?.label||"Overview"}</h1><p>{page==="overview"?"An integrated view of school operations and foundational learning.":"Secure workspace · "+(identity.admin?"Super Admin":role||"Assigned member")}</p></div>{schoolId&&<Btn kind="outline" disabled={busy} onClick={refresh}><RefreshCw size={15}/> Refresh</Btn>}</div><Notice message={message}/>
+ <main className="main"><header className="topbar"><div className="topbar-title"><button type="button" className="mobile-menu" aria-label={(isMobile?mobileNavOpen:!desktopNavCollapsed)?"Close navigation menu":"Open navigation menu"} aria-controls="vision-sidebar" aria-expanded={isMobile?mobileNavOpen:!desktopNavCollapsed} onClick={toggleNavigation}>{isMobile?mobileNavOpen?<X size={21}/>:<Menu size={21}/>:desktopNavCollapsed?<Menu size={21}/>:<X size={21}/>}</button><span>VISION / <b>{navigation.find(n=>n.id===page)?.label||"Overview"}</b></span></div><div className="topbar-right"><select aria-label="Active school" value={schoolId} onChange={e=>{setSchoolId(e.target.value);setPage("overview");}}><option value="">Select a school</option>{identity.schools.filter(s=>identity.admin||identity.memberships.some(m=>m.school_id===s.id)||identity.consultantSchools.includes(s.id)).map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select><span className="avatar">{(session.user.email||"U").slice(0,1).toUpperCase()}</span></div></header><div className="content"><div className="page-heading"><div><span className="eyebrow">{school?.name||"PLATFORM WORKSPACE"}</span><h1>{navigation.find(n=>n.id===page)?.label||"Overview"}</h1><p>{page==="overview"?"An integrated view of school operations and foundational learning.":"Secure workspace · "+(identity.admin?"Super Admin":role||"Assigned member")}</p></div>{schoolId&&<Btn kind="outline" disabled={busy} onClick={refresh}><RefreshCw size={15}/> Refresh</Btn>}</div><Notice message={message}/>
  {page==="overview"&&<><div className="stats"><div className="stat"><span>Schools assigned</span><strong>{identity.memberships.length}</strong><small>Active memberships</small></div><div className="stat"><span>Classes</span><strong>{visibleClasses.length}</strong><small>Accessible classes</small></div><div className="stat"><span>Students</span><strong>{students.filter(s=>visibleClasses.some(c=>c.id===s.class_id)).length}</strong><small>Registered learners</small></div><div className="stat"><span>Assessment sessions</span><strong>{assessments.filter(a=>visibleClasses.some(c=>c.id===a.class_id)).length}</strong><small>Last 500 loaded</small></div></div><div className="two-col"><Box title="Your learning workflow"><div className="workflow">{["Set up school and staff","Create classes and student rosters","Assess cumulative competencies","Review literacy level and interventions"].map((t,i)=><div key={t} className="workflow-row"><span>{i+1}</span>{t}<CircleCheck size={16}/></div>)}</div></Box><Box title="Product readiness"><div className="readiness"><p><CircleCheck size={17}/> Unified authentication and role-aware interface</p><p><CircleCheck size={17}/> Cumulative student assessment and reports</p><p><AlertCircle size={17}/> Legacy evidence migration requires secure ID mapping</p><p><AlertCircle size={17}/> Production security review and end-to-end testing pending</p></div></Box></div></>}
  {page==="schools"&&identity.admin&&<div className="two-col"><Box title="Registered schools">{identity.schools.length?<div className="rows">{identity.schools.map(s=><div className="record" key={s.id}><School size={17}/><strong>{s.name}</strong></div>)}</div>:<Empty title="No schools yet" detail="Create your first school to begin."/>}</Box><Box title="Register a school"><form onSubmit={addSchool} className="stack"><label>School name<input required maxLength={180} value={newSchool} onChange={e=>setNewSchool(e.target.value)} placeholder="Full registered school name"/></label><Btn kind="primary" type="submit" disabled={busy}><Plus size={16}/> Create school</Btn></form></Box></div>}
  {page==="users"&&(identity.admin||(isManager&&schoolId))&&<div className="two-col">
@@ -315,8 +326,14 @@ export default function Home(){
   session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"}
   isAdmin={identity.admin} onImported={refresh}/>}
 
+ {page==="consultants"&&identity.admin&&<ConsultantManagement session={session} schools={identity.schools}/>}
+ {page==="consultant"&&schoolId&&(identity.admin||isManager||identity.isConsultant)&&
+  <ConsultantWorkspace session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"}
+   isConsultant={!identity.admin&&!!identity.isConsultant&&identity.consultantSchools.includes(schoolId)}/>}
+
  {page==="classes"&&schoolId&&<><div className="two-col"><Box title="Your classes"><div className="rows">{visibleClasses.length?visibleClasses.map(c=><button key={c.id} className={"record row-button "+(classObj?.id===c.id?"selected":"")} onClick={()=>setActiveClass(c.id)}><BookMarked size={17}/><strong>{c.grade} · {c.section}</strong><small>{c.academic_year}</small></button>):<Empty title="No classes yet" detail="A school leader can create a class."/>}</div></Box><Box title="Register class">{isManager?<form className="stack" onSubmit={addClass}><label>Grade<select value={classForm.grade} onChange={e=>setClassForm({...classForm,grade:e.target.value})}>{LEVELS.map(g=><option key={g}>{g}</option>)}</select></label><label>Section<input value={classForm.section} required onChange={e=>setClassForm({...classForm,section:e.target.value})}/></label><label>Academic year<input value={classForm.academic_year} required onChange={e=>setClassForm({...classForm,academic_year:e.target.value})}/></label><Btn type="submit" kind="primary" disabled={busy}>Create class</Btn></form>:<Empty title="Read-only access" detail="Class creation is reserved for school leadership."/>}</Box></div>{isManager&&classObj&&<Box title="Assign teacher to class"><form onSubmit={assignTeacher} className="inline-form"><select value={selectedTeacher} onChange={e=>setSelectedTeacher(e.target.value)} required><option value="">Select a teacher</option>{members.filter(m=>m.role==="teacher").map(m=><option key={m.user_id} value={m.user_id}>{m.display_name||m.user_id}</option>)}</select><Btn type="submit" kind="primary" disabled={busy||!selectedTeacher}>Assign teacher</Btn></form><p className="helper">Only assigned teachers can submit student assessments for this class.</p></Box>}{classObj&&<Box title={"Students · "+classObj.grade+" "+classObj.section}><div className="students-head">{isManager&&<><form onSubmit={addStudent} className="inline-form"><input placeholder="Student full name" required value={studentName} onChange={e=>setStudentName(e.target.value)}/><Btn kind="primary" type="submit" disabled={busy}><Plus size={15}/> Add student</Btn></form><label className="upload-label">Import student CSV <input type="file" accept=".csv,text/csv" onChange={uploadRoster} disabled={busy}/></label></>}</div><div className="table-wrap"><table><thead><tr><th>Student</th><th>Assessment ID</th></tr></thead><tbody>{students.filter(s=>s.class_id===classObj.id&&s.active!==false).map(s=><tr key={s.id}><td>{s.student_name}</td><td className="mono">{s.admission_number}</td></tr>)}</tbody></table></div></Box>}</>}
  {page==="assess"&&schoolId&&<Box title="Cumulative competency assessment">{!visibleClasses.length?<Empty title="No classes assigned" detail="Create classes or assign a teacher to begin."/>:<form onSubmit={submitAssessment} className="stack"><div className="three-col"><label>Class<select value={classObj?.id||""} onChange={e=>setActiveClass(e.target.value)}>{visibleClasses.map(c=><option value={c.id} key={c.id}>{c.grade} · {c.section}</option>)}</select></label><label>Assessment type<select value={assessmentSubject} onChange={e=>setAssessmentSubject(e.target.value)}><option value="student">Student</option>{isManager&&<option value="teacher">Teacher</option>}</select></label><label>{assessmentSubject==="student"?"Student":"Teacher"}<select required value={assessmentTarget} onChange={e=>setAssessmentTarget(e.target.value)}><option value="">Select person</option>{targets.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label></div><div className="skills-head"><h3>Competencies from Nursery to {grade}</h3><span>{criterionList.length} published skills</span></div>{criterionList.length?criterionList.map((c,i)=><div className="skill" key={c.id}><div><small>{c.grade} · {c.code}</small><strong>{c.title}</strong><p>{c.description}</p></div><select aria-label={"Rating for "+c.title} value={ratingForm[c.id]||"Not Assessed"} onChange={e=>setRatingForm({...ratingForm,[c.id]:e.target.value})}>{RATINGS.map(r=><option key={r}>{r}</option>)}</select></div>):<Empty title="No published competencies" detail="Publish competency records before assessing learners."/>}<label>Observations and recommended intervention<textarea value={ratingNotes} onChange={e=>setRatingNotes(e.target.value)} rows={3}/></label><Btn kind="primary" type="submit" disabled={busy||!assessmentTarget||!criterionList.length}>Save assessment <ArrowRight size={16}/></Btn></form>}</Box>}
+ {page==="competencies"&&schoolId&&identity.admin&&<CurriculumEditor competencies={competencies} session={session} onSaved={refresh}/>}
  {page==="competencies"&&schoolId&&<Box title="Published literacy progression"><div className="level-grid">{LEVELS.map(l=><div key={l} className="level"><strong>{l}</strong><span>{competencies.filter(c=>c.active&&c.grade===l).length} competencies</span></div>)}</div><div className="rows">{competencies.filter(c=>c.active).sort((a,b)=>formatGrade(a.grade)-formatGrade(b.grade)||a.sequence-b.sequence).map(c=><div key={c.id} className="record"><BookOpen size={16}/><strong>{c.title}</strong><small>{c.grade}</small></div>)}</div><div className="helper">Shared curriculum editing is reserved for Platform Super Admin and requires a reviewed database policy.</div></Box>}
  {page==="reports"&&schoolId&&<Box title="Individual literacy progression"><label>Student<select value={reportStudent} onChange={e=>loadReport(e.target.value)}><option value="">Select student</option>{students.filter(s=>visibleClasses.some(c=>c.id===s.class_id)).map(s=><option key={s.id} value={s.id}>{s.student_name}</option>)}</select></label>{reportData&&<><div className="stats report-stats"><div className="stat"><span>Enrolled grade</span><strong>{reportData.cls?.grade}</strong></div><div className="stat"><span>Demonstrated level</span><strong>{reportData.progress.highest||"Not established"}</strong></div></div><div className="rows">{reportData.progress.byLevel.map(l=><div key={l.level} className="progress-row"><strong>{l.level}</strong><div className="progress-bar"><span style={{width:l.independence+"%"}}/></div><small>{l.assessed}/{l.count} assessed · {l.independence}% independent</small></div>)}</div><p className="helper">Provisional threshold: 80% assessed and 80% independent at each consecutive level. This is a screening indicator, not a diagnosis.</p></>}</Box>}
  {["implementation","observations"].includes(page)&&<Box title={page==="implementation"?"Teacher implementation evidence":"Classroom observations"}><Empty title="Historical integration is being prepared" detail="The existing Streamlit workflow remains operational. This commercial workspace will connect only after school IDs, access policies and secure evidence storage are migrated and tested."/></Box>}
