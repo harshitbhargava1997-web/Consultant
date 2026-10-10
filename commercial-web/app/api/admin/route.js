@@ -11,21 +11,28 @@ function adminClient() {
  return createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
 }
 async function authorize(request) {
- const token=(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"");
- if(!token) return {error:"Sign in required.",status:401};
- const admin=adminClient();
- const {data:{user},error}=await admin.auth.getUser(token);
- if(error||!user||!user.email_confirmed_at) return {error:"Invalid account.",status:401};
- const {data:rows,error:roleError}=await admin.from("literacy_platform_admins")
- .select("user_id").eq("user_id",user.id).limit(1);
- if(roleError) return {error:"Administrator verification failed.",status:503};
- return {admin,user,isAdmin:!!rows?.length};
+ const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+ if (!token) return { error: "Sign in required.", status: 401 };
+ const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+ const publicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+ if (!url || !publicKey) return { error: "Authentication is not configured.", status: 503 };
+ const userClient = createClient(url, publicKey, {
+  global: { headers: { Authorization: "Bearer " + token } },
+  auth: { persistSession: false, autoRefreshToken: false }
+ });
+ const { data: { user }, error } = await userClient.auth.getUser(token);
+ if (error || !user || !user.email_confirmed_at)
+   return { error: "Invalid or unconfirmed account.", status: 401 };
+ const { data: isAdmin, error: checkError } = await userClient.rpc("literacy_current_user_is_admin");
+ if (checkError) return { error: "Administrator verification failed.", status: 503 };
+ return { user, isAdmin: isAdmin === true };
 }
 export async function GET(request) {
- try {const ctx=await authorize(request);
-  if(ctx.error)return response({error:ctx.error},ctx.status);
-  return response({isAdmin:ctx.isAdmin});
- }catch{return response({error:"Administrator service unavailable."},503);}
+ try {
+  const ctx = await authorize(request);
+  if (ctx.error) return response({ error: ctx.error }, ctx.status);
+  return response({ isAdmin: ctx.isAdmin });
+ } catch { return response({ error: "Administrator verification unavailable." }, 503); }
 }
 export async function POST(request) {
  try{
@@ -33,11 +40,12 @@ export async function POST(request) {
   if(ctx.error)return response({error:ctx.error},ctx.status);
   if(!ctx.isAdmin)return response({error:"Platform Super Admin permission required."},403);
   if(ctx.user.app_metadata?.must_change_password)return response({error:"Change your initial password first."},403);
+  const admin=adminClient();
   const body=await request.json();
   if(body.action==="createSchool"){
    const name=String(body.name||"").trim();
    if(name.length<3||name.length>180)return response({error:"Enter a valid school name."},400);
-   const {data,error}=await ctx.admin.from("literacy_schools").insert({name}).select("id,name").single();
+   const {data,error}=await admin.from("literacy_schools").insert({name}).select("id,name").single();
    if(error)return response({error:error.message},400);return response({school:data});
   }
   if(body.action==="createUser"){
@@ -48,11 +56,11 @@ export async function POST(request) {
    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||fullName.length<2||fullName.length>160||
       !["owner","principal","coordinator","teacher"].includes(role)||
       !/^[0-9a-f-]{36}$/i.test(schoolId))return response({error:"Valid user, role and school required."},400);
-   const {data:school}=await ctx.admin.from("literacy_schools").select("id").eq("id",schoolId).maybeSingle();
+   const {data:school}=await admin.from("literacy_schools").select("id").eq("id",schoolId).maybeSingle();
    if(!school)return response({error:"School not found."},400);
    let existing=null;let page=1;
    while(page<=50&&!existing){
-    const {data,error}=await ctx.admin.auth.admin.listUsers({page,perPage:200});
+    const {data,error}=await admin.auth.admin.listUsers({page,perPage:200});
     if(error)throw error;
     existing=(data.users||[]).find(u=>u.email?.toLowerCase()===email);
     if((data.users||[]).length<200)break;page++;
@@ -60,7 +68,7 @@ export async function POST(request) {
    let password=null;
    if(!existing){
     password=randomBytes(20).toString("base64url")+"aA1!";
-    const {data,error}=await ctx.admin.auth.admin.createUser({
+    const {data,error}=await admin.auth.admin.createUser({
       email,password,email_confirm:true,
       user_metadata:{full_name:fullName},
       app_metadata:{must_change_password:true}
@@ -68,7 +76,7 @@ export async function POST(request) {
     if(error)throw error;
     existing=data.user;
    }
-   const {error:membershipError}=await ctx.admin.from("literacy_memberships")
+   const {error:membershipError}=await admin.from("literacy_memberships")
      .upsert({school_id:schoolId,user_id:existing.id,display_name:fullName,role},
        {onConflict:"school_id,user_id"});
    if(membershipError)throw membershipError;
