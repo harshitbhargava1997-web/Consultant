@@ -16,9 +16,14 @@ export async function POST(request){
   const {data:{user},error:userError}=await userClient.auth.getUser(token);
   if(userError||!user||!user.email_confirmed_at)return send({error:"Invalid account."},401);
   const admin=createClient(url,secret,{auth:{persistSession:false,autoRefreshToken:false}});
-  const {data:permission,error:permError}=await admin.from("literacy_platform_admins")
-   .select("user_id").eq("user_id",user.id).maybeSingle();
-  if(permError||!permission)return send({error:"Platform Super Admin permission required."},403);
+  const [adminResult,consultantResult]=await Promise.all([
+   admin.from("literacy_platform_admins").select("user_id").eq("user_id",user.id).maybeSingle(),
+   admin.from("literacy_consultant_assignments").select("school_id")
+    .eq("consultant_user_id",user.id).limit(1)
+  ]);
+  if(adminResult.error||consultantResult.error)return send({error:"Unable to verify permissions."},503);
+  if(!adminResult.data&&!consultantResult.data?.length)
+   return send({error:"Only the Super Admin or an assigned Consultant can edit the shared curriculum."},403);
   const raw=await request.text();
   if(raw.length>20000)return send({error:"Request too large."},413);
   const body=JSON.parse(raw);
