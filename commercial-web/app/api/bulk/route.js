@@ -128,7 +128,7 @@ async function importStudents(ctx,rows){
   .select("id,grade,section,academic_year").eq("school_id",ctx.school.id);
  if(error)throw error;
  const classMap=new Map((classes||[]).map(c=>[[c.grade,c.section,c.academic_year].join("|"),c.id]));
- const seen=new Set(),results=[];
+ const seen=new Set(),results=[],valid=[];
  for(const row of rows){
   const grade=clean(row.grade),section=clean(row.section)||"A",
    year=clean(row.academic_year),name=clean(row.student_name),
@@ -142,13 +142,18 @@ async function importStudents(ctx,rows){
   const key=classId+"|"+admission.toLowerCase();
   if(seen.has(key)){results.push(rowResult(row,"error","Duplicate admission number for this class in the upload batch."));continue;}
   seen.add(key);
-  const {error:saveError}=await ctx.admin.from("literacy_students").upsert({
-    class_id:classId,admission_number:admission,student_name:name
-   },{onConflict:"class_id,admission_number"});
-  results.push(rowResult(row,saveError?"error":"saved",
-   saveError?(saveError.message||"Unable to save student."):"Student saved to the matched class."));
+  valid.push({row,payload:{class_id:classId,admission_number:admission,student_name:name}});
  }
- return results;
+ // One database request per validated upload batch, avoiding per-student API overhead.
+ if(valid.length){
+  const {error:saveError}=await ctx.admin.from("literacy_students")
+   .upsert(valid.map(v=>v.payload),{onConflict:"class_id,admission_number"});
+  for(const v of valid){
+   results.push(rowResult(v.row,saveError?"error":"saved",
+     saveError?(saveError.message||"Student batch could not be saved."):"Student saved to the matched class."));
+  }
+ }
+ return results.sort((a,b)=>a.row_number-b.row_number);
 }
 async function exportPeople(ctx){
  const memberships=await allRows((from,to)=>ctx.admin.from("literacy_memberships")
