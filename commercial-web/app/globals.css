@@ -35,3 +35,15 @@
 .bulk-summary .btn{align-self:flex-start}
 .bulk-stack .btn{white-space:normal;text-align:center}
 @media(max-width:760px){.bulk-stack .panel{padding:18px}.bulk-choice .btn{flex:1}.bulk-stack .btn{min-height:42px}}
+
+
+/* Curriculum editor and Consultant implementation workspace. */
+.curriculum-status{display:flex;flex-direction:row;align-items:center;gap:9px;font-size:13px;color:var(--ink)}
+.curriculum-status input{width:18px;height:18px;flex-shrink:0;accent-color:var(--teal)}
+.consultant-activity{border-bottom:1px solid var(--border);padding:15px 6px}
+.consultant-activity-top{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
+.consultant-activity-top strong{font-size:13px;color:var(--ink)}
+.consultant-activity-top small{font-size:11px;color:var(--muted)}
+.consultant-activity p{font-size:12px;color:#465b68;white-space:pre-wrap;line-height:1.5;margin:9px 0 0}
+.consultant-activity p b{color:var(--teal)}
+@media(max-width:760px){.consultant-activity-top{flex-direction:column;align-items:flex-start}.curriculum-status input{margin:0}}
