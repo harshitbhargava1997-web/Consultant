@@ -1,33 +1,19 @@
 
-"""School-scoped literacy assessment Streamlit interface.
-
-Uses Supabase Authentication and Row Level Security.
-Never uses the service-role key for ordinary assessments.
-"""
-
-import io
-from datetime import date
-
-import pandas as pd
 import streamlit as st
+import pandas as pd
+from datetime import date
 from supabase import create_client
 
-
 GRADES = (
-    "Nursery",
-    "LKG",
-    "UKG",
-    "Grade 1",
-    "Grade 2",
-    "Grade 3",
-    "Grade 4",
+    "Nursery", "LKG", "UKG",
+    "Grade 1", "Grade 2", "Grade 3", "Grade 4"
 )
 
 RATINGS = (
     "Not Assessed",
     "Emerging",
     "Developing",
-    "Independent",
+    "Independent"
 )
 
 MANAGERS = ("owner", "principal", "coordinator")
@@ -35,25 +21,40 @@ ALL_ROLES = MANAGERS + ("teacher",)
 
 
 # =====================================================
-# SUPABASE CONNECTION
+# SUPABASE CONFIGURATION
 # =====================================================
 
 def _conn():
     cfg = st.secrets["supabase"]
 
-    key = (
-        cfg.get("anon_key")
-        or cfg.get("publishable_key")
+    url = cfg.get("url") or cfg.get("URL")
+
+    key = next(
+        (
+            cfg.get(name)
+            for name in (
+                "anon_key",
+                "publishable_key",
+                "key",
+                "ANON_KEY",
+                "PUBLISHABLE_KEY",
+                "KEY",
+            )
+            if cfg.get(name)
+        ),
+        None,
     )
 
-    if not key:
+    if not url or not key:
         st.error(
-            "Configure [supabase] anon_key or "
-            "publishable_key in Streamlit Secrets."
+            "Missing Supabase URL or public key. "
+            "Check [supabase] in Streamlit Secrets."
         )
         st.stop()
 
-    return create_client(cfg["url"], key)
+    # Only use a publishable/anon key.
+    # Never use the service-role key here.
+    return create_client(url, key)
 
 
 def _db(token, table):
@@ -62,10 +63,10 @@ def _db(token, table):
     return client.table(table)
 
 
-def _query(token, table, columns="*", **equalities):
+def _query(token, table, columns="*", **filters):
     query = _db(token, table).select(columns)
 
-    for field, value in equalities.items():
+    for field, value in filters.items():
         query = query.eq(field, value)
 
     return query.execute().data or []
@@ -83,33 +84,32 @@ def _login():
         with st.form("lit_login"):
             email = st.text_input("Email")
             password = st.text_input(
-                "Password",
-                type="password"
+                "Password", type="password"
             )
-            submitted = st.form_submit_button("Sign in")
+            submitted = st.form_submit_button("Sign In")
 
         if submitted:
             try:
                 result = _conn().auth.sign_in_with_password({
                     "email": email.strip(),
-                    "password": password,
+                    "password": password
                 })
 
                 if not result.session or not result.user:
-                    raise ValueError("No authenticated session")
+                    raise ValueError("Authentication failed")
 
                 st.session_state["lit_auth"] = {
                     "access_token": result.session.access_token,
                     "refresh_token": result.session.refresh_token,
-                    "user_id": str(result.user.id),
+                    "user_id": str(result.user.id)
                 }
 
                 st.rerun()
 
             except Exception:
                 st.error(
-                    "Sign in failed. Check credentials "
-                    "or contact your administrator."
+                    "Sign in failed. Check your "
+                    "email address and password."
                 )
 
         st.stop()
@@ -124,17 +124,20 @@ def _login():
         if str(result.user.id) != str(auth["user_id"]):
             raise ValueError("Session identity mismatch")
 
-        auth.update({
-            "access_token": result.session.access_token,
-            "refresh_token": result.session.refresh_token,
-        })
+        auth["access_token"] = (
+            result.session.access_token
+        )
+
+        auth["refresh_token"] = (
+            result.session.refresh_token
+        )
 
     except Exception:
         st.session_state.pop("lit_auth", None)
-        st.warning("Session expired. Please sign in again.")
+        st.warning("Session expired. Sign in again.")
         st.stop()
 
-    if st.button("Sign out", key="lit_signout"):
+    if st.button("Sign Out", key="lit_signout"):
         st.session_state.pop("lit_auth", None)
         st.rerun()
 
@@ -142,7 +145,7 @@ def _login():
 
 
 # =====================================================
-# SCHOOL ACCESS
+# SCHOOL PERMISSIONS
 # =====================================================
 
 def _school(token, user_id):
@@ -155,21 +158,20 @@ def _school(token, user_id):
     )
 
     memberships = [
-        membership
-        for membership in memberships
-        if membership["role"] in ALL_ROLES
+        item for item in memberships
+        if item["role"] in ALL_ROLES
     ]
 
     if not memberships:
         st.warning(
-            "No school is assigned to this account. "
-            "Contact your platform administrator."
+            "No school membership assigned. "
+            "Contact your administrator."
         )
         st.stop()
 
     allowed_ids = {
-        membership["school_id"]
-        for membership in memberships
+        item["school_id"]
+        for item in memberships
     }
 
     schools = [
@@ -191,22 +193,22 @@ def _school(token, user_id):
         for school in schools
     }
 
-    selected_id = st.selectbox(
-        "School",
-        options=list(names),
-        format_func=lambda school_id: names[school_id],
+    school_id = st.selectbox(
+        "Select School",
+        list(names),
+        format_func=lambda sid: names[sid],
         key="lit_school",
     )
 
     role = next(
-        membership["role"]
-        for membership in memberships
-        if membership["school_id"] == selected_id
+        item["role"]
+        for item in memberships
+        if item["school_id"] == school_id
     )
 
-    st.caption(f"Signed in as: {role.title()}")
+    st.caption(f"Logged in as: {role.title()}")
 
-    return selected_id, role, names[selected_id]
+    return school_id, role, names[school_id]
 
 
 def _classes(token, school_id, user_id, role):
@@ -227,15 +229,14 @@ def _classes(token, school_id, user_id, role):
             teacher_user_id=user_id,
         )
 
-        assigned = {
+        allowed = {
             item["class_id"]
             for item in assignments
         }
 
         classes = [
-            item
-            for item in classes
-            if item["id"] in assigned
+            item for item in classes
+            if item["id"] in allowed
         ]
 
     return sorted(
@@ -261,20 +262,19 @@ def _class_picker(classes, key):
     }
 
     if not options:
-        st.info("No classes are assigned to this account.")
+        st.info("No classes available.")
         return None
 
-    selected_id = st.selectbox(
+    selected = st.selectbox(
         "Class / Section",
         list(options),
-        format_func=lambda item_id: options[item_id],
+        format_func=lambda cid: options[cid],
         key=key,
     )
 
     return next(
-        item
-        for item in classes
-        if item["id"] == selected_id
+        item for item in classes
+        if item["id"] == selected
     )
 
 
@@ -287,7 +287,7 @@ def _criteria(token, grade):
     if grade not in GRADES:
         return []
 
-    allowed_grades = set(
+    allowed = set(
         GRADES[:GRADES.index(grade) + 1]
     )
 
@@ -303,7 +303,7 @@ def _criteria(token, grade):
             item
             for item in competencies
             if item["active"]
-            and item["grade"] in allowed_grades
+            and item["grade"] in allowed
         ],
         key=lambda item: (
             GRADES.index(item["grade"]),
@@ -314,7 +314,7 @@ def _criteria(token, grade):
 
 
 # =====================================================
-# STUDENT / TEACHER ASSESSMENT FORM
+# COMPETENCY ASSESSMENT FORM
 # =====================================================
 
 def _assessment_form(
@@ -331,8 +331,8 @@ def _assessment_form(
 
     if not criteria:
         st.info(
-            "No active competencies have been published "
-            "for this or earlier levels."
+            "No published competencies available "
+            "for this level."
         )
         return
 
@@ -351,74 +351,68 @@ def _assessment_form(
     with st.form(form_key):
 
         assessment_date = st.date_input(
-            "Assessment date",
+            "Assessment Date",
             value=date.today(),
         )
 
-        grades = {}
+        scores = {}
         evidence = {}
-        previous_stage = None
+        previous_grade = None
 
         for item in criteria:
 
-            if item["grade"] != previous_stage:
+            if item["grade"] != previous_grade:
                 st.markdown(
-                    f"### {item['grade']} competencies"
+                    f"### {item['grade']} Competencies"
                 )
-                previous_stage = item["grade"]
+                previous_grade = item["grade"]
 
             st.markdown(
-                f"**{item['title']}** · {item['code']}"
+                f"**{item['title']}** — {item['code']}"
             )
 
             if item.get("description"):
                 st.caption(item["description"])
 
-            rating_key = (
-                f"r_{subject_type}_{subject_id}_"
-                f"{item['id']}"
-            )
-
-            evidence_key = (
-                f"e_{subject_type}_{subject_id}_"
-                f"{item['id']}"
-            )
-
-            grades[item["id"]] = st.selectbox(
-                "Observed level",
+            scores[item["id"]] = st.selectbox(
+                "Competency Level",
                 RATINGS,
-                key=rating_key,
+                key=(
+                    f"rating_{subject_type}_"
+                    f"{subject_id}_{item['id']}"
+                ),
             )
 
             evidence[item["id"]] = st.text_input(
-                "Observation / example (optional)",
-                key=evidence_key,
+                "Observation / Evidence",
+                key=(
+                    f"evidence_{subject_type}_"
+                    f"{subject_id}_{item['id']}"
+                ),
             )
 
         notes = st.text_area(
-            "Assessment summary / recommended support"
+            "Assessment Summary / Recommendations"
         )
 
-        confirm = st.checkbox(
-            "I confirm these results reflect "
-            "my own assessment."
+        confirmed = st.checkbox(
+            "I confirm these assessment results."
         )
 
-        save = st.form_submit_button(
-            "Save assessment",
-            disabled=not confirm,
+        submitted = st.form_submit_button(
+            "Save Assessment",
+            disabled=not confirmed,
         )
 
-    if not save:
+    if not submitted:
         return
 
     if all(
-        rating == "Not Assessed"
-        for rating in grades.values()
+        score == "Not Assessed"
+        for score in scores.values()
     ):
         st.error(
-            "Assess at least one competency "
-            "before submitting."
+            "Assess at least one competency."
         )
         return
 
@@ -428,7 +422,7 @@ def _assessment_form(
             "rating": rating,
             "evidence_notes": evidence[competency_id],
         }
-        for competency_id, rating in grades.items()
+        for competency_id, rating in scores.items()
     ]
 
     try:
@@ -450,34 +444,26 @@ def _assessment_form(
         ).execute()
 
         st.success(
-            f"Assessment saved. Reference: "
-            f"{response.data}"
+            f"Assessment saved: {response.data}"
         )
 
     except Exception as exc:
-        st.error(
-            "Could not save the assessment. "
-            "Check permissions and database migration."
-        )
+        st.error("Assessment could not be saved.")
         st.caption(str(exc))
 
 
 # =====================================================
-# STUDENT ASSESSMENTS
+# STUDENT ASSESSMENT
 # =====================================================
 
 def _student_assessments(
-    token,
-    school_id,
-    classes,
-    user_id,
+    token, school_id, classes, user_id
 ):
 
     st.subheader("Student Competency Assessment")
 
     target = _class_picker(
-        classes,
-        "lit_student_class",
+        classes, "student_class"
     )
 
     if not target:
@@ -502,8 +488,8 @@ def _student_assessments(
 
     if not students:
         st.info(
-            "Upload a student roster in "
-            "Assessment Administration first."
+            "Upload the student roster "
+            "in Assessment Administration."
         )
         return
 
@@ -516,9 +502,9 @@ def _student_assessments(
     }
 
     student_id = st.selectbox(
-        "Student",
+        "Select Student",
         list(labels),
-        format_func=lambda item_id: labels[item_id],
+        format_func=lambda sid: labels[sid],
     )
 
     _assessment_form(
@@ -533,31 +519,24 @@ def _student_assessments(
 
 
 # =====================================================
-# TEACHER ASSESSMENTS
+# TEACHER ASSESSMENT
 # =====================================================
 
 def _teacher_assessments(
-    token,
-    school_id,
-    classes,
-    user_id,
-    role,
+    token, school_id, classes, user_id, role
 ):
 
-    st.subheader(
-        "Teacher Reading Competency Assessment"
-    )
+    st.subheader("Teacher Competency Assessment")
 
     if role not in MANAGERS:
-        st.info(
-            "Only school leadership can submit "
-            "teacher competency assessments."
+        st.warning(
+            "Teacher assessments require "
+            "school leadership access."
         )
         return
 
     target = _class_picker(
-        classes,
-        "lit_teacher_class",
+        classes, "teacher_class"
     )
 
     if not target:
@@ -576,9 +555,7 @@ def _teacher_assessments(
     }
 
     if not assigned_ids:
-        st.info(
-            "Assign teachers to this class first."
-        )
+        st.info("No teachers assigned to this class.")
         return
 
     members = _query(
@@ -598,20 +575,13 @@ def _teacher_assessments(
     }
 
     if not teachers:
-        st.info(
-            "No assigned teacher accounts are available."
-        )
+        st.info("No teacher accounts available.")
         return
 
     teacher_id = st.selectbox(
-        "Teacher",
+        "Select Teacher",
         list(teachers),
-        format_func=lambda item_id: teachers[item_id],
-    )
-
-    st.caption(
-        "Assess the teacher's ability to explain, "
-        "demonstrate and apply the competencies."
+        format_func=lambda tid: teachers[tid],
     )
 
     _assessment_form(
@@ -626,13 +596,13 @@ def _teacher_assessments(
 
 
 # =====================================================
-# STUDENT ROSTER VALIDATION
+# STUDENT ROSTER IMPORT
 # =====================================================
 
-def _parse_roster(file):
+def _parse_roster(uploaded_file):
 
     df = pd.read_csv(
-        file,
+        uploaded_file,
         dtype=str,
         keep_default_na=False,
     ).fillna("")
@@ -642,10 +612,10 @@ def _parse_roster(file):
         "student_name",
     }
 
-    if not required.issubset(set(df.columns)):
+    if not required.issubset(df.columns):
         raise ValueError(
-            "CSV must contain admission_number "
-            "and student_name."
+            "CSV requires admission_number "
+            "and student_name columns."
         )
 
     records = []
@@ -653,7 +623,7 @@ def _parse_roster(file):
 
     for index, row in df.iterrows():
 
-        number = str(
+        student_id = str(
             row["admission_number"]
         ).strip()
 
@@ -662,118 +632,111 @@ def _parse_roster(file):
         ).strip()
 
         if (
-            not number
+            not student_id
             or not name
-            or len(number) > 100
+            or len(student_id) > 100
             or len(name) > 200
         ):
             raise ValueError(
-                f"Invalid student record "
-                f"in CSV row {index + 2}."
+                f"Invalid student in row {index + 2}"
             )
 
-        if number in seen:
+        if student_id in seen:
             raise ValueError(
-                f"Duplicate assessment ID "
-                f"in CSV row {index + 2}: {number}"
+                f"Duplicate student ID: {student_id}"
             )
 
-        seen.add(number)
+        seen.add(student_id)
 
         records.append({
-            "admission_number": number,
+            "admission_number": student_id,
             "student_name": name,
         })
 
     if len(records) > 2000:
         raise ValueError(
-            "Maximum 2,000 students per upload."
+            "Maximum 2,000 students per import."
         )
 
     return records
 
 
 # =====================================================
-# SCHOOL ASSESSMENT ADMINISTRATION
+# ASSESSMENT ADMINISTRATION
 # =====================================================
 
 def _admin(token, school_id, classes, role):
 
     if role not in MANAGERS:
-        st.error(
-            "Only school leadership may open "
-            "Assessment Administration."
-        )
+        st.error("Administrator access required.")
         return
 
     st.subheader("Assessment Administration")
 
-    create, roster, assignments, library = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "Classes",
-        "Roster Upload",
+        "Student Roster",
         "Teacher Assignments",
         "Competency Library",
     ])
 
-    with create:
+    # CREATE CLASS
+    with tab1:
 
-        with st.form("lit_new_class"):
+        with st.form("create_class"):
 
             grade = st.selectbox(
-                "Grade",
-                GRADES,
+                "Grade", GRADES
             )
 
             section = st.text_input(
-                "Section",
-                value="A",
+                "Section", value="A"
             )
 
-            year = st.text_input(
-                "Academic year",
+            academic_year = st.text_input(
+                "Academic Year",
                 value="2026-27",
             )
 
-            clicked = st.form_submit_button(
-                "Create class"
+            save = st.form_submit_button(
+                "Create Class"
             )
 
-        if clicked:
+        if save:
+
             try:
-                if not section.strip() or not year.strip():
+                if not section.strip() or not academic_year.strip():
                     raise ValueError(
-                        "Section and academic year required."
+                        "Enter section and academic year."
                     )
 
                 _db(
-                    token,
-                    "literacy_classes",
+                    token, "literacy_classes"
                 ).insert({
                     "school_id": school_id,
                     "grade": grade,
                     "section": section.strip(),
-                    "academic_year": year.strip(),
+                    "academic_year": academic_year.strip(),
                 }).execute()
 
                 st.success(
-                    "Class created. Refresh to see it."
+                    "Class created. Refresh the page."
                 )
 
             except Exception as exc:
                 st.error(str(exc))
 
-    with roster:
+    # STUDENT ROSTER
+    with tab2:
 
         target = _class_picker(
-            classes,
-            "lit_admin_class",
+            classes, "admin_roster_class"
         )
 
         if target:
 
             uploaded = st.file_uploader(
-                "CSV: admission_number, student_name. "
-                "Use your independent assessment IDs.",
+                "Upload Student CSV",
                 type="csv",
             )
 
@@ -787,29 +750,24 @@ def _admin(token, school_id, classes, role):
                         hide_index=True,
                     )
 
-                    st.caption(
-                        f"{len(records)} students validated. "
-                        "Use the same assessment IDs "
-                        "for future uploads."
+                    st.info(
+                        f"{len(records)} students validated."
                     )
 
-                    if st.button(
-                        "Confirm roster import"
-                    ):
+                    if st.button("Import Student Roster"):
 
                         entries = [
-                            dict(
-                                class_id=target["id"],
+                            {
+                                "class_id": target["id"],
                                 **record,
-                            )
+                            }
                             for record in records
                         ]
 
                         for index in range(
-                            0,
-                            len(entries),
-                            200,
+                            0, len(entries), 200
                         ):
+
                             batch = entries[
                                 index:index + 200
                             ]
@@ -825,35 +783,32 @@ def _admin(token, school_id, classes, role):
                             ).execute()
 
                         st.success(
-                            f"Imported/updated "
-                            f"{len(entries)} students."
+                            f"{len(entries)} students imported."
                         )
 
                 except Exception as exc:
                     st.error(str(exc))
 
-            template = pd.DataFrame([
-                {
-                    "admission_number": "S001",
-                    "student_name": "Sample Student",
-                }
-            ]).to_csv(index=False)
+            template = pd.DataFrame([{
+                "admission_number": "S001",
+                "student_name": "Sample Student",
+            }]).to_csv(index=False)
 
             st.download_button(
-                "Download roster CSV template",
+                "Download CSV Template",
                 template,
                 "student_roster_template.csv",
                 "text/csv",
             )
 
-    with assignments:
+    # TEACHER ASSIGNMENTS
+    with tab3:
 
         target = _class_picker(
-            classes,
-            "lit_assignment_class",
+            classes, "admin_teacher_class"
         )
 
-        members = _query(
+        memberships = _query(
             token,
             "literacy_memberships",
             "user_id,display_name,role",
@@ -864,76 +819,68 @@ def _admin(token, school_id, classes, role):
             member["user_id"]:
                 member.get("display_name")
                 or member["user_id"]
-            for member in members
+            for member in memberships
             if member["role"] == "teacher"
         }
 
         if target and teachers:
 
-            teacher_id = st.selectbox(
-                "Teacher account",
+            selected_teacher = st.selectbox(
+                "Teacher",
                 list(teachers),
-                format_func=lambda item_id:
-                    teachers[item_id],
+                format_func=lambda tid:
+                    teachers[tid],
             )
 
-            if st.button(
-                "Assign teacher to class"
-            ):
+            if st.button("Assign Teacher"):
+
                 try:
                     _db(
                         token,
                         "literacy_teacher_classes",
-                    ).upsert(
-                        {
-                            "class_id": target["id"],
-                            "teacher_user_id": teacher_id,
-                        },
-                        on_conflict=(
-                            "class_id,teacher_user_id"
-                        ),
-                    ).execute()
+                    ).upsert({
+                        "class_id": target["id"],
+                        "teacher_user_id": selected_teacher,
+                    }, on_conflict=(
+                        "class_id,teacher_user_id"
+                    )).execute()
 
-                    st.success(
-                        "Teacher assigned."
-                    )
+                    st.success("Teacher assigned.")
 
                 except Exception as exc:
                     st.error(str(exc))
 
         elif not teachers:
             st.info(
-                "Invite teacher accounts from "
-                "the Super Admin dashboard first."
+                "Invite teachers from the "
+                "Super Admin dashboard first."
             )
 
-    with library:
+    # READ-ONLY CURRICULUM
+    with tab4:
 
         st.info(
-            "The competency library is shared "
-            "across schools. Only the Platform "
-            "Super Admin may publish or edit it."
+            "The competency library is managed "
+            "by the Platform Super Admin."
         )
 
         grade = st.selectbox(
-            "View competencies up to grade",
+            "View Competencies Through",
             GRADES,
-            key="lit_library_grade",
         )
 
-        data = _criteria(token, grade)
+        competencies = _criteria(token, grade)
 
-        if data:
+        if competencies:
+
             st.dataframe(
-                pd.DataFrame(data),
+                pd.DataFrame(competencies),
                 hide_index=True,
                 use_container_width=True,
             )
+
         else:
-            st.caption(
-                "No published competencies "
-                "at these levels."
-            )
+            st.info("No competencies published.")
 
 
 # =====================================================
@@ -944,19 +891,9 @@ def calculate_demonstrated_level(
     latest_results,
     competencies,
     enrolled_grade,
-    min_coverage=0.8,
-    min_independent=0.8,
+    min_coverage=0.80,
+    min_independent=0.80,
 ):
-    """
-    Calculate the highest consecutively mastered level.
-
-    Each level requires:
-      - At least 80% competency assessment coverage.
-      - At least 80% Independent among assessed skills.
-
-    Missing assessments are not counted as failures.
-    Thresholds are provisional product rules.
-    """
 
     highest = None
     details = []
@@ -965,28 +902,25 @@ def calculate_demonstrated_level(
     if enrolled_grade not in GRADES:
         return None, []
 
-    levels = GRADES[
+    for grade in GRADES[
         :GRADES.index(enrolled_grade) + 1
-    ]
-
-    for level in levels:
+    ]:
 
         skills = [
-            competency
-            for competency in competencies
-            if competency["grade"] == level
-            and competency.get("active", True)
+            item for item in competencies
+            if item["grade"] == grade
+            and item.get("active", True)
         ]
 
         if not skills:
 
             details.append({
-                "Level": level,
+                "Level": grade,
                 "Competencies": 0,
                 "Assessed": 0,
                 "Independent": 0,
                 "Coverage": None,
-                "Independent rate": None,
+                "Independent Rate": None,
                 "Mastered": False,
             })
 
@@ -995,52 +929,44 @@ def calculate_demonstrated_level(
 
         ratings = [
             latest_results.get(
-                competency["id"],
-                "Not Assessed",
+                skill["id"], "Not Assessed"
             )
-            for competency in skills
+            for skill in skills
         ]
 
         assessed = [
-            rating
-            for rating in ratings
+            rating for rating in ratings
             if rating != "Not Assessed"
         ]
 
-        independent_count = assessed.count(
+        independent = assessed.count(
             "Independent"
         )
 
         coverage = len(assessed) / len(skills)
 
-        independent_rate = (
-            independent_count / len(assessed)
-            if assessed else 0.0
+        rate = (
+            independent / len(assessed)
+            if assessed else 0
         )
 
         mastered = (
             coverage >= min_coverage
-            and independent_rate >= min_independent
+            and rate >= min_independent
         )
 
         if consecutive and mastered:
-            highest = level
+            highest = grade
         else:
             consecutive = False
 
         details.append({
-            "Level": level,
+            "Level": grade,
             "Competencies": len(skills),
             "Assessed": len(assessed),
-            "Independent": independent_count,
-            "Coverage": round(
-                coverage * 100,
-                1,
-            ),
-            "Independent rate": (
-                round(independent_rate * 100, 1)
-                if assessed else None
-            ),
+            "Independent": independent,
+            "Coverage": round(coverage * 100, 1),
+            "Independent Rate": round(rate * 100, 1),
             "Mastered": mastered,
         })
 
@@ -1048,16 +974,15 @@ def calculate_demonstrated_level(
 
 
 # =====================================================
-# PROGRESS REPORTS
+# STUDENT PROGRESS REPORT
 # =====================================================
 
 def _reports(token, school_id, classes):
 
-    st.subheader("Assessment Progress")
+    st.subheader("Literacy Progress Reports")
 
     allowed_ids = {
-        item["id"]
-        for item in classes
+        item["id"] for item in classes
     }
 
     assessments = [
@@ -1073,14 +998,11 @@ def _reports(token, school_id, classes):
     ]
 
     if not assessments:
-        st.info(
-            "No assessments are available "
-            "for your permitted classes."
-        )
+        st.info("No assessment records found.")
         return
 
     st.metric(
-        "Assessment sessions",
+        "Assessment Sessions",
         len(assessments),
     )
 
@@ -1101,26 +1023,26 @@ def _reports(token, school_id, classes):
     )
 
     target = _class_picker(
-        classes,
-        "lit_report_class",
+        classes, "report_class"
     )
 
     if not target:
         return
 
+    students = _query(
+        token,
+        "literacy_students",
+        "id,student_name,admission_number,active",
+        class_id=target["id"],
+    )
+
     students = [
-        student
-        for student in _query(
-            token,
-            "literacy_students",
-            "id,student_name,admission_number,active",
-            class_id=target["id"],
-        )
+        student for student in students
         if student.get("active", True)
     ]
 
     if not students:
-        st.info("No students enrolled in this class.")
+        st.info("No students registered.")
         return
 
     labels = {
@@ -1132,10 +1054,9 @@ def _reports(token, school_id, classes):
     }
 
     student_id = st.selectbox(
-        "Student progress",
+        "Select Student",
         list(labels),
-        format_func=lambda item_id: labels[item_id],
-        key="lit_report_student",
+        format_func=lambda sid: labels[sid],
     )
 
     history = sorted(
@@ -1153,9 +1074,7 @@ def _reports(token, school_id, classes):
     )
 
     if not history:
-        st.info(
-            "This student has not been assessed yet."
-        )
+        st.info("Student not yet assessed.")
         return
 
     latest = {}
@@ -1169,44 +1088,42 @@ def _reports(token, school_id, classes):
             assessment_id=assessment["id"],
         )
 
-        for result in results:
+        for item in results:
 
-            competency_id = result["competency_id"]
+            competency_id = item["competency_id"]
 
             if (
                 competency_id not in latest
-                and result["rating"] != "Not Assessed"
+                and item["rating"] != "Not Assessed"
             ):
-                latest[competency_id] = result["rating"]
+                latest[competency_id] = item["rating"]
 
-    criteria = _criteria(
-        token,
-        target["grade"],
+    competencies = _criteria(
+        token, target["grade"]
     )
 
     level, details = calculate_demonstrated_level(
         latest,
-        criteria,
+        competencies,
         target["grade"],
     )
 
     left, right = st.columns(2)
 
     left.metric(
-        "Enrolled grade",
+        "Enrolled Grade",
         target["grade"],
     )
 
     right.metric(
-        "Demonstrated literacy level",
-        level or "Not established",
+        "Demonstrated Literacy Level",
+        level or "Not Established",
     )
 
     st.caption(
-        "Provisional thresholds: 80% competency "
+        "Provisional thresholds: 80% assessment "
         "coverage and 80% Independent performance "
-        "at each successive level. Unassessed "
-        "competencies are not treated as failures."
+        "at each successive level."
     )
 
     st.dataframe(
@@ -1216,33 +1133,28 @@ def _reports(token, school_id, classes):
 
     next_level = next(
         (
-            item
-            for item in details
+            item for item in details
             if not item["Mastered"]
         ),
         None,
     )
 
     if next_level:
-
         st.info(
-            f"Next learning target: "
-            f"{next_level['Level']} competencies."
+            f"Next Learning Target: "
+            f"{next_level['Level']}"
         )
 
-    skill_rows = [
+    report = pd.DataFrame([
         {
-            "Origin level": item["grade"],
+            "Origin Level": item["grade"],
             "Competency": item["title"],
             "Status": latest.get(
-                item["id"],
-                "Not Assessed",
+                item["id"], "Not Assessed"
             ),
         }
-        for item in criteria
-    ]
-
-    report = pd.DataFrame(skill_rows)
+        for item in competencies
+    ])
 
     st.dataframe(
         report,
@@ -1250,22 +1162,22 @@ def _reports(token, school_id, classes):
     )
 
     st.download_button(
-        "Download student competency report (CSV)",
-        report.to_csv(
-            index=False
-        ).encode("utf-8-sig"),
-        f"literacy_progress_{student_id}.csv",
+        "Download Student Report",
+        report.to_csv(index=False).encode("utf-8-sig"),
+        f"literacy_report_{student_id}.csv",
         "text/csv",
     )
 
 
 # =====================================================
-# MAIN APPLICATION ROUTER
+# MAIN APPLICATION
 # =====================================================
 
 def render_assessment_module():
 
-    st.title("Foundational Literacy Assessments")
+    st.title(
+        "Foundational Literacy Assessment Platform"
+    )
 
     token, user_id = _login()
 
@@ -1277,7 +1189,7 @@ def render_assessment_module():
     if is_platform_admin(token, user_id):
 
         workspace = st.radio(
-            "Workspace",
+            "Select Workspace",
             [
                 "Platform Super Admin",
                 "School Assessments",
@@ -1286,16 +1198,18 @@ def render_assessment_module():
         )
 
         if workspace == "Platform Super Admin":
+
             render_platform_admin(
-                token,
-                user_id,
+                token, user_id
             )
+
             return
 
     school_id, role, school_name = _school(
-        token,
-        user_id,
+        token, user_id
     )
+
+    st.caption(f"School: {school_name}")
 
     classes = _classes(
         token,
@@ -1304,22 +1218,23 @@ def render_assessment_module():
         role,
     )
 
-    tabs = [
+    modules = [
         "Student Assessments",
         "Teacher Assessments",
         "Progress Reports",
     ]
 
     if role in MANAGERS:
-        tabs.append("Assessment Admin")
+        modules.append("Assessment Admin")
 
     selected = st.radio(
         "Module",
-        tabs,
+        modules,
         horizontal=True,
     )
 
     if selected == "Student Assessments":
+
         _student_assessments(
             token,
             school_id,
@@ -1328,6 +1243,7 @@ def render_assessment_module():
         )
 
     elif selected == "Teacher Assessments":
+
         _teacher_assessments(
             token,
             school_id,
@@ -1337,17 +1253,18 @@ def render_assessment_module():
         )
 
     elif selected == "Progress Reports":
+
         _reports(
             token,
             school_id,
             classes,
         )
 
-    else:
+    elif selected == "Assessment Admin":
+
         _admin(
             token,
             school_id,
             classes,
             role,
         )
-
