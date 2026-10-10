@@ -19,7 +19,13 @@ export async function POST(request){
   const {data:adminRow,error:adminError}=await admin.from("literacy_platform_admins")
     .select("user_id").eq("user_id",user.id).maybeSingle();
   if(adminError)return send({error:"Unable to verify Super Admin permissions."},503);
-  if(!adminRow)return send({error:"Only the Platform Super Admin can create, edit or publish competencies."},403);
+  if(!adminRow){
+   const {data:mayEdit,error:accessError}=await userClient.rpc("lit_permission_any_school",{
+    p_feature:"competencies.edit"
+   });
+   if(accessError)return send({error:"Unable to verify curriculum access."},503);
+   if(mayEdit!==true)return send({error:"Curriculum editing is disabled for your role."},403);
+  }
   const raw=await request.text();
   if(raw.length>20000)return send({error:"Request too large."},413);
   const body=JSON.parse(raw);
