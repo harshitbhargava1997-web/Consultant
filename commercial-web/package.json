@@ -12,6 +12,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "@supabase/supabase-js": "^2.57.0",
-    "lucide-react": "^0.468.0"
+    "lucide-react": "^0.468.0",
+    "exceljs": "^4.4.0"
   }
 }
