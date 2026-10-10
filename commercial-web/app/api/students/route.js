@@ -38,10 +38,17 @@ export async function POST(request){
   ]);
   if([superRes,memberRes,consultantRes,teacherRes].some(r=>r.error))
    return response({error:"School permission check failed."},503);
-  const manager=["owner","principal","coordinator"].includes(memberRes.data?.role);
-  const canManage=!!superRes.data||manager||!!consultantRes.data||
-    (memberRes.data?.role==="teacher"&&!!teacherRes.data);
-  if(!canManage)return response({error:"You may manage students only in your assigned classes or schools."},403);
+  const role=consultantRes.data?"consultant":memberRes.data?.role;
+  const memberAssigned=!!superRes.data||!!consultantRes.data||
+   ["owner","principal","coordinator"].includes(role)||
+   (role==="teacher"&&!!teacherRes.data);
+  if(!memberAssigned)return response({error:"You may manage students only in assigned classes or schools."},403);
+  if(!superRes.data){
+   const {data:grant,error:grantError}=await admin.from("literacy_role_permissions")
+    .select("enabled").eq("role",role).eq("feature","students.manage").maybeSingle();
+   if(grantError)throw grantError;
+   if(!grant?.enabled)return response({error:"Student management is disabled for your role."},403);
+  }
   if(body.action==="add"){
    const name=typeof body.studentName==="string"?body.studentName.trim():"";
    const admission=typeof body.admissionNumber==="string"?body.admissionNumber.trim():"";
