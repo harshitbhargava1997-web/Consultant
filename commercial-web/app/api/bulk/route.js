@@ -36,12 +36,13 @@ async function authorized(request,schoolId){
  ]);
  if(memberResult.error||consultantResult.error)return {error:"Unable to verify school permissions.",status:503};
  const isAssignedConsultant=!!consultantResult.data;
- if(!isAdmin&&!isAssignedConsultant&&!MANAGERS.includes(memberResult.data?.role))
-  return {error:"School owner, principal, coordinator or assigned Consultant access is required.",status:403};
+ const role=memberResult.data?.role||"";
+ if(!isAdmin&&!isAssignedConsultant&&!MANAGERS.includes(role)&&role!=="teacher")
+  return {error:"No stakeholder/student upload access for this school.",status:403};
  const {data:school,error:schoolError}=await admin.from("literacy_schools")
    .select("id,name").eq("id",schoolId).maybeSingle();
  if(schoolError||!school)return {error:"Assigned school not found.",status:404};
- return {admin,user,isAdmin,isAssignedConsultant,school};
+ return {admin,user,isAdmin,isAssignedConsultant,role,school};
 }
 async function authUsers(admin){
  const byEmail=new Map(),byId=new Map();
@@ -74,6 +75,8 @@ function rowResult(row,status,detail){
  return {row_number:Number(row.row_number)||0,status,detail};
 }
 async function importPeople(ctx,rows){
+ if(!ctx.isAdmin&&!ctx.isAssignedConsultant&&!MANAGERS.includes(ctx.role))
+  throw Error("Teachers cannot provision staff accounts.");
  const results=[];
  const directory=await authUsers(ctx.admin);
  const {data:members,error:membersErr}=await ctx.admin.from("literacy_memberships")
@@ -132,6 +135,14 @@ async function importStudents(ctx,rows){
   .select("id,grade,section,academic_year").eq("school_id",ctx.school.id);
  if(error)throw error;
  const classMap=new Map((classes||[]).map(c=>[[c.grade,c.section,c.academic_year].join("|"),c.id]));
+ const isTeacher=!ctx.isAdmin&&!ctx.isAssignedConsultant&&ctx.role==="teacher";
+ let teacherClassIds=new Set();
+ if(isTeacher){
+  const {data:assigned,error:assignedError}=await ctx.admin.from("literacy_teacher_classes")
+   .select("class_id").eq("teacher_user_id",ctx.user.id).in("class_id",(classes||[]).map(c=>c.id).length?(classes||[]).map(c=>c.id):["00000000-0000-0000-0000-000000000000"]);
+  if(assignedError)throw assignedError;
+  teacherClassIds=new Set((assigned||[]).map(c=>c.class_id));
+ }
  const seen=new Set(),results=[],valid=[];
  for(const row of rows){
   const grade=clean(row.grade),section=clean(row.section)||"A",
@@ -143,6 +154,9 @@ async function importStudents(ctx,rows){
   }
   const classId=classMap.get([grade,section,year].join("|"));
   if(!classId){results.push(rowResult(row,"error","Class not found. Create the grade/section/year in Classes & students first."));continue;}
+  if(isTeacher&&!teacherClassIds.has(classId)){
+   results.push(rowResult(row,"error","You may import students only into your assigned classes."));continue;
+  }
   const key=classId+"|"+admission.toLowerCase();
   if(seen.has(key)){results.push(rowResult(row,"error","Duplicate admission number for this class in the upload batch."));continue;}
   seen.add(key);
@@ -197,8 +211,14 @@ export async function POST(request){
   if(!/^[0-9a-f-]{36}$/i.test(schoolId))return response({error:"Select a school."},400);
   const ctx=await authorized(request,schoolId);
   if(ctx.error)return response({error:ctx.error},ctx.status);
-  if(body.action==="exportPeople")return response({rows:await exportPeople(ctx),school:ctx.school.name});
-  if(body.action==="exportStudents")return response({rows:await exportStudents(ctx),school:ctx.school.name});
+  if(body.action==="exportPeople"||body.action==="exportStudents"){
+   // Exporting roster or staff data is a platform-only permission.
+   if(!ctx.isAdmin)return response({error:"Only the Super Admin can download stakeholder or student data."},403);
+   if(body.action==="exportPeople")return response({rows:await exportPeople(ctx),school:ctx.school.name});
+   return response({rows:await exportStudents(ctx),school:ctx.school.name});
+  }
+  if(body.action==="importPeople"&&!ctx.isAdmin&&!ctx.isAssignedConsultant&&!MANAGERS.includes(ctx.role))
+   return response({error:"Teachers can only import students into assigned classes."},403);
   if(body.action!=="importPeople"&&body.action!=="importStudents")
    return response({error:"Unsupported bulk action."},400);
   if(!Array.isArray(body.rows)||body.rows.length<1||body.rows.length>100)
