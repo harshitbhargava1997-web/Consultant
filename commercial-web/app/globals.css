@@ -120,3 +120,29 @@
  .assessor-save-row .btn{width:100%}
  .assessor-session-head{flex-direction:column;align-items:flex-start}
 }
+
+
+/* Platform Super Admin configurable role permissions */
+.role-permissions{display:flex;flex-direction:column;gap:18px}
+.role-permissions .panel{margin-bottom:0}
+.role-permissions .panel-head h2{display:flex;align-items:center;gap:9px}
+.role-picker{display:flex;gap:9px;flex-wrap:wrap;margin:18px 0}
+.role-picker .btn{flex:1;min-width:118px}
+.role-summary{border:1px solid #dce9e6;background:#f5faf9;border-radius:12px;padding:14px 15px;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.role-summary span{display:flex;align-items:center;gap:8px;font-size:12px;color:#44666a;font-weight:750}
+.role-summary strong{color:#145b59;font-size:13px}
+.role-summary .btn{min-height:35px;padding:8px 12px;font-size:11px}
+.role-setting-list{display:flex;flex-direction:column;gap:0}
+.role-setting{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:22px;border-bottom:1px solid var(--border);padding:16px 4px}
+.role-setting:last-child{border-bottom:0}
+.role-setting-info{display:flex;flex-direction:column;align-items:flex-start;gap:5px;flex:1;min-width:0}
+.role-setting-info strong{font-size:13px;color:#20374a}
+.role-setting-info small{font-size:11px;line-height:1.45;color:#7b8998;font-weight:400}
+.role-setting input[type=checkbox]{appearance:none;width:43px;min-width:43px;height:25px;border-radius:30px;padding:0;border:1px solid #b9c9d0;background:#d1d8dd;cursor:pointer;position:relative;box-shadow:none;transition:.2s}
+.role-setting input[type=checkbox]:before{content:"";position:absolute;top:3px;left:3px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.12);transition:.2s}
+.role-setting input[type=checkbox]:checked{background:#17867f;border-color:#17867f}
+.role-setting input[type=checkbox]:checked:before{transform:translateX(18px)}
+.role-setting input[type=checkbox]:focus-visible{outline:3px solid #8bc6bf;outline-offset:3px}
+.role-setting input[type=checkbox]:disabled{opacity:.55;cursor:not-allowed}
+.role-locked{display:inline-flex;align-items:center;gap:5px;color:#687e8a;border:1px solid #e2e8ed;border-radius:7px;font-size:11px;padding:7px 10px;flex-shrink:0}
+@media(max-width:760px){.role-picker .btn{min-width:calc(50% - 5px)}.role-setting{gap:14px}.role-summary .btn{width:100%}}
