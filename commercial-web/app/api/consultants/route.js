@@ -138,16 +138,12 @@ export async function POST(request){
   const action=text(body.action);
   if(["createConsultant","assignConsultant","removeAssignment"].includes(action)){
    if(!ctx.isAdmin){
-    if(!ctx.profile)return send({error:"Consultant management requires a Super Admin or Consultant account."},403);
     if(action==="createConsultant"){
-     const {data:own,error:ownErr}=await ctx.admin.from("literacy_consultant_assignments")
-      .select("school_id").eq("consultant_user_id",ctx.user.id).limit(1);
-     if(ownErr)throw ownErr;
-     if(!own?.length)return send({error:"A school assignment is required to register Consultants."},403);
+     const manageable=await managerSchools(ctx);
+     if(!manageable.length)return send({error:"Consultant management is disabled for your role."},403);
     }else{
-     const targetSchool=text(body.schoolId);
-     if(!uuid(targetSchool)||!await assigned(ctx,targetSchool))
-      return send({error:"You may manage Consultant assignments only in your assigned schools."},403);
+     if(!await permission(ctx,text(body.schoolId),"consultants.manage"))
+      return send({error:"Consultant assignment management is disabled for this school."},403);
     }
    }
    if(action==="createConsultant"){
@@ -200,10 +196,9 @@ export async function POST(request){
    return send({message:"Consultant assignment removed. Historical activity records remain."});
   }
   if(action==="logActivity"){
-   if(!ctx.profile)return send({error:"An assigned Consultant account is required."},403);
    const schoolId=text(body.schoolId);
-   if(!uuid(schoolId)||!await assigned(ctx,schoolId))
-    return send({error:"You are not assigned to this school."},403);
+   if(!await permission(ctx,schoolId,"consultants.log"))
+    return send({error:"Training logs are disabled for this role or school."},403);
    const kind=text(body.kind),topic=text(body.topic),
     date=text(body.activityDate),minutes=Number(body.durationMinutes),
     participantRoles=text(body.participantRoles),summary=text(body.summary),nextAction=text(body.nextAction);
@@ -213,7 +208,7 @@ export async function POST(request){
       participantRoles.length>300||summary.length>4000||nextAction.length>2000)
     return send({error:"Check date, activity type, title, duration and notes."},400);
    const {data,error}=await ctx.admin.from("literacy_consultant_activities").insert({
-    consultant_user_id:ctx.user.id,school_id:schoolId,kind,activity_date:date,
+    consultant_user_id:ctx.profile?ctx.user.id:null,recorded_by_user_id:ctx.user.id,school_id:schoolId,kind,activity_date:date,
     topic,duration_minutes:minutes,participant_roles:participantRoles,summary,next_action:nextAction
    }).select("id").single();
    if(error)throw error;
