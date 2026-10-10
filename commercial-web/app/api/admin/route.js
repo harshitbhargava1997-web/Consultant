@@ -71,9 +71,14 @@ export async function POST(request) {
     ]);
     if(memberResult.error||consultantResult.error)return response({error:"School permission check failed."},503);
     isAssignedConsultant=!!consultantResult.data;
-    const isLeader=["owner","principal","coordinator"].includes(memberResult.data?.role);
-    if(!isAssignedConsultant&&!isLeader)
-     return response({error:"Only school leaders or assigned Consultants can manage accounts for this school."},403);
+    const currentRole=isAssignedConsultant?"consultant":memberResult.data?.role;
+    if(!["consultant","owner","principal","coordinator","teacher"].includes(currentRole))
+     return response({error:"You are not assigned to this school."},403);
+    const {data:setting,error:settingError}=await admin.from("literacy_role_permissions")
+      .select("enabled").eq("role",currentRole).eq("feature","users.manage").maybeSingle();
+    if(settingError)throw settingError;
+    if(!setting?.enabled)
+     return response({error:"User management is disabled for your stakeholder role."},403);
     if(!isAssignedConsultant&&role!=="teacher")
      return response({error:"School leaders may create or assign teachers only."},403);
    }
