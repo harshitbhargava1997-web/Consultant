@@ -37,10 +37,12 @@ export async function POST(request) {
  try{
   const ctx=await authorize(request);
   if(ctx.error)return response({error:ctx.error},ctx.status);
-  if(!ctx.isAdmin)return response({error:"Platform Super Admin permission required."},403);
   if(ctx.user.app_metadata?.must_change_password)return response({error:"Change your initial password first."},403);
-  const admin=adminClient();
   const body=await request.json();
+  // Only teacher onboarding is delegated. All other admin actions remain platform-admin-only.
+  if(body.action!=="createUser" && !ctx.isAdmin)
+   return response({error:"Platform Super Admin permission required."},403);
+  const admin=adminClient();
   if(body.action==="createSchool"){
    const name=String(body.name||"").trim();
    if(name.length<3||name.length>180)return response({error:"Enter a valid school name."},400);
@@ -56,7 +58,17 @@ export async function POST(request) {
    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||fullName.length<2||fullName.length>160||
       !["owner","principal","coordinator","teacher"].includes(role)||
       !/^[0-9a-f-]{36}$/i.test(schoolId))return response({error:"Valid user, role and school required."},400);
-   const {data:school}=await admin.from("literacy_schools").select("id").eq("id",schoolId).maybeSingle();
+   // Use server-side membership checks. Never trust the school or role selected by the browser.
+   if(!ctx.isAdmin){
+    if(role!=="teacher")return response({error:"School leaders may create or assign teachers only."},403);
+    const {data:manager,error:managerError}=await admin.from("literacy_memberships")
+      .select("role").eq("school_id",schoolId).eq("user_id",ctx.user.id).maybeSingle();
+    if(managerError)throw managerError;
+    if(!manager||!["owner","principal","coordinator"].includes(manager.role))
+     return response({error:"School owner, principal or coordinator access required for this school."},403);
+   }
+   const {data:school,error:schoolError}=await admin.from("literacy_schools").select("id").eq("id",schoolId).maybeSingle();
+   if(schoolError)throw schoolError;
    if(!school)return response({error:"School not found."},400);
    let existing=null;let page=1;
    while(page<=50&&!existing){
@@ -64,6 +76,15 @@ export async function POST(request) {
     if(error)throw error;
     existing=(data.users||[]).find(u=>u.email?.toLowerCase()===email);
     if((data.users||[]).length<200)break;page++;
+   }
+   // Protect existing owner/principal/coordinator memberships from being overwritten
+   // by delegated teacher creation, including same-email reassignments.
+   if(!ctx.isAdmin && existing){
+    const {data:currentMembership,error:memberError}=await admin.from("literacy_memberships")
+      .select("role").eq("school_id",schoolId).eq("user_id",existing.id).maybeSingle();
+    if(memberError)throw memberError;
+    if(currentMembership && currentMembership.role!=="teacher")
+      return response({error:"This account already has a different school role. Contact the Platform Super Admin."},403);
    }
    const isNewAccount=!existing;
    if(isNewAccount){
@@ -85,7 +106,12 @@ export async function POST(request) {
    const {error:membershipError}=await admin.from("literacy_memberships")
      .upsert({school_id:schoolId,user_id:existing.id,display_name:fullName,role},
        {onConflict:"school_id,user_id"});
-   if(membershipError)throw membershipError;
+   if(membershipError){
+    // Undo a newly provisioned account if its school assignment fails.
+    // Do not delete pre-existing accounts.
+    if(isNewAccount)await admin.auth.admin.deleteUser(existing.id).catch(()=>{});
+    throw membershipError;
+   }
    return response({created:isNewAccount,email,
      message:isNewAccount
        ?"User created using the initial password you supplied. Share it privately; they may use Forgot password to change it. Confirm email ownership separately."
