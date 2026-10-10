@@ -65,6 +65,14 @@ def Table(data, *args, **kwargs):
 
 # Page layout configuration
 st.set_page_config(page_title="Academic Manager Portfolio & Teacher Performance Indicator Review Dashboard", layout="wide")
+# Assessment navigation keeps the original implementation workflow untouched.
+from assessment_module import render_assessment_module
+assessment_view = st.sidebar.radio("Application", ["Existing portal", "Literacy assessments"], key="lit_navigation")
+if assessment_view == "Literacy assessments":
+    render_assessment_module()
+    st.stop()
+
+
 
 # Optional deployment protection. Configure [access] admin_password before sharing.
 try:
