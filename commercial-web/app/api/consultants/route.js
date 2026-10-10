@@ -98,11 +98,10 @@ export async function GET(request){
   const url=new URL(request.url),schoolId=url.searchParams.get("schoolId");
   if(schoolId){
    if(!uuid(schoolId))return send({error:"Invalid school."},400);
-   if(!await assigned(ctx,schoolId)&&!await schoolManager(ctx,schoolId))
+   if(!await permission(ctx,schoolId,"consultants.support")&&!await permission(ctx,schoolId,"consultants.log"))
     return send({error:"School access not permitted."},403);
    return send({overview:await schoolOverview(ctx,schoolId)});
   }
-  // A consultant's management directory contains only its assigned schools.
   let consultantSchools=[];
   if(!ctx.isAdmin&&ctx.profile){
    const {data:own,error:ownError}=await ctx.admin.from("literacy_consultant_assignments")
@@ -110,27 +109,23 @@ export async function GET(request){
    if(ownError)throw ownError;
    consultantSchools=(own||[]).map(a=>a.school_id);
   }
-  if(!ctx.isAdmin&&!ctx.profile)return send({isConsultant:false,consultantSchools:[]});
-  let assignmentQuery=ctx.admin.from("literacy_consultant_assignments")
+  const manageable=ctx.isAdmin?[]:await managerSchools(ctx);
+  if(!ctx.isAdmin&&!manageable.length)
+   return send({isConsultant:!!ctx.profile,consultantSchools,consultants:[],assignments:[]});
+  let query=ctx.admin.from("literacy_consultant_assignments")
     .select("consultant_user_id,school_id,assigned_at")
     .order("assigned_at",{ascending:false}).limit(2000);
-  if(!ctx.isAdmin){
-   // A Consultant with no schools does not see or manage other consultants.
-   if(!consultantSchools.length)return send({isConsultant:true,consultantSchools:[],consultants:[],assignments:[]});
-   assignmentQuery=assignmentQuery.in("school_id",consultantSchools);
-  }
-  const {data:assignments,error:assignmentError}=await assignmentQuery;
+  if(!ctx.isAdmin)query=query.in("school_id",manageable);
+  const {data:assignments,error:assignmentError}=await query;
   if(assignmentError)throw assignmentError;
-  let rosterQuery=ctx.admin.from("literacy_consultants")
+  const {data:roster,error:rosterError}=await ctx.admin.from("literacy_consultants")
     .select("user_id,display_name,created_at,created_by")
     .order("created_at",{ascending:false}).limit(1000);
-  const {data:roster,error:rosterError}=await rosterQuery;
   if(rosterError)throw rosterError;
-  const allowedIds=new Set((assignments||[]).map(a=>a.consultant_user_id));
-  const visibleRoster=ctx.isAdmin?roster:(roster||[]).filter(c=>allowedIds.has(c.user_id)||c.created_by===ctx.user.id||c.user_id===ctx.user.id);
-  return send({isConsultant:!!ctx.profile,isAdmin:ctx.isAdmin,
-    consultantSchools,consultants:visibleRoster.map(({created_by,...c})=>c),
-    assignments:assignments||[]});
+  const ids=new Set((assignments||[]).map(a=>a.consultant_user_id));
+  const visible=ctx.isAdmin?roster:(roster||[]).filter(c=>ids.has(c.user_id)||c.created_by===ctx.user.id);
+  return send({isConsultant:!!ctx.profile,isAdmin:ctx.isAdmin,consultantSchools,
+   consultants:visible.map(({created_by,...entry})=>entry),assignments:assignments||[]});
  }catch(e){return send({error:e.message||"Unable to load consultant data."},500);}
 }
 export async function POST(request){
