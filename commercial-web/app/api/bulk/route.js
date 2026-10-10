@@ -36,13 +36,20 @@ async function authorized(request,schoolId){
  ]);
  if(memberResult.error||consultantResult.error)return {error:"Unable to verify school permissions.",status:503};
  const isAssignedConsultant=!!consultantResult.data;
- const role=memberResult.data?.role||"";
- if(!isAdmin&&!isAssignedConsultant&&!MANAGERS.includes(role)&&role!=="teacher")
-  return {error:"No stakeholder/student upload access for this school.",status:403};
+ const role=isAssignedConsultant?"consultant":memberResult.data?.role||"";
+ if(!isAdmin&&!["consultant","owner","principal","coordinator","teacher"].includes(role))
+  return {error:"No access to this school.",status:403};
+ let granted=new Set();
+ if(!isAdmin){
+  const {data:permissionRows,error:permissionError}=await admin.from("literacy_role_permissions")
+   .select("feature").eq("role",role).eq("enabled",true);
+  if(permissionError)return {error:"Unable to load stakeholder role permissions.",status:503};
+  granted=new Set((permissionRows||[]).map(row=>row.feature));
+ }
  const {data:school,error:schoolError}=await admin.from("literacy_schools")
    .select("id,name").eq("id",schoolId).maybeSingle();
  if(schoolError||!school)return {error:"Assigned school not found.",status:404};
- return {admin,user,isAdmin,isAssignedConsultant,role,school};
+ return {admin,user,isAdmin,isAssignedConsultant,role,granted,school};
 }
 async function authUsers(admin){
  const byEmail=new Map(),byId=new Map();
@@ -75,8 +82,8 @@ function rowResult(row,status,detail){
  return {row_number:Number(row.row_number)||0,status,detail};
 }
 async function importPeople(ctx,rows){
- if(!ctx.isAdmin&&!ctx.isAssignedConsultant&&!MANAGERS.includes(ctx.role))
-  throw Error("Teachers cannot provision staff accounts.");
+ if(!ctx.isAdmin&&!ctx.granted.has("staff.import"))
+  throw Error("Your role cannot import stakeholder accounts.");
  const results=[];
  const directory=await authUsers(ctx.admin);
  const {data:members,error:membersErr}=await ctx.admin.from("literacy_memberships")
@@ -213,12 +220,15 @@ export async function POST(request){
   if(ctx.error)return response({error:ctx.error},ctx.status);
   if(body.action==="exportPeople"||body.action==="exportStudents"){
    // Exporting roster or staff data is a platform-only permission.
-   if(!ctx.isAdmin)return response({error:"Only the Super Admin can download stakeholder or student data."},403);
+   if(!ctx.isAdmin&&!ctx.granted.has("data.export"))
+    return response({error:"Data export is disabled for your role."},403);
    if(body.action==="exportPeople")return response({rows:await exportPeople(ctx),school:ctx.school.name});
    return response({rows:await exportStudents(ctx),school:ctx.school.name});
   }
-  if(body.action==="importPeople"&&!ctx.isAdmin&&!ctx.isAssignedConsultant&&!MANAGERS.includes(ctx.role))
-   return response({error:"Teachers can only import students into assigned classes."},403);
+  if(body.action==="importPeople"&&!ctx.isAdmin&&!ctx.granted.has("staff.import"))
+   return response({error:"Stakeholder upload is disabled for your role."},403);
+  if(body.action==="importStudents"&&!ctx.isAdmin&&!ctx.granted.has("students.import"))
+   return response({error:"Student upload is disabled for your role."},403);
   if(body.action!=="importPeople"&&body.action!=="importStudents")
    return response({error:"Unsupported bulk action."},400);
   if(!Array.isArray(body.rows)||body.rows.length<1||body.rows.length>100)
