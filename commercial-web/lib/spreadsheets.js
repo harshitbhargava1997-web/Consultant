@@ -2,6 +2,7 @@
 const XLSX_MIME="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 export const STAKEHOLDER_FIELDS=["full_name","email","role","initial_password"];
 export const STUDENT_FIELDS=["grade","section","academic_year","admission_number","student_name"];
+export const CLASS_FIELDS=["grade","section","academic_year"];
 
 async function excel(){
  const library=await import("exceljs");
@@ -36,7 +37,14 @@ function addGuide(book,kind,allowRoles){
  sheet.mergeCells("A1:B1");sheet.getCell("A1").font={size:17,bold:true,color:{argb:"FF127F79"}};
  sheet.getCell("A2").value=kind==="stakeholders"?"Stakeholder upload template":"Student roster upload template";
  sheet.mergeCells("A2:B2");sheet.getCell("A2").font={size:12,bold:true};
- const lines=kind==="stakeholders"?[
+ const lines=kind==="classes"?[
+  ["Required columns","grade, section, academic_year"],
+  ["Valid grades","Nursery, LKG, UKG, Grade 1, Grade 2, Grade 3, Grade 4"],
+  ["Class matching","One unique grade / section / academic year per school"],
+  ["Re-upload","Existing matching classes are preserved"],
+  ["School selection","Select your school in Vision before uploading"],
+  ["Limit","Maximum 500 rows per workbook"]
+ ]:kind==="stakeholders"?[
   ["Required columns","full_name, email, role, initial_password (only for new users)"],
   ["Allowed roles",allowRoles?"owner, principal, coordinator, teacher":"teacher only for your school"],
   ["New accounts","Provide a distinct strong initial password; 12–128 characters with uppercase, lowercase, number and symbol"],
@@ -65,8 +73,8 @@ function addGuide(book,kind,allowRoles){
  }
 }
 function workbookData(book,kind,rows){
- const headers=kind==="stakeholders"?STAKEHOLDER_FIELDS.slice(0,-1):STUDENT_FIELDS;
- const sheet=book.addWorksheet(kind==="stakeholders"?"Stakeholders":"Students");
+ const headers=kind==="stakeholders"?STAKEHOLDER_FIELDS.slice(0,-1):kind==="classes"?CLASS_FIELDS:STUDENT_FIELDS;
+ const sheet=book.addWorksheet(kind==="stakeholders"?"Stakeholders":kind==="classes"?"Classes":"Students");
  styleSheet(sheet,headers);
  for(const entry of rows){
   sheet.addRow(headers.map(k=>safeValue(entry[k])));
@@ -86,8 +94,8 @@ async function trigger(book,filename){
 export async function downloadTemplate(kind,admin){
  const ExcelJS=await excel();const book=new ExcelJS.Workbook();book.creator="Vision School Platform";
  addGuide(book,kind,admin);
- const headers=kind==="stakeholders"?STAKEHOLDER_FIELDS:STUDENT_FIELDS;
- const sheet=book.addWorksheet(kind==="stakeholders"?"Stakeholders":"Students");
+ const headers=kind==="stakeholders"?STAKEHOLDER_FIELDS:kind==="classes"?CLASS_FIELDS:STUDENT_FIELDS;
+ const sheet=book.addWorksheet(kind==="stakeholders"?"Stakeholders":kind==="classes"?"Classes":"Students");
  styleSheet(sheet,headers);
  if(kind==="stakeholders"){
   for(let r=2;r<=501;r++){
@@ -142,8 +150,8 @@ export async function readWorkbook(file,kind){
   try{await book.xlsx.load(normalized);}
   catch{throw new Error("This workbook could not be parsed. Please re-save it as an .xlsx file in Microsoft Excel or Google Sheets.");}
  }
- const headers=kind==="stakeholders"?STAKEHOLDER_FIELDS:STUDENT_FIELDS;
- const sheet=book.getWorksheet(kind==="stakeholders"?"Stakeholders":"Students");
+ const headers=kind==="stakeholders"?STAKEHOLDER_FIELDS:kind==="classes"?CLASS_FIELDS:STUDENT_FIELDS;
+ const sheet=book.getWorksheet(kind==="stakeholders"?"Stakeholders":kind==="classes"?"Classes":"Students");
  if(!sheet)throw Error("Spreadsheet worksheet missing. Please use the downloadable Vision template.");
  const available=new Map();
  sheet.getRow(1).eachCell({includeEmpty:false},(cell,column)=>{
@@ -179,8 +187,10 @@ export async function readWorkbook(file,kind){
  }else{
   const unique=new Set();
   for(const row of rows){
-   const key=[row.grade,row.section,row.academic_year,row.admission_number].join("|").toLowerCase();
-   if(row.admission_number&&unique.has(key))throw Error("Duplicate student admission number in the sheet (row "+row.row_number+").");
+   const key=(kind==="classes"?[row.grade,row.section,row.academic_year]:
+      [row.grade,row.section,row.academic_year,row.admission_number]).join("|").toLowerCase();
+   if((kind==="classes"||row.admission_number)&&unique.has(key))
+    throw Error("Duplicate "+(kind==="classes"?"class":"student admission number")+" in the sheet (row "+row.row_number+").");
    unique.add(key);
   }
  }
