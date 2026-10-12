@@ -33,7 +33,10 @@ export const PERMISSION_GROUPS=[
  {title:"Implementation & school support",items:[
   {key:"consultants.support",label:"View school support and training history",description:"School-level monitoring"},
   {key:"consultants.log",label:"Log school support and training",description:"Consultant-role activity logging"},
-  {key:"implementation.view",label:"View teacher implementation module",description:"Module is still being developed"},
+  {key:"implementation.view",label:"View implementation submission history",description:"Teachers see their submissions; authorized school leaders and Consultants see school evidence"},
+  {key:"implementation.submit",label:"Submit classroom implementation evidence",description:"Assigned teachers upload daily reflections, audio, lesson plans, writing and classroom evidence"},
+  {key:"implementation.review",label:"Review teacher implementation evidence",description:"Review implementation evidence across authorized school classes"},
+  {key:"implementation.feedback",label:"Provide implementation review feedback",description:"Record needs-follow-up or reviewed status and notes on teacher submissions"},
   {key:"observations.view",label:"View classroom observations module",description:"Module is still being developed"}
  ]}
 ];
