@@ -4,19 +4,22 @@ import {Download,FileSpreadsheet,UploadCloud,AlertCircle,CheckCircle2} from "luc
 import {downloadTemplate,readWorkbook,downloadExport,downloadImportResults} from "../lib/spreadsheets";
 
 const TYPES=[
+ {id:"classes",name:"Classes",uploadAction:"importClasses",exportAction:"exportClasses"},
  {id:"stakeholders",name:"Stakeholders (staff)",uploadAction:"importPeople",exportAction:"exportPeople"},
  {id:"students",name:"Students",uploadAction:"importStudents",exportAction:"exportStudents"}
 ];
 function counts(results){
  return results.reduce((a,row)=>{a[row.status]=(a[row.status]||0)+1;return a;},{});
 }
-export default function BulkWorkspace({session,schoolId,schoolName,canExport,canUploadStaff,canUploadStudents,canManageRoles,onImported}){
- const [kind,setKind]=useState("stakeholders");
+export default function BulkWorkspace({session,schoolId,schoolName,canExport,canUploadStaff,canUploadStudents,canUploadClasses=false,canManageRoles,fixedKind="",onImported}){
+ const [kind,setKind]=useState(fixedKind||"stakeholders");
  const [rows,setRows]=useState([]),[fileName,setFileName]=useState("");
  const [results,setResults]=useState([]),[busy,setBusy]=useState(false),[notice,setNotice]=useState("");
  const fileInput=useRef(null);
  const item=TYPES.find(t=>t.id===kind);
- useEffect(()=>{if(!canUploadStaff)setKind("students");else if(!canUploadStudents)setKind("stakeholders");},[canUploadStaff,canUploadStudents]);
+ useEffect(()=>{if(fixedKind){setKind(fixedKind);return;}
+  if(canUploadStaff)setKind("stakeholders");else if(canUploadStudents)setKind("students");else if(canUploadClasses)setKind("classes");
+ },[fixedKind,canUploadStaff,canUploadStudents,canUploadClasses]);
  useEffect(()=>{
   setRows([]);setResults([]);setNotice("");setFileName("");
   if(fileInput.current)fileInput.current.value="";
@@ -45,7 +48,7 @@ export default function BulkWorkspace({session,schoolId,schoolName,canExport,can
  }
  async function upload(){
   if(!schoolId||!rows.length||busy)return;
-  if(kind==="stakeholders"&&!canUploadStaff||kind==="students"&&!canUploadStudents){setNotice("Bulk upload is not enabled for this role.");return;}
+  if((kind==="stakeholders"&&!canUploadStaff)||(kind==="students"&&!canUploadStudents)||(kind==="classes"&&!canUploadClasses)){setNotice("Bulk upload is not enabled for this role.");return;}
   if(!window.confirm("Import "+rows.length+" "+item.name.toLowerCase()+" records into "+schoolName+"? Rows already processed may be saved even if later rows fail."))return;
   const saved=[];setBusy(true);setNotice("");
   const batchSize=kind==="stakeholders"?5:100;
@@ -95,17 +98,17 @@ export default function BulkWorkspace({session,schoolId,schoolName,canExport,can
  return <div className="bulk-stack">
   <section className="panel">
    <div className="panel-head"><h2>{canExport?"Bulk upload & export":"Bulk upload"}</h2><span className="eyebrow">EXCEL · SCHOOL-SCOPED</span></div>
-   <p className="bulk-intro">Upload staff or students using a blank Excel template. Imports are restricted to the selected school and show the outcome of each row. Only the Platform Super Admin can export existing records.</p>
-   <div className="bulk-choice" role="group" aria-label="Choose data type">
-    {TYPES.filter(t=>t.id==="stakeholders"?canUploadStaff:canUploadStudents||canExport).map(t=><button key={t.id} type="button" className={"btn "+(t.id===kind?"primary":"outline")} disabled={busy} aria-pressed={t.id===kind} onClick={()=>setKind(t.id)}>{t.name}</button>)}
-   </div>
-   <div className="notice small"><AlertCircle size={17}/><span>Selected school: <strong>{schoolName||"Choose a school from the top bar"}</strong>. Super Admins and assigned Consultants can import stakeholder roles; school leaders can import teachers and students; teachers can upload students into assigned classes only. Existing data exports are restricted to the Super Admin.</span></div>
+   <p className="bulk-intro">Upload {kind==="classes"?"classes":kind==="stakeholders"?"teachers and staff":"students"} using Vision's Excel template. New records stay within the selected school, and the result of every row is shown below. Existing record exports require their own Super Admin-controlled permission.</p>
+   {!fixedKind&&<div className="bulk-choice" role="group" aria-label="Choose data type">
+    {TYPES.filter(t=>t.id==="classes"?canUploadClasses||canExport:t.id==="stakeholders"?canUploadStaff||canExport:canUploadStudents||canExport).map(t=><button key={t.id} type="button" className={"btn "+(t.id===kind?"primary":"outline")} disabled={busy} aria-pressed={t.id===kind} onClick={()=>setKind(t.id)}>{t.name}</button>)}
+   </div>}
+   <div className="notice small"><AlertCircle size={17}/><span>Selected school: <strong>{schoolName||"Choose a school from the top bar"}</strong>. Uploads are checked against your role permissions. Teachers can import students only into assigned classes; exports of existing data need separate permission.</span></div>
   </section>
   <div className="two-col">
    <section className="panel">
     <div className="panel-head"><h2><FileSpreadsheet size={19}/> Excel import</h2></div>
-    <p className="helper">Download the blank template, enter records on the {kind==="stakeholders"?"Stakeholders":"Students"} worksheet, then select the completed .xlsx file. Up to 500 rows per upload.</p>
-    <button className="btn outline" disabled={busy} onClick={template}><Download size={16}/> Download {kind==="stakeholders"?"stakeholder":"student"} template</button>
+    <p className="helper">Download the blank template, enter records on the {kind==="stakeholders"?"Stakeholders":kind==="classes"?"Classes":"Students"} worksheet, then select the completed .xlsx file. Up to 500 rows per upload.</p>
+    <button className="btn outline" disabled={busy} onClick={template}><Download size={16}/> Download {kind==="stakeholders"?"stakeholder":kind==="classes"?"class":"student"} template</button>
     <div className="bulk-upload">
      <label htmlFor="bulk-excel-file">Upload completed Excel sheet
       <input id="bulk-excel-file" ref={fileInput} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={fileChanged} disabled={busy||!schoolId}/>
