@@ -4,6 +4,7 @@ import {browserClient,LEVELS,RATINGS,MANAGERS,skillProgress,parseCsv} from "../l
 import BulkWorkspace from "./BulkWorkspace";
 import AssessorWorkspace from "./AssessorWorkspace";
 import RolePermissions from "./RolePermissions";
+import SchoolManagementWorkspace from "./SchoolManagementWorkspace";
 import CurriculumEditor from "./CurriculumEditor";
 import ConsultantWorkspace,{ConsultantManagement} from "./ConsultantWorkspace";
 import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNoAxesCombined,
@@ -13,12 +14,10 @@ import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNo
 const navigation=[
  {id:"overview",label:"Overview",icon:LayoutDashboard},
  {id:"schools",label:"Schools",icon:School,admin:true},
- {id:"users",label:"User management",icon:Users,manager:true},
- {id:"bulk",label:"Bulk upload",icon:FileUp,importer:true,school:true},
+ {id:"users",label:"User management",icon:Users,school:true},
  {id:"consultants",label:"Consultant assignments",icon:Users,admin:true},
  {id:"permissions",label:"Role permissions",icon:ShieldCheck,admin:true},
  {id:"consultant",label:"Consultant support",icon:GraduationCap,consultant:true,school:true},
- {id:"classes",label:"Classes & students",icon:BookMarked,school:true},
  {id:"assess",label:"Literacy Assessor",icon:ClipboardCheck,school:true},
  {id:"teacher-review",label:"Teacher skills review",icon:GraduationCap,manager:true,school:true},
  {id:"competencies",label:"Competency library",icon:BookOpen,school:true},
@@ -331,6 +330,10 @@ export default function Home(){
  const availableNav=navigation.filter(n=>{
   if(n.id==="permissions")return identity.admin;
   if(n.id==="overview")return true;
+  if(n.id==="users")return !!schoolId&&
+   (can("users.manage")||can("classes.view")||can("classes.manage")||can("classes.import")||
+    can("staff.import")||can("students.import")||can("students.manage")||
+    can("teachers.assign")||can("data.export"));
   if(n.id==="schools")return can("schools.view");
   if(!schoolId)return false;
   if(n.id==="bulk")return can("staff.import")||can("students.import")||can("data.export");
@@ -347,46 +350,21 @@ export default function Home(){
  {page==="overview"&&<><div className="stats"><div className="stat"><span>Schools assigned</span><strong>{new Set([...identity.memberships.map(m=>m.school_id),...identity.consultantSchools]).size}</strong><small>School access</small></div><div className="stat"><span>Classes</span><strong>{visibleClasses.length}</strong><small>Accessible classes</small></div><div className="stat"><span>Students</span><strong>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).length}</strong><small>Registered learners</small></div><div className="stat"><span>Assessment sessions</span><strong>{assessments.filter(a=>visibleClasses.some(c=>c.id===a.class_id)).length}</strong><small>Last 500 loaded</small></div></div><div className="two-col"><Box title="Your learning workflow"><div className="workflow">{["Set up school and staff","Create classes and student rosters","Assess cumulative competencies","Review literacy level and interventions"].map((t,i)=><div key={t} className="workflow-row"><span>{i+1}</span>{t}<CircleCheck size={16}/></div>)}</div></Box><Box title="Product readiness"><div className="readiness"><p><CircleCheck size={17}/> Unified authentication and role-aware interface</p><p><CircleCheck size={17}/> Cumulative student assessment and reports</p><p><AlertCircle size={17}/> Legacy evidence migration requires secure ID mapping</p><p><AlertCircle size={17}/> Production security review and end-to-end testing pending</p></div></Box></div></>}
  {page==="permissions"&&identity.admin&&<RolePermissions session={session}/>}
  {page==="schools"&&can("schools.view")&&<div className="two-col"><Box title="Registered schools">{identity.schools.length?<div className="rows">{identity.schools.map(s=><div className="record" key={s.id}><School size={17}/><strong>{s.name}</strong></div>)}</div>:<Empty title="No schools yet" detail="Create your first school to begin."/>}</Box>{identity.admin&&<Box title="Register a school"><form onSubmit={addSchool} className="stack"><label>School name<input required maxLength={180} value={newSchool} onChange={e=>setNewSchool(e.target.value)} placeholder="Full registered school name"/></label><Btn kind="primary" type="submit" disabled={busy}><Plus size={16}/> Create school</Btn></form></Box>}</div>}
- {page==="users"&&schoolId&&can("users.manage")&&<div className="two-col">
- <Box title={canManageAllRoles?"Create or assign school user":"Add teacher to your school"}>
-  <form onSubmit={addUser} className="stack">
-   {identity.admin
-    ?<label>School<select required value={newUser.school} onChange={e=>setNewUser({...newUser,school:e.target.value})}><option value="">Choose school</option>{identity.schools.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-    :<label>Assigned school<input value={school?.name||""} readOnly aria-label="Your assigned school"/></label>}
-   <label>Full name<input required minLength={2} maxLength={160} value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})}/></label>
-   <label>Login email<input type="email" required value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})}/></label>
-   {canManageAllRoles
-    ?<label>Role<select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})}>{["owner","principal","coordinator","teacher"].map(r=><option key={r} value={r}>{r}</option>)}</select></label>
-    :<label>Role<input value="Teacher" readOnly aria-label="Teacher role"/></label>}
-   <label>Initial password (set manually)<input type="password" minLength={12} maxLength={128} autoComplete="new-password" placeholder="Choose a strong initial password" value={newUser.initialPassword} onChange={e=>setNewUser({...newUser,initialPassword:e.target.value})}/></label>
-   <label>Confirm initial password<input type="password" minLength={12} maxLength={128} autoComplete="new-password" placeholder="Enter the same password" value={newUser.confirmPassword} onChange={e=>setNewUser({...newUser,confirmPassword:e.target.value})}/></label>
-   <p className="helper">For a new account, enter 12–128 characters including uppercase, lowercase, a number and a symbol. Leave both password fields blank when assigning an existing account; its password will not change.</p>
-   <div className="notice small">Share the initial password privately and confirm the account holder's email address. Teachers can use “Forgot password” to change it. Super Admins and assigned Consultants can create school leaders, while school leaders can only add teachers.</div>
-   <Btn kind="primary" type="submit" disabled={busy}>{busy?"Please wait…":canManageAllRoles?"Create / assign user":"Add teacher"}</Btn>
-  </form>
- </Box>
- <Box title="School teachers and account provisioning">
-  {!identity.admin&&<div className="rows">
-   {members.filter(m=>m.role==="teacher").length
-     ?members.filter(m=>m.role==="teacher").map(m=><div className="record" key={m.user_id}><Users size={17}/><strong>{m.display_name||"Teacher"}</strong></div>)
-     :<Empty title="No teachers assigned yet" detail="Add a teacher to register them with this school."/>}
-  </div>}
-  {temporary?<div className="credentials"><h3>{temporary.created?"New account created":"Existing account assigned"}</h3><p>Login: {temporary.email}</p><p>{temporary.created?"The initial password you entered has been set and cleared from the form.":"The user's existing password was left unchanged."}</p></div>
-   :<p className="helper">Consultants may manage stakeholders in their assigned schools. Only the Super Admin may create new schools.</p>}
- </Box>
-</div>}
- {page==="bulk"&&schoolId&&(can("staff.import")||can("students.import")||can("data.export"))&&<BulkWorkspace
-  session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"}
-  canExport={can("data.export")} canUploadStaff={can("staff.import")}
-  canUploadStudents={can("students.import")} canManageRoles={canManageAllRoles} onImported={refresh}/>}
-
+ {page==="users"&&schoolId&&
+  (can("users.manage")||can("classes.view")||can("classes.manage")||can("classes.import")||
+   can("teachers.assign")||can("staff.import")||can("students.manage")||
+   can("students.import")||can("data.export"))&&
+  <SchoolManagementWorkspace client={client} session={session} schoolId={schoolId}
+   schoolName={school?.name||"Selected school"} classes={visibleClasses}
+   students={students.filter(s=>visibleClasses.some(c=>c.id===s.class_id))}
+   members={members} teacherClasses={teacherClasses}
+   grants={roleGrants} isAdmin={identity.admin} canManageAllRoles={canManageAllRoles}
+   onChanged={refresh}/>}
  {page==="consultants"&&can("consultants.manage")&&<ConsultantManagement session={session} schools={identity.schools.filter(x=>identity.admin||identity.consultantSchools.includes(x.id)||identity.memberships.some(m=>m.school_id===x.id))}/>} 
  {page==="consultant"&&schoolId&&(can("consultants.support")||can("consultants.log"))&&
   <ConsultantWorkspace session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"}
    isConsultant={can("consultants.log")}/>}
 
- {page==="classes"&&schoolId&&can("classes.view")&&<><div className="two-col"><Box title="Your classes"><div className="rows">{visibleClasses.length?visibleClasses.map(c=><button key={c.id} className={"record row-button "+(classObj?.id===c.id?"selected":"")} onClick={()=>setActiveClass(c.id)}><BookMarked size={17}/><strong>{c.grade} · {c.section}</strong><small>{c.academic_year}</small></button>):<Empty title="No classes yet" detail="A school leader can create a class."/>}</div></Box><Box title="Register class">{can("classes.manage")?<form className="stack" onSubmit={addClass}><label>Grade<select value={classForm.grade} onChange={e=>setClassForm({...classForm,grade:e.target.value})}>{LEVELS.map(g=><option key={g}>{g}</option>)}</select></label><label>Section<input value={classForm.section} required onChange={e=>setClassForm({...classForm,section:e.target.value})}/></label><label>Academic year<input value={classForm.academic_year} required onChange={e=>setClassForm({...classForm,academic_year:e.target.value})}/></label><Btn type="submit" kind="primary" disabled={busy}>Create class</Btn></form>:<Empty title="Read-only access" detail="Class creation is reserved for school leadership."/>}</Box></div>{can("teachers.assign")&&classObj&&<Box title="Assign teacher to class"><form onSubmit={assignTeacher} className="inline-form"><select value={selectedTeacher} onChange={e=>setSelectedTeacher(e.target.value)} required><option value="">Select a teacher</option>{members.filter(m=>m.role==="teacher").map(m=><option key={m.user_id} value={m.user_id}>{m.display_name||m.user_id}</option>)}</select><Btn type="submit" kind="primary" disabled={busy||!selectedTeacher}>Assign teacher</Btn></form><p className="helper">Only assigned teachers can submit student assessments for this class.</p></Box>}{classObj&&<Box title={"Students · "+classObj.grade+" "+classObj.section}><div className="students-head">{can("students.manage")&&<><form onSubmit={addStudent} className="inline-form"><input placeholder="Student full name" required value={studentName} onChange={e=>setStudentName(e.target.value)}/><Btn kind="primary" type="submit" disabled={busy}><Plus size={15}/> Add student</Btn></form>{can("students.import")&&<label className="upload-label">Import student CSV <input type="file" accept=".csv,text/csv" onChange={uploadRoster} disabled={busy}/></label>}</>}</div><div className="table-wrap"><table><thead><tr><th>Student</th><th>Assessment ID</th><th>Actions</th></tr></thead><tbody>{students.filter(s=>s.class_id===classObj.id&&s.active!==false).map(s=><tr key={s.id}><td>{s.student_name}</td><td className="mono">{s.admission_number}</td>
-<td>{can("students.manage")&&<button type="button" className="btn outline" disabled={busy} onClick={()=>removeStudent(s)} aria-label={"Remove "+s.student_name+" from class"}><Trash2 size={14}/> Remove</button>}</td></tr>)}</tbody></table></div></Box>}</>}
  {page==="assess"&&schoolId&&(can("assessments.create")||can("assessments.view"))&&<AssessorWorkspace
   client={client} schoolId={schoolId} classes={visibleClasses}
   students={students} competencies={competencies} canCreate={can("assessments.create")} canViewHistory={can("assessments.view")} onSaved={refresh}/>}
