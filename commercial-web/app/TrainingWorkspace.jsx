@@ -33,14 +33,14 @@ export default function TrainingWorkspace({
  session,client,schoolId,schoolName,schools=[],competencies=[],isAdmin=false,grants=[]
 }){
  const can=key=>isAdmin||grants.includes(key);
- const [data,setData]=useState({courses:[],units:[],progress:[],certificates:[],review:[],sessions:[]});
+ const [data,setData]=useState({courses:[],units:[],progress:[],certificates:[],review:[],sessions:[],trainingStaff:[]});
  const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
  const [tab,setTab]=useState(isAdmin?"publish":"learn");
  const [newCourseForm,setNewCourseForm]=useState(newCourse);
  const [courseId,setCourseId]=useState(""),[editCourseId,setEditCourseId]=useState("");
  const [unitForm,setUnitForm]=useState(newUnit),[uploadFile,setUploadFile]=useState(null);
  const [answers,setAnswers]=useState({});
- const [sessionForm,setSessionForm]=useState({courseId:"",heldOn:d(),attendeeCount:0,notes:"",nextAction:""});
+ const [sessionForm,setSessionForm]=useState({courseId:"",heldOn:d(),attendeeCount:0,attendeeIds:[],notes:"",nextAction:""});
  const [reviewFilter,setReviewFilter]=useState("");
  const selectedCourse=data.courses.find(c=>c.id===courseId);
  const draft=data.courses.find(c=>c.id===editCourseId);
@@ -274,7 +274,7 @@ export default function TrainingWorkspace({
       <div className="progress-bar"><span style={{width:percent+"%"}}/></div><strong>{percent}%</strong></div>
      {certMap.get(selectedCourse.id)&&<div id="training-certificate" className="training-certificate">
       <Medal size={30}/><span>VISION SCHOOL PLATFORM</span><h2>Certificate of Completion</h2>
-      <p>Professional development programme</p><h3>{selectedCourse.title}</h3>
+      <p>This certifies that</p><h3>{data.learnerName||"Programme participant"}</h3><p>has completed</p><h3>{selectedCourse.title}</h3><p>School: {schoolName||"Vision Partner School"}</p>
       <p>Successfully completed with required practice and assessment</p>
       <small>Certificate ID: {certMap.get(selectedCourse.id).code}</small>
       <small>Issued: {new Date(certMap.get(selectedCourse.id).issued_at).toLocaleDateString("en-IN")}</small>
@@ -319,7 +319,7 @@ export default function TrainingWorkspace({
     <div className="panel-head"><h2><Users size={18}/> Deliver a school training session</h2></div>
     <p className="helper">Consultants and authorized school leaders can record a facilitated workshop, demonstration or coaching session. Attendance records are distinct from individual learner completion.</p>
     <form className="stack" onSubmit={e=>{e.preventDefault();execute("logSession",sessionForm,()=>{
-     setSessionForm({courseId:"",heldOn:d(),attendeeCount:0,notes:"",nextAction:""});
+     setSessionForm({courseId:"",heldOn:d(),attendeeCount:0,attendeeIds:[],notes:"",nextAction:""});
     });}}>
      <label>Training programme<select required value={sessionForm.courseId}
       onChange={e=>setSessionForm({...sessionForm,courseId:e.target.value})}>
@@ -329,6 +329,15 @@ export default function TrainingWorkspace({
        onChange={e=>setSessionForm({...sessionForm,heldOn:e.target.value})}/></label>
       <label>Attendees (count)<input type="number" min={0} max={10000} value={sessionForm.attendeeCount}
        onChange={e=>setSessionForm({...sessionForm,attendeeCount:Number(e.target.value)})}/></label>
+     </div>
+     <div><strong className="training-label">Teachers attending (optional individual attendance record)</strong>
+      <div className="training-options">
+       {(data.trainingStaff||[]).map(t=><label key={t.user_id} className="manage-check">
+        <input type="checkbox" checked={sessionForm.attendeeIds.includes(t.user_id)}
+         onChange={()=>setSessionForm(f=>({...f,attendeeIds:toggle(f.attendeeIds,t.user_id)}))}/>
+        <span><strong>{t.display_name||"School teacher"}</strong></span>
+       </label>)}
+      </div><p className="helper">Tick individual participants when known. If attendees are selected, the individual count overrides the manual count. Attendance alone does not award a completion certificate.</p>
      </div>
      <label>Training observations<textarea rows={3} maxLength={4000} value={sessionForm.notes}
       onChange={e=>setSessionForm({...sessionForm,notes:e.target.value})}/></label>
@@ -351,10 +360,10 @@ export default function TrainingWorkspace({
    <p className="helper">Review staff participation, unit completion and certificates for the selected school. This is not an export and does not show private login credentials.</p>
    <label>Find staff member<input type="search" value={reviewFilter} onChange={e=>setReviewFilter(e.target.value)}
     placeholder="Search by name or role"/></label>
-   <div className="table-wrap"><table><thead><tr><th>Stakeholder</th><th>Role</th><th>Completed units</th><th>Certificates</th><th>Course status</th></tr></thead>
+   <div className="table-wrap"><table><thead><tr><th>Stakeholder</th><th>Role</th><th>Completed units</th><th>Certificates</th><th>Training sessions attended</th><th>Course status</th></tr></thead>
     <tbody>{schoolParticipants.map(p=><tr key={p.user_id}>
      <td>{p.name}</td><td>{nameOf(p.role)}</td>
-     <td>{p.units_completed}</td><td>{p.certificates}</td>
+     <td>{p.units_completed}</td><td>{p.certificates}</td><td>{p.attended_sessions||0}</td>
      <td>{p.courses.map(c=>c.title+": "+c.units_completed+"/"+c.units_total+(c.certified?" certified":"")).join(" · ")||"No assigned courses"}</td>
     </tr>)}</tbody></table></div>
    {!schoolParticipants.length&&<p className="helper">No matching staff members or training records.</p>}
