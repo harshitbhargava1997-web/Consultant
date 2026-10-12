@@ -7,6 +7,7 @@ import RolePermissions from "./RolePermissions";
 import SchoolManagementWorkspace from "./SchoolManagementWorkspace";
 import TrainingWorkspace from "./TrainingWorkspace";
 import TrainingImpactPanel from "./TrainingImpactPanel";
+import ImplementationWorkspace from "./ImplementationWorkspace";
 import CurriculumEditor from "./CurriculumEditor";
 import ConsultantWorkspace,{ConsultantManagement} from "./ConsultantWorkspace";
 import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNoAxesCombined,
@@ -345,6 +346,7 @@ export default function Home(){
   if(n.id==="assess")return can("assessments.create")||can("assessments.view");
   if(n.id==="consultant")return can("consultants.support")||can("consultants.log");
   if(n.id==="competencies")return can("competencies.view")||can("competencies.edit");
+  if(n.id==="implementation")return can("implementation.view")||can("implementation.submit")||can("implementation.review");
   return can(navFeature[n.id]);
  });
  return <div className={"layout"+(desktopNavCollapsed?" sidebar-collapsed":"")}>
@@ -382,7 +384,13 @@ export default function Home(){
  {page==="competencies"&&schoolId&&(can("competencies.view")||can("competencies.edit"))&&<Box title="Published literacy progression"><div className="level-grid">{LEVELS.map(l=><div key={l} className="level"><strong>{l}</strong><span>{competencies.filter(c=>c.active&&c.grade===l).length} competencies</span></div>)}</div><div className="rows">{competencies.filter(c=>c.active).sort((a,b)=>formatGrade(a.grade)-formatGrade(b.grade)||a.sequence-b.sequence).map(c=><div key={c.id} className="record"><BookOpen size={16}/><strong>{c.title}</strong><small>{c.grade}</small></div>)}</div><div className="helper">Only the Platform Super Admin can create, edit or publish competencies. Consultants and school stakeholders can view published learning progressions.</div></Box>}
  {page==="reports"&&schoolId&&can("reports.view")&&<Box title="Individual literacy progression"><label>Student<select value={reportStudent} onChange={e=>loadReport(e.target.value)}><option value="">Select student</option>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).map(s=><option key={s.id} value={s.id}>{s.student_name}</option>)}</select></label>{reportData&&<><div className="stats report-stats"><div className="stat"><span>Enrolled grade</span><strong>{reportData.cls?.grade}</strong></div><div className="stat"><span>Demonstrated level</span><strong>{reportData.progress.highest||"Not established"}</strong></div></div><div className="rows">{reportData.progress.byLevel.map(l=><div key={l.level} className="progress-row"><strong>{l.level}</strong><div className="progress-bar"><span style={{width:l.independence+"%"}}/></div><small>{l.assessed}/{l.count} assessed · {l.independence}% independent</small></div>)}</div><p className="helper">Provisional threshold: 80% assessed and 80% independent at each consecutive level. This is a screening indicator, not a diagnosis.</p><TrainingImpactPanel session={session} schoolId={schoolId}
    studentId={reportStudent} enabled={!!reportStudent}/></>}</Box>}
- {((page==="implementation"&&can("implementation.view"))||(page==="observations"&&can("observations.view")))&&<Box title={page==="implementation"?"Teacher implementation evidence":"Classroom observations"}><Empty title="Historical integration is being prepared" detail="The existing Streamlit workflow remains operational. This commercial workspace will connect only after school IDs, access policies and secure evidence storage are migrated and tested."/></Box>}
+ {page==="implementation"&&schoolId&&
+   (can("implementation.view")||can("implementation.submit")||can("implementation.review"))&&
+   <ImplementationWorkspace client={client} session={session} schoolId={schoolId}
+     schoolName={school?.name||"Selected school"} competencies={competencies}
+     isAdmin={identity.admin} grants={roleGrants}/>}
+ {page==="observations"&&can("observations.view")&&
+   <Box title="Classroom observations"><Empty title="Historical observation integration is being prepared" detail="The existing Streamlit observation workflow remains operational. Observation rubric and legacy record migration are separate from Teacher Implementation evidence."/></Box>}
  {!schoolId&&!identity.admin&&<Empty title="No school membership found" detail="Ask your Platform Super Admin to assign your account to a school."/>}
  </div></main></div>;
 }
