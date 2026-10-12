@@ -99,22 +99,23 @@ async function getEntries(ctx,url){
  const {data:entries,error}=await query;
  if(error)throw error;
  const rows=entries||[];
- if(!rows.length)return {entries:[],files:[],reviews:[],people:[],classes:await eligibleClasses(ctx)};
+ if(!rows.length)return {entries:[],files:[],reviews:[],people:[],competencyLinks:[],classes:await eligibleClasses(ctx)};
  const ids=rows.map(r=>r.id);
- const [fileResult,reviewResult,peopleResult,classes]=await Promise.all([
+ const [fileResult,reviewResult,peopleResult,linkResult,classes]=await Promise.all([
   ctx.admin.from("literacy_implementation_files").select("id,entry_id,category,object_path,file_name,content_type,size_bytes")
    .in("entry_id",ids).limit(2000),
   ctx.admin.from("literacy_implementation_reviews").select("entry_id,reviewer_id,status,feedback,reviewed_at").in("entry_id",ids),
   ctx.admin.from("literacy_memberships").select("user_id,display_name,role").eq("school_id",ctx.schoolId).limit(600),
+  ctx.admin.from("literacy_implementation_competencies").select("entry_id,competency_id").in("entry_id",ids),
   eligibleClasses(ctx)
  ]);
- if(fileResult.error||reviewResult.error||peopleResult.error)throw fileResult.error||reviewResult.error||peopleResult.error;
+ if(fileResult.error||reviewResult.error||peopleResult.error||linkResult.error)throw fileResult.error||reviewResult.error||peopleResult.error||linkResult.error;
  const files=await Promise.all((fileResult.data||[]).map(async f=>{
   const {data,error:linkError}=await ctx.admin.storage.from(BUCKET).createSignedUrl(f.object_path,600);
   const {object_path,...safe}=f;
   return {...safe,url:linkError?"":data?.signedUrl||""};
  }));
- return {entries:rows,files,reviews:reviewResult.data||[],people:reviewer?peopleResult.data||[]:
+ return {entries:rows,files,reviews:reviewResult.data||[],competencyLinks:linkResult.data||[],people:reviewer?peopleResult.data||[]:
   (peopleResult.data||[]).filter(p=>p.user_id===ctx.user.id),classes};
 }
 export async function GET(request){
@@ -203,7 +204,7 @@ export async function POST(request){
    if(existing.data?.length)return send({saved:true,alreadySaved:true,count:existing.data.length,receipt:body.submissionKey,
      message:"This implementation receipt was already saved; no duplicate was created."});
    const classes=await eligibleClasses(ctx),byClass=new Map(classes.map(c=>[c.id,c]));
-   const seen=new Set(),entryPayloads=[],filePayloads=[];
+   const seen=new Set(),entryPayloads=[],filePayloads=[],competencyLinks=[];
    for(const [i,p] of body.periods.entries()){
     const period=Number(p.period),cid=txt(p.classId,40),date=txt(p.date,15),
      subject=txt(p.subject,100),topic=txt(p.topic,300),
@@ -214,9 +215,11 @@ export async function POST(request){
      reflection.length>5000||voiceNotes.length>5000)
      return send({error:"Check period "+(i+1)+" (assigned class, lesson date, subject, lesson topic and reflection)."},400);
     seen.add(period);
-    const competency=txt(p.competencyId,40),course=txt(p.trainingCourseId,40);
-    if(competency&&!UUID.test(competency))
-     return send({error:"Invalid linked competency or course."},400);
+    const competencyIds=[...new Set(Array.isArray(p.competencyIds)?p.competencyIds:
+     (p.competencyId?[p.competencyId]:[]))];
+    if(competencyIds.length>30||competencyIds.some(id=>!UUID.test(id)))
+     return send({error:"Choose up to 30 valid published competencies per period."},400);
+    competencyLinks.push({period,ids:competencyIds});
     const periodFiles=Array.isArray(p.files)?p.files:[];
     if(periodFiles.length>20)return send({error:"Maximum 20 evidence files per period."},400);
     if(!periodFiles.some(f=>f.category==="voice"))
@@ -225,7 +228,7 @@ export async function POST(request){
     entryPayloads.push({school_id:ctx.schoolId,class_id:cid,teacher_user_id:ctx.user.id,
      submission_key:body.submissionKey,period_number:period,implementation_date:date,
      subject,lesson_topic:topic,voice_reflection_note:voiceNotes,teacher_reflection:"",
-     competency_id:competency||null,training_course_id:null});
+     competency_id:competencyIds[0]||null,training_course_id:null});
    }
    if(filePayloads.length>30||new Set(filePayloads.map(f=>f.object_path)).size!==filePayloads.length)
     return send({error:"Maximum 30 unique evidence files per submission."},400);
@@ -236,8 +239,8 @@ export async function POST(request){
     const actualSize=Number(object.metadata?.size??object.size);
     if(Number.isFinite(actualSize)&&actualSize!==f.size_bytes)throw Error("Uploaded file size does not match: "+f.file_name);
    }
-   if(entryPayloads.some(e=>e.competency_id)){
-    const ids=[...new Set(entryPayloads.map(e=>e.competency_id).filter(Boolean))];
+   if(competencyLinks.some(e=>e.ids.length)){
+    const ids=[...new Set(competencyLinks.flatMap(e=>e.ids))];
     const {data,error}=await ctx.admin.from("literacy_competencies")
      .select("id").in("id",ids).eq("active",true);
     if(error||data?.length!==ids.length)return send({error:"A linked competency is no longer published."},400);
@@ -250,6 +253,13 @@ export async function POST(request){
     const payload=filePayloads.map(f=>{
      const {period,...meta}=f;return {entry_id:idByPeriod.get(period),...meta};
     });
+    const links=competencyLinks.flatMap(group=>group.ids.map(id=>({
+     entry_id:idByPeriod.get(group.period),competency_id:id
+    })));
+    if(links.length){
+     const {error:linkError}=await ctx.admin.from("literacy_implementation_competencies").insert(links);
+     if(linkError)throw linkError;
+    }
     if(payload.length){
      const {error:fileError}=await ctx.admin.from("literacy_implementation_files").insert(payload);
      if(fileError)throw fileError;
