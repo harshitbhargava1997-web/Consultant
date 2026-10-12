@@ -18,6 +18,8 @@ export const PERMISSION_GROUPS=[
  {title:"Assessments & learning",items:[
   {key:"assessments.view",label:"View assessment history",description:"Within accessible classes"},
   {key:"assessments.create",label:"Conduct literacy assessments",description:"Within accessible classes"},
+  {key:"assessments.evidence.upload",label:"Upload individual student competency photos/videos",description:"Attach media to saved student assessment sessions only within assigned schools and classes"},
+  {key:"assessments.evidence.view",label:"View individual student competency media",description:"See photos and videos attached to permitted assessment sessions"},
   {key:"teacher_reviews.create",label:"Assess teacher competencies",description:"Within authorized school classes"},
   {key:"reports.view",label:"View progress reports",description:"Individual student learning trends"},
   {key:"competencies.view",label:"View published competency library",description:"Read-only competency visibility"},
