@@ -5,6 +5,8 @@ import BulkWorkspace from "./BulkWorkspace";
 import AssessorWorkspace from "./AssessorWorkspace";
 import RolePermissions from "./RolePermissions";
 import SchoolManagementWorkspace from "./SchoolManagementWorkspace";
+import TrainingWorkspace from "./TrainingWorkspace";
+import TrainingImpactPanel from "./TrainingImpactPanel";
 import CurriculumEditor from "./CurriculumEditor";
 import ConsultantWorkspace,{ConsultantManagement} from "./ConsultantWorkspace";
 import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNoAxesCombined,
@@ -20,6 +22,7 @@ const navigation=[
  {id:"consultant",label:"Consultant support",icon:GraduationCap,consultant:true,school:true},
  {id:"assess",label:"Literacy Assessor",icon:ClipboardCheck,school:true},
  {id:"teacher-review",label:"Teacher skills review",icon:GraduationCap,manager:true,school:true},
+ {id:"training",label:"Teacher training",icon:BookOpen,school:true},
  {id:"competencies",label:"Competency library",icon:BookOpen,school:true},
  {id:"reports",label:"Progress reports",icon:ChartNoAxesCombined,school:true},
  {id:"implementation",label:"Teacher implementation",icon:FileUp,school:true},
@@ -329,6 +332,8 @@ export default function Home(){
  };
  const availableNav=navigation.filter(n=>{
   if(n.id==="permissions")return identity.admin;
+  if(n.id==="training")return identity.admin||!!schoolId&&
+   (can("training.access")||can("training.complete")||can("training.deliver")||can("training.review"));
   if(n.id==="overview")return true;
   if(n.id==="users")return identity.admin||!!schoolId&&
    (can("users.manage")||can("classes.view")||can("classes.manage")||can("classes.import")||
@@ -365,13 +370,18 @@ export default function Home(){
   <ConsultantWorkspace session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"}
    isConsultant={can("consultants.log")}/>}
 
+ {page==="training"&&(identity.admin||schoolId)&&
+  <TrainingWorkspace session={session} client={client} schoolId={schoolId}
+   schoolName={school?.name||"Selected school"} schools={identity.schools}
+   competencies={competencies} grants={roleGrants} isAdmin={identity.admin}/>}
  {page==="assess"&&schoolId&&(can("assessments.create")||can("assessments.view"))&&<AssessorWorkspace
   client={client} schoolId={schoolId} classes={visibleClasses}
   students={students} competencies={competencies} canCreate={can("assessments.create")} canViewHistory={can("assessments.view")} onSaved={refresh}/>}
  {page==="teacher-review"&&schoolId&&can("teacher_reviews.create")&&<Box title="Existing teacher / competency review">{!visibleClasses.length?<Empty title="No classes assigned" detail="Create classes or assign a teacher to begin."/>:<form onSubmit={submitAssessment} className="stack"><div className="three-col"><label>Class<select value={classObj?.id||""} onChange={e=>setActiveClass(e.target.value)}>{visibleClasses.map(c=><option value={c.id} key={c.id}>{c.grade} · {c.section}</option>)}</select></label><label>Assessment type<select value={assessmentSubject} onChange={e=>setAssessmentSubject(e.target.value)}><option value="student">Student</option>{can("teacher_reviews.create")&&<option value="teacher">Teacher</option>}</select></label><label>{assessmentSubject==="student"?"Student":"Teacher"}<select required value={assessmentTarget} onChange={e=>setAssessmentTarget(e.target.value)}><option value="">Select person</option>{targets.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label></div><div className="skills-head"><h3>Competencies from Nursery to {grade}</h3><span>{criterionList.length} published skills</span></div>{criterionList.length?criterionList.map((c,i)=><div className="skill" key={c.id}><div><small>{c.grade} · {c.code}</small><strong>{c.title}</strong><p>{c.description}</p></div><select aria-label={"Rating for "+c.title} value={ratingForm[c.id]||"Not Assessed"} onChange={e=>setRatingForm({...ratingForm,[c.id]:e.target.value})}>{RATINGS.map(r=><option key={r}>{r}</option>)}</select></div>):<Empty title="No published competencies" detail="Publish competency records before assessing learners."/>}<label>Observations and recommended intervention<textarea value={ratingNotes} onChange={e=>setRatingNotes(e.target.value)} rows={3}/></label><Btn kind="primary" type="submit" disabled={busy||!can("teacher_reviews.create")||!assessmentTarget||!criterionList.length}>Save assessment <ArrowRight size={16}/></Btn></form>}</Box>}
  {page==="competencies"&&schoolId&&can("competencies.edit")&&<CurriculumEditor competencies={competencies} session={session} onSaved={refresh}/>}
  {page==="competencies"&&schoolId&&(can("competencies.view")||can("competencies.edit"))&&<Box title="Published literacy progression"><div className="level-grid">{LEVELS.map(l=><div key={l} className="level"><strong>{l}</strong><span>{competencies.filter(c=>c.active&&c.grade===l).length} competencies</span></div>)}</div><div className="rows">{competencies.filter(c=>c.active).sort((a,b)=>formatGrade(a.grade)-formatGrade(b.grade)||a.sequence-b.sequence).map(c=><div key={c.id} className="record"><BookOpen size={16}/><strong>{c.title}</strong><small>{c.grade}</small></div>)}</div><div className="helper">Only the Platform Super Admin can create, edit or publish competencies. Consultants and school stakeholders can view published learning progressions.</div></Box>}
- {page==="reports"&&schoolId&&can("reports.view")&&<Box title="Individual literacy progression"><label>Student<select value={reportStudent} onChange={e=>loadReport(e.target.value)}><option value="">Select student</option>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).map(s=><option key={s.id} value={s.id}>{s.student_name}</option>)}</select></label>{reportData&&<><div className="stats report-stats"><div className="stat"><span>Enrolled grade</span><strong>{reportData.cls?.grade}</strong></div><div className="stat"><span>Demonstrated level</span><strong>{reportData.progress.highest||"Not established"}</strong></div></div><div className="rows">{reportData.progress.byLevel.map(l=><div key={l.level} className="progress-row"><strong>{l.level}</strong><div className="progress-bar"><span style={{width:l.independence+"%"}}/></div><small>{l.assessed}/{l.count} assessed · {l.independence}% independent</small></div>)}</div><p className="helper">Provisional threshold: 80% assessed and 80% independent at each consecutive level. This is a screening indicator, not a diagnosis.</p></>}</Box>}
+ {page==="reports"&&schoolId&&can("reports.view")&&<Box title="Individual literacy progression"><label>Student<select value={reportStudent} onChange={e=>loadReport(e.target.value)}><option value="">Select student</option>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).map(s=><option key={s.id} value={s.id}>{s.student_name}</option>)}</select></label>{reportData&&<><div className="stats report-stats"><div className="stat"><span>Enrolled grade</span><strong>{reportData.cls?.grade}</strong></div><div className="stat"><span>Demonstrated level</span><strong>{reportData.progress.highest||"Not established"}</strong></div></div><div className="rows">{reportData.progress.byLevel.map(l=><div key={l.level} className="progress-row"><strong>{l.level}</strong><div className="progress-bar"><span style={{width:l.independence+"%"}}/></div><small>{l.assessed}/{l.count} assessed · {l.independence}% independent</small></div>)}</div><p className="helper">Provisional threshold: 80% assessed and 80% independent at each consecutive level. This is a screening indicator, not a diagnosis.</p><TrainingImpactPanel session={session} schoolId={schoolId}
+   studentId={reportStudent} enabled={!!reportStudent}/></>}</Box>}
  {((page==="implementation"&&can("implementation.view"))||(page==="observations"&&can("observations.view")))&&<Box title={page==="implementation"?"Teacher implementation evidence":"Classroom observations"}><Empty title="Historical integration is being prepared" detail="The existing Streamlit workflow remains operational. This commercial workspace will connect only after school IDs, access policies and secure evidence storage are migrated and tested."/></Box>}
  {!schoolId&&!identity.admin&&<Empty title="No school membership found" detail="Ask your Platform Super Admin to assign your account to a school."/>}
  </div></main></div>;
