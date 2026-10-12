@@ -215,3 +215,86 @@
  .management-role-type span{margin-left:auto}
  .management-admin-leaders .stack button{align-self:stretch}
 }
+
+
+/* Professional development / teacher training programme */
+.training-module{display:flex;flex-direction:column;gap:18px}
+.training-module .panel{margin-bottom:0}
+.training-module .panel-head h2{display:flex;align-items:center;gap:9px}
+.training-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:17px 0}
+.training-stats>div{background:#f1f8f6;border:1px solid #d8e8e2;border-radius:11px;display:flex;flex-direction:column;gap:6px;padding:14px}
+.training-stats strong{font-size:23px;color:#174d50;font-weight:750}
+.training-stats small{font-size:11px;color:#56767a}
+.training-label{display:block;font-size:12px;margin-bottom:10px}
+.training-options{display:flex;flex-direction:column;gap:7px;max-height:250px;overflow:auto;padding-right:5px}
+.training-course-detail{border:1px solid #deebe7;border-radius:12px;padding:17px;margin:15px 0;background:#fff}
+.training-course-head{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:9px}
+.training-course-head h3{font-size:16px;color:#254451;margin:0}
+.training-course-head span{font-size:11px;border-radius:6px;padding:6px 9px;background:#eaf6f2;color:#16736c}
+.training-unit-list{display:flex;flex-direction:column;margin:13px 0}
+.training-unit-line{display:flex;align-items:center;gap:13px;justify-content:space-between;border-top:1px solid #e8eeed;padding:10px 0}
+.training-unit-line span{display:flex;flex-direction:column;gap:6px}
+.training-unit-line strong{font-size:12px}
+.training-unit-line small{font-size:11px;color:#6c7d88}
+.training-unit-form{display:flex;flex-direction:column;gap:14px;border-top:1px solid #e1ece8;margin:17px 0;padding-top:17px}
+.training-unit-form h3{font-size:14px;color:#254451;margin:4px 0}
+.training-questions{padding:13px;background:#f6faf9;border:1px solid #e2eae8;border-radius:10px;display:flex;flex-direction:column;gap:10px}
+.training-question-editor{padding:12px;border:1px solid #dde9e6;background:#fff;border-radius:9px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.training-question-editor label:first-child{grid-column:1/-1}
+.training-progress-summary{display:flex;align-items:center;gap:10px;margin:16px 0}
+.training-progress-summary .progress-bar{height:9px;flex:1}
+.training-progress-summary strong{font-size:12px;color:#25515b}
+.training-lessons{display:flex;flex-direction:column;gap:14px;margin:18px 0}
+.training-lesson{border:1px solid #e3eae8;background:#fcfefd;border-radius:11px;padding:17px}
+.training-lesson-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}
+.training-lesson-heading>div{display:flex;flex-direction:column;gap:5px}
+.training-lesson-heading strong{font-size:13px;color:#263e4d}
+.training-lesson-heading small{font-size:11px;color:#647c87}
+.training-done{display:flex;gap:5px;align-items:center;font-size:11px;color:#0b816d;white-space:nowrap}
+.training-reading{white-space:pre-wrap;background:#f2f7f6;padding:15px;border-radius:9px;font-size:12px;line-height:1.8;color:#304a57;margin:10px 0}
+.training-material{display:flex;gap:12px;align-items:flex-start;flex-direction:column;margin:12px 0}
+.training-material .btn{display:inline-flex;gap:7px}
+.training-learner-questions{display:flex;flex-direction:column;gap:15px;margin:14px 0}
+.training-learner-questions fieldset{border:1px solid #dce8e6;border-radius:9px;padding:12px 14px}
+.training-learner-questions legend{font-size:12px;font-weight:700;color:#263b4a;padding:0 5px}
+.training-answer{display:flex!important;flex-direction:row!important;align-items:center;gap:10px;margin-top:10px;font-size:12px;color:#38505c}
+.training-answer input{width:16px;height:16px;accent-color:#128778}
+.training-certificate{display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;padding:32px 20px;border:3px double #b9d7cb;background:#fbfefc;margin:22px 0;border-radius:12px}
+.training-certificate svg{color:#b38b3b}
+.training-certificate>span{letter-spacing:2px;font-size:10px;color:#496e68}
+.training-certificate h2{margin:5px;font-size:24px;color:#235754}
+.training-certificate h3{color:#1c535a;font-size:17px;margin:6px 0}
+.training-certificate p{font-size:12px;color:#617a7c;margin:4px}
+.training-certificate small{font-size:11px;color:#5f727a}
+.certificate-print{margin:14px 0}
+.training-impact{margin:23px 0;padding-top:19px;border-top:1px solid #e2eae9}
+.training-impact .panel-head h2{display:flex;align-items:center;gap:8px}
+.training-impact h3{font-size:12px;display:flex;align-items:center;gap:8px;margin:17px 0 12px;color:#2a5357}
+.training-impact-teacher{padding:15px;border:1px solid #e3ece9;border-radius:10px;margin:10px 0}
+.training-impact-teacher>strong{display:flex;gap:8px;align-items:center;font-size:12px}
+.training-impact-courses{display:flex;flex-direction:column;gap:9px;margin-top:10px}
+.training-impact-courses>div{display:flex;gap:10px;align-items:flex-start;font-size:11px}
+.training-impact-courses span{display:flex;flex-direction:column;gap:5px;flex:1}
+.training-impact-courses small{color:#697f86}
+.training-impact-timeline{display:flex;flex-direction:column;gap:8px}
+.training-impact-timeline>div{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px;border:1px solid #edf0ee;border-radius:8px;font-size:11px}
+.training-impact-timeline small{color:#6e7d86;margin-left:auto}
+.training-module .table-wrap{overflow:auto;max-height:420px}
+.training-module .table-wrap table{min-width:720px;width:100%}
+.training-module .table-wrap th{white-space:nowrap}
+.training-module .table-wrap td{vertical-align:top;line-height:1.5}
+@media(max-width:700px){
+ .training-stats{gap:6px}
+ .training-stats>div{padding:9px}
+ .training-stats strong{font-size:17px}
+ .training-question-editor{grid-template-columns:1fr}
+ .training-progress-summary{flex-wrap:wrap}
+ .training-lesson-heading{align-items:flex-start}
+ .training-course-head{align-items:flex-start;flex-direction:column}
+}
+@media print {
+ body *{visibility:hidden!important}
+ #training-certificate,#training-certificate *{visibility:visible!important}
+ #training-certificate{position:absolute!important;top:10%;left:5%;width:90%;margin:0!important;border:3px double #b9d7cb!important}
+ #training-certificate .certificate-print{display:none!important}
+}
