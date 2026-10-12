@@ -337,7 +337,8 @@ export async function POST(request){
   }
   if(action==="uploadTicket"){
    if(!UUID.test(body.courseId))return send({error:"Choose a course."},400);
-   await courseAllowed(ctx,body.courseId);
+   const uploadCourse=await courseAllowed(ctx,body.courseId);
+   if(uploadCourse.status!=="draft")return send({error:"Only draft courses may receive new files."},403);
    const mimetype=clean(body.mimeType,120),size=Number(body.size);
    const extension=mimetype==="application/pdf"?"pdf":mimetype==="video/mp4"?"mp4":
     mimetype==="video/webm"?"webm":mimetype==="video/quicktime"?"mov":"";
@@ -412,7 +413,9 @@ export async function POST(request){
    const {data:unit,error:unitError}=await ctx.admin.from("literacy_training_units")
     .select("*").eq("id",unitId).maybeSingle();
    if(unitError||!unit)return send({error:"Learning unit not found."},404);
+   if(!ctx.can("training.access"))return send({error:"Training library access is disabled."},403);
    const course=await courseAllowed(ctx,unit.course_id,"training.complete");
+   if(course.status!=="published")return send({error:"Only published training can be completed."},403);
    if(["exercise","interactive"].includes(unit.kind)){
     const questions=Array.isArray(unit.questions)?unit.questions:[];
     const answers=body.answers;
@@ -450,7 +453,8 @@ export async function POST(request){
    if(!ctx.can("training.deliver"))return send({error:"Training delivery is disabled for your role."},403);
    if(!ctx.schoolId)return send({error:"Choose the school that attended."},400);
    if(!UUID.test(body.courseId))return send({error:"Select a training course."},400);
-   await courseAllowed(ctx,body.courseId,"training.deliver");
+   const sessionCourse=await courseAllowed(ctx,body.courseId,"training.deliver");
+   if(sessionCourse.status!=="published")return send({error:"Select a published training programme."},403);
    const heldOn=clean(body.heldOn,20),notes=clean(body.notes,4000),
     nextAction=clean(body.nextAction,2000),attendeeCount=Number(body.attendeeCount);
    if(!/^\d{4}-\d{2}-\d{2}$/.test(heldOn)||heldOn>new Date().toISOString().slice(0,10)||
