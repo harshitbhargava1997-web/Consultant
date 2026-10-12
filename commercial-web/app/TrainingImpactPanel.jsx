@@ -31,7 +31,7 @@ export default function TrainingImpactPanel({session,schoolId,studentId,enabled=
     {!teacher.courses.length?<p className="helper">No published training matched to this student's grade.</p>:
     <div className="training-impact-courses">{teacher.courses.map((course,j)=>
      <div key={j}><BookOpen size={15}/>
-      <span><strong>{course.title}</strong><small>{course.units_completed}/{course.units_total} training units completed
+      <span><strong>{course.title}</strong><small>{course.units_completed}/{course.units_total} training units completed{course.average_quiz_score!==null?" · Quiz "+course.average_quiz_score+"%":""}
        {course.certified?" · Certified":""}</small></span>
       {course.certified&&<Medal size={16}/>}</div>)}</div>}
    </div>):<p className="helper">No class teacher assignments are recorded yet.</p>}
