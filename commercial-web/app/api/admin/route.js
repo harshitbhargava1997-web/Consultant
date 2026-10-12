@@ -30,6 +30,34 @@ export async function GET(request) {
  try {
   const ctx = await authorize(request);
   if (ctx.error) return response({ error: ctx.error }, ctx.status);
+  const url=new URL(request.url);
+  if(url.searchParams.get("view")==="stakeholders"){
+   if(!ctx.isAdmin)return response({error:"Only Super Admin can review stakeholder accounts."},403);
+   const admin=adminClient();
+   const memberships=[];
+   for(let page=0;page<20;page++){
+    const {data,error}=await admin.from("literacy_memberships")
+     .select("user_id,school_id,display_name,role")
+     .order("school_id").order("user_id").range(page*500,page*500+499);
+    if(error)throw error;
+    memberships.push(...(data||[]));
+    if((data||[]).length<500)break;
+    if(page===19)return response({error:"Stakeholder directory exceeds safe listing size. Contact the platform administrator."},413);
+   }
+   const accounts=new Map();
+   for(let page=1;page<=50;page++){
+    const {data,error}=await admin.auth.admin.listUsers({page,perPage:200});
+    if(error)throw error;
+    for(const user of data.users||[]){
+     accounts.set(user.id,{email:user.email||"",confirmed:!!user.email_confirmed_at});
+    }
+    if((data.users||[]).length<200)break;
+   }
+   return response({memberships:memberships.map(row=>({
+    ...row,email:accounts.get(row.user_id)?.email||"",
+    confirmed:accounts.get(row.user_id)?.confirmed===true
+   }))});
+  }
   return response({ isAdmin: ctx.isAdmin });
  } catch { return response({ error: "Administrator verification unavailable." }, 503); }
 }
