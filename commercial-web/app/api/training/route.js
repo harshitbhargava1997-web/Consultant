@@ -44,7 +44,7 @@ async function access(request,schoolId){
   role=assigned.data?"consultant":member.data?.role||"";
   if(!ROLES.includes(role))return {error:"Not assigned to this school.",status:403};
   const {data,error}=await admin.from("literacy_role_permissions")
-   .select("feature").eq("role",role).eq("enabled",true).like("feature","training.%");
+   .select("feature").eq("role",role).eq("enabled",true);
   if(error)return {error:"Unable to read training permissions.",status:503};
   grants=new Set((data||[]).map(x=>x.feature));
  }
@@ -179,12 +179,99 @@ async function maybeCertificate(ctx,course){
  if(existing.error)throw existing.error;
  return existing.data;
 }
+
+async function studentOutcome(ctx,studentId){
+ if(!ctx.can("reports.view")||!ctx.schoolId)throw Error("Student progress review is disabled for this school or role.");
+ if(!UUID.test(studentId))throw Error("Select a valid student.");
+ const {data:student,error:studentError}=await ctx.admin.from("literacy_students")
+  .select("id,student_name,class_id").eq("id",studentId).maybeSingle();
+ if(studentError||!student)throw Error("Student was not found.");
+ const {data:cls,error:classError}=await ctx.admin.from("literacy_classes")
+  .select("id,school_id,grade,section").eq("id",student.class_id).eq("school_id",ctx.schoolId).maybeSingle();
+ if(classError||!cls)throw Error("Student is outside the selected school.");
+ if(!ctx.isAdmin&&ctx.role==="teacher"){
+  const {data:assignment,error}=await ctx.admin.from("literacy_teacher_classes")
+   .select("class_id").eq("teacher_user_id",ctx.user.id).eq("class_id",cls.id).maybeSingle();
+  if(error||!assignment)throw Error("Student is not in one of your assigned classes.");
+ }
+ const [{data:teachers,error:teacherError},{data:schoolCourses,error:courseError},{data:assessments,error:assessError}]=await Promise.all([
+  ctx.admin.from("literacy_teacher_classes").select("teacher_user_id").eq("class_id",cls.id),
+  ctx.admin.from("literacy_training_course_schools").select("course_id").eq("school_id",ctx.schoolId).limit(500),
+  ctx.admin.from("literacy_assessments")
+   .select("id,assessment_date,assessment_stage,assessor_role")
+   .eq("school_id",ctx.schoolId).eq("student_id",studentId).eq("class_id",cls.id)
+   .eq("subject_type","student").order("assessment_date",{ascending:true}).limit(30)
+ ]);
+ if(teacherError||courseError||assessError)throw teacherError||courseError||assessError;
+ const teacherIds=[...new Set((teachers||[]).map(t=>t.teacher_user_id))];
+ const courseIds=(schoolCourses||[]).map(c=>c.course_id);
+ const [{data:membership,error:memberError},{data:courseList,error:courseListError},
+   {data:results,error:resultError}]=await Promise.all([
+  teacherIds.length?ctx.admin.from("literacy_memberships")
+   .select("user_id,display_name").eq("school_id",ctx.schoolId).in("user_id",teacherIds):
+   Promise.resolve({data:[],error:null}),
+  courseIds.length?ctx.admin.from("literacy_training_courses")
+   .select("id,title,grade,competency_id,target_roles,status")
+   .in("id",courseIds).eq("status","published"):
+   Promise.resolve({data:[],error:null}),
+  assessments?.length?ctx.admin.from("literacy_assessment_results")
+   .select("assessment_id,competency_id,rating")
+   .in("assessment_id",assessments.map(a=>a.id)).limit(2000):
+   Promise.resolve({data:[],error:null})
+ ]);
+ if(memberError||courseListError||resultError)throw memberError||courseListError||resultError;
+ const allCourses=(courseList||[]).filter(c=>c.target_roles.includes("teacher")&&
+  (c.grade==="All Grades"||c.grade===cls.grade));
+ const ids=allCourses.map(c=>c.id);
+ const [{data:units,error:unitError},{data:certificates,error:certError},
+ {data:sessions,error:sessionError}]=await Promise.all([
+  ids.length?ctx.admin.from("literacy_training_units").select("id,course_id")
+   .in("course_id",ids).limit(1000):Promise.resolve({data:[],error:null}),
+  ids.length&&teacherIds.length?ctx.admin.from("literacy_training_certificates")
+   .select("user_id,course_id").in("course_id",ids).eq("school_id",ctx.schoolId)
+   .in("user_id",teacherIds):Promise.resolve({data:[],error:null}),
+  ids.length?ctx.admin.from("literacy_training_sessions")
+   .select("id,course_id,held_on,attendee_count")
+   .in("course_id",ids).eq("school_id",ctx.schoolId)
+   .order("held_on",{ascending:false}).limit(10):Promise.resolve({data:[],error:null})
+ ]);
+ if(unitError||certError||sessionError)throw unitError||certError||sessionError;
+ const unitIds=(units||[]).map(u=>u.id);
+ const progress=unitIds.length&&teacherIds.length?await ctx.admin.from("literacy_training_progress")
+  .select("user_id,unit_id").eq("school_id",ctx.schoolId)
+  .in("user_id",teacherIds).in("unit_id",unitIds).limit(2500):{data:[],error:null};
+ if(progress.error)throw progress.error;
+ const teachersReport=teacherIds.map(userId=>({
+  name:(membership||[]).find(m=>m.user_id===userId)?.display_name||"Assigned teacher",
+  courses:allCourses.map(c=>{
+   const unitSet=new Set((units||[]).filter(u=>u.course_id===c.id).map(u=>u.id));
+   return {title:c.title,competency_id:c.competency_id,
+    units_completed:(progress.data||[]).filter(p=>p.user_id===userId&&unitSet.has(p.unit_id)).length,
+    units_total:unitSet.size,
+    certified:(certificates||[]).some(x=>x.user_id===userId&&x.course_id===c.id)};
+  })
+ }));
+ const assessmentTimeline=(assessments||[]).map(a=>{
+  const ratings=(results||[]).filter(r=>r.assessment_id===a.id);
+  return {date:a.assessment_date,stage:a.assessment_stage||"periodic",assessor_role:a.assessor_role||"legacy",
+   observed:ratings.length,independent:ratings.filter(r=>r.rating==="Independent").length,
+   competency_ids:ratings.map(r=>r.competency_id)};
+ });
+ return {student_name:student.student_name,grade:cls.grade,section:cls.section,
+  teachers:teachersReport,sessions:sessions||[],assessments:assessmentTimeline,
+  explanation:"Training completion is staff evidence; student competency observations are separate. Their association does not establish causation."};
+}
+
 export async function GET(request){
  try{
   const url=new URL(request.url);
   const schoolId=clean(url.searchParams.get("schoolId"),40);
   const ctx=await access(request,schoolId);
   if(ctx.error)return send({error:ctx.error},ctx.status);
+  if(url.searchParams.get("action")==="studentOutcome"){
+   try{return send({outcome:await studentOutcome(ctx,clean(url.searchParams.get("studentId"),40))});}
+   catch(e){return send({error:e.message||"Unable to retrieve student-linked training evidence."},403);}
+  }
   if(!ctx.can("training.access")&&!ctx.can("training.review")&&!ctx.can("training.deliver"))
    return send({error:"Training access is disabled for your role."},403);
   const {courses}=await coursesFor(ctx);
