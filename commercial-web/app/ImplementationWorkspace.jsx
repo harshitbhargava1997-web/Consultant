@@ -9,15 +9,13 @@ const SUBJECTS=[
  "English Grammar","Computer","Play Activity","Play Time","Play Based"
 ];
 const CATEGORIES=[
- {id:"lesson_plan",label:"Lesson Plan",accept:"image/jpeg,image/png,image/webp,application/pdf"},
+ {id:"lesson_plan",label:"Lesson Plan (optional)",accept:"image/jpeg,image/png,image/webp,application/pdf"},
  {id:"activity",label:"Classroom Activity Conducted",accept:"image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,video/x-m4v,video/x-msvideo,application/pdf"},
- {id:"writing",label:"Student Written Work / Writing Practice",accept:"image/jpeg,image/png,image/webp,application/pdf"},
- {id:"phonics",label:"Phonics / Phonetics Implementation",accept:"image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,video/x-m4v,video/x-msvideo,application/pdf"},
- {id:"assessment",label:"Student Assessment",accept:"image/jpeg,image/png,image/webp,application/pdf"},
- {id:"portfolio",label:"Student Portfolio",accept:"image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,video/x-m4v,video/x-msvideo,application/pdf"},
- {id:"event_pictures",label:"Event Pictures",accept:"image/jpeg,image/png,image/webp"}
+ {id:"phonics",label:"Phonics / Phonetics Implementation",accept:"image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,video/x-m4v,video/x-msvideo,application/pdf"}
 ];
-const LABELS={voice:"Voice reflection",...Object.fromEntries(CATEGORIES.map(c=>[c.id,c.label]))};
+const LABELS={voice:"Voice reflection",...Object.fromEntries(CATEGORIES.map(c=>[c.id,c.label])),
+ writing:"Historical student writing",assessment:"Historical assessment",
+ portfolio:"Historical portfolio",event_pictures:"Historical event pictures"};
 const today=()=>{
  const d=new Date(),y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),
   day=String(d.getDate()).padStart(2,"0");return y+"-"+m+"-"+day;
@@ -25,7 +23,7 @@ const today=()=>{
 let nextKey=0;
 const emptyPeriod=(classId="")=>({
  key:++nextKey,classId,date:today(),subject:"Phonics / Literacy",topic:"",
- reflection:"",voiceNotes:"",competencyId:"",trainingCourseId:"",attachments:{}
+ voiceNotes:"",competencyIds:[],language:"en-IN",attachments:{}
 });
 const classTitle=c=>c.grade+" · "+c.section+" · "+c.academic_year;
 function EvidenceFile({file}){
@@ -57,7 +55,7 @@ function ReviewCard({entry,files=[],review,teacher,classLabel,canFeedback,onSave
    <span>Submitted: {new Date(entry.submitted_at).toLocaleString("en-IN")}</span>
    <span>{files.length} files</span>
   </div>
-  {entry.voice_reflection_note&&<div className="implementation-reflection"><strong>Voice reflection notes</strong>
+  {entry.voice_reflection_note&&<div className="implementation-reflection"><strong>Voice reflection transcription</strong>
    <p>{entry.voice_reflection_note}</p></div>}
   {entry.teacher_reflection&&<div className="implementation-reflection"><strong>Implementation reflection</strong>
    <p>{entry.teacher_reflection}</p></div>}
@@ -88,13 +86,13 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
  const [periods,setPeriods]=useState([emptyPeriod()]);
  const [tab,setTab]=useState("submit");
  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[message,setMessage]=useState("");
- const [courseList,setCourseList]=useState([]);
  const [teacherFilter,setTeacherFilter]=useState("all"),[classFilter,setClassFilter]=useState("all");
  const [statusFilter,setStatusFilter]=useState("all"),[categoryFilter,setCategoryFilter]=useState("all"),[search,setSearch]=useState("");
  const [dateFrom,setDateFrom]=useState(""),[dateTo,setDateTo]=useState("");
  const [receipt,setReceipt]=useState("");
- const [recording,setRecording]=useState(null);
- const recorder=useRef(null),audioStream=useRef(null);
+ const [recording,setRecording]=useState(null),[transcribing,setTranscribing]=useState(null);
+ const recorder=useRef(null),audioStream=useRef(null),speechRef=useRef(null);
+ const preparedVoices=useRef(new Map());
  const hasSubmit=info.canSubmit&&can("implementation.submit");
  const hasReview=info.canReview&&can("implementation.review");
  const hasFeedback=hasReview&&info.canFeedback&&can("implementation.feedback");
@@ -153,52 +151,96 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
   }).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||"Unable to load evidence.");return j;})
    .then(j=>{if(active){setInfo(j);setPeriods([emptyPeriod(j.classes[0]?.id||"")]);setTab(j.canSubmit?"submit":"review");setLoading(false);}})
    .catch(e=>{if(active){setMessage(e.message);setLoading(false);}});
-  fetch("/api/training?schoolId="+encodeURIComponent(schoolId),{
-   headers:{"Authorization":"Bearer "+session.access_token},cache:"no-store"
-  }).then(r=>r.ok?r.json():{courses:[]})
-   .then(j=>{if(active)setCourseList((j.courses||[]).filter(c=>c.status==="published"&&c.school_ids.includes(schoolId)));})
-   .catch(()=>{});
   return()=>{active=false;};
  },[schoolId,session?.access_token]);
- useEffect(()=>()=>{try{if(recorder.current?.state==="recording")recorder.current.stop();}catch{}audioStream.current?.getTracks().forEach(t=>t.stop());},[]);
+ useEffect(()=>()=>{try{if(recorder.current?.state==="recording")recorder.current.stop();}catch{}
+  try{speechRef.current?.stop();}catch{}audioStream.current?.getTracks().forEach(t=>t.stop());},[]);
  function update(key,values){setPeriods(old=>old.map(p=>p.key===key?{...p,...values}:p));}
- function uploadInput(key,category,files){updateAttachment(key,category,Array.from(files||[]));}
+ function uploadInput(key,category,files){
+  const picked=Array.from(files||[]);
+  if(category==="voice"){
+   preparedVoices.current.delete(key);
+   updateAttachment(key,category,picked.slice(0,1));
+   if(picked[0]&&info.transcriptionAvailable)transcribeAudio(key,picked[0]);
+  }else updateAttachment(key,category,picked);
+ }
  function updateAttachment(key,category,files){
   setPeriods(old=>old.map(p=>p.key===key?{...p,attachments:{...p.attachments,[category]:files}}:p));
  }
+ async function transcribeAudio(key,file){
+  if(!info.transcriptionAvailable||!file)return;
+  setTranscribing(key);
+  try{
+   const ticket=await call("uploadTicket",{category:"voice",contentType:file.type,name:file.name,size:file.size});
+   const {error:uploadError}=await client.storage.from("vision-implementation")
+    .uploadToSignedUrl(ticket.path,ticket.token,file,{contentType:file.type});
+   if(uploadError)throw uploadError;
+   const meta={path:ticket.path,category:"voice",contentType:file.type,name:file.name,size:file.size};
+   preparedVoices.current.set(key,{file,meta});
+   const period=periods.find(p=>p.key===key);
+   const result=await call("transcribeVoice",{path:ticket.path,language:period?.language==="hi-IN"?"hi":"en"});
+   update(key,{voiceNotes:result.transcript||""});
+   setMessage("Voice transcribed. Please review and edit the transcription if needed.");
+  }catch(e){
+   setMessage("Audio kept for submission. Automatic transcription was unavailable: "+e.message+
+    ". You can edit the transcript box when necessary.");
+  }finally{setTranscribing(null);}
+ }
  async function toggleMicrophone(key){
   if(recording===key){
-   try{recorder.current?.stop();}catch{}setRecording(null);return;
+   try{recorder.current?.stop();}catch{}
+   try{speechRef.current?.stop();}catch{}
+   speechRef.current=null;setRecording(null);return;
   }
   if(recording||!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==="undefined"){
    setMessage("Microphone recording is unavailable in this browser. Upload an audio recording instead.");return;
   }
   try{
    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-   audioStream.current=stream;const type=["audio/webm","audio/mp4"].find(t=>MediaRecorder.isTypeSupported(t))||"";
+   audioStream.current=stream;
+   const type=["audio/webm","audio/mp4"].find(t=>MediaRecorder.isTypeSupported(t))||"";
    const rec=new MediaRecorder(stream,type?{mimeType:type}:undefined),parts=[];
+   const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+   if(SpeechRecognition){
+    const speech=new SpeechRecognition();
+    speech.continuous=true;speech.interimResults=true;
+    speech.lang=periods.find(p=>p.key===key)?.language||"en-IN";
+    const starting=periods.find(p=>p.key===key)?.voiceNotes||"";
+    speech.onresult=event=>{
+     const words=Array.from(event.results).map(item=>item[0]?.transcript||"").join(" ").trim();
+     if(words)update(key,{voiceNotes:(starting+" "+words).trim().slice(0,5000)});
+    };
+    speech.onerror=()=>{if(!info.transcriptionAvailable)setMessage("Live speech recognition was interrupted. Your audio recording continues and can still be submitted.");};
+    try{speech.start();speechRef.current=speech;}catch{speechRef.current=null;}
+   }else if(!info.transcriptionAvailable){
+    setMessage("Recording started. Live transcription is not supported by this browser. The voice file will still be saved.");
+   }
    rec.ondataavailable=e=>{if(e.data.size)parts.push(e.data);};
    rec.onstop=()=>{
     const actual=(rec.mimeType||type||"audio/webm").split(";")[0];
     const file=new File(parts,"voice-reflection-"+Date.now()+"."+(actual.includes("mp4")?"m4a":"webm"),{type:actual});
+    preparedVoices.current.delete(key);
     setPeriods(old=>old.map(p=>p.key===key?{...p,attachments:{
-     ...p.attachments,voice:[...(p.attachments.voice||[]),file]
+     ...p.attachments,voice:[file]
     }}:p));
-    stream.getTracks().forEach(t=>t.stop());audioStream.current=null;recorder.current=null;setRecording(null);
+    stream.getTracks().forEach(t=>t.stop());
+    audioStream.current=null;recorder.current=null;setRecording(null);
+    if(info.transcriptionAvailable)transcribeAudio(key,file);
    };
-   recorder.current=rec;rec.start();setRecording(key);setMessage("");
+   recorder.current=rec;rec.start();setRecording(key);
+   if(SpeechRecognition)setMessage("Recording voice. Live transcript will appear below where you can edit it.");
   }catch(e){setMessage("Cannot access microphone: "+e.message);}
  }
  async function submit(e){
   e.preventDefault();
   if(!hasSubmit||busy)return;
-  if(recording){setMessage("Stop voice recording before submitting.");return;}
+  if(recording||transcribing!==null){setMessage("Finish voice recording and transcription before submitting.");return;}
+  if(periods.some(p=>!(p.attachments.voice||[]).length)){
+   setMessage("Record or upload a voice reflection for every period before submitting.");return;
+  }
   const all=periods.flatMap(p=>Object.entries(p.attachments).flatMap(([category,files])=>files.map(file=>({category,file}))));
   if(all.length>30||all.some(x=>x.file.size>50*1024*1024||x.file.size===0)){
    setMessage("Maximum 30 evidence files per submission and 50 MB per file.");return;
-  }
-  if(!all.length&&periods.every(p=>!p.reflection.trim()&&!p.voiceNotes.trim())){
-   setMessage("Add a teacher reflection or at least one evidence file.");return;
   }
   setBusy(true);setMessage("");
   const paths=[];
@@ -210,6 +252,10 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
     const p=periods[idx],files=[];
     for(const [category,items] of Object.entries(p.attachments)){
      for(const file of items){
+      const prepared=category==="voice"?preparedVoices.current.get(p.key):null;
+      if(prepared?.file===file){
+       paths.push(prepared.meta.path);files.push(prepared.meta);continue;
+      }
       const ticket=await call("uploadTicket",{category,contentType:file.type,name:file.name,size:file.size});
       const {error:uploadError}=await client.storage.from("vision-implementation")
        .uploadToSignedUrl(ticket.path,ticket.token,file,{contentType:file.type});
@@ -219,15 +265,15 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
      }
     }
     details.push({period:idx+1,classId:p.classId,date:p.date,subject:p.subject,topic:p.topic,
-     reflection:p.reflection,voiceNotes:p.voiceNotes,competencyId:p.competencyId,
-     trainingCourseId:p.trainingCourseId,files});
+     voiceNotes:p.voiceNotes,competencyIds:p.competencyIds,files});
    }
    const result=await call("submit",{submissionKey:key,periods:details});
    setMessage((result.message||"Submitted.")+" Receipt: "+result.receipt);
-   setReceipt("");setPeriods([emptyPeriod(info.classes[0]?.id||"")]);setTab("mine");await load(true);
+   preparedVoices.current.clear();setReceipt("");setPeriods([emptyPeriod(info.classes[0]?.id||"")]);setTab("mine");await load(true);
   }catch(err){
    // Already-linked evidence is kept by the API; only uncommitted uploads are removable.
    try{if(paths.length)await call("cleanupUploads",{paths});}catch{}
+   preparedVoices.current.clear();
    setMessage("Submission not confirmed: "+err.message+" · Receipt: "+key+
     ". If a connection timed out after saving, refresh My submissions before trying again.");
   }finally{setBusy(false);}
