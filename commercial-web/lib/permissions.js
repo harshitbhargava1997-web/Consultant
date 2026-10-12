@@ -8,6 +8,7 @@ export const PERMISSION_GROUPS=[
  {title:"Student & class operations",items:[
   {key:"classes.view",label:"View classes and student rosters",description:"Teacher access remains limited to assigned classes"},
   {key:"classes.manage",label:"Create classes",description:"Create classes in authorized schools"},
+  {key:"classes.import",label:"Bulk upload classes",description:"Import grade, section and academic-year records from an Excel sheet"},
   {key:"students.manage",label:"Add or remove individual students",description:"Removal keeps assessment history"},
   {key:"teachers.assign",label:"Assign teachers to classes",description:"Manage class assignments"},
   {key:"staff.import",label:"Bulk upload stakeholder accounts",description:"Does not grant rights to export account data"},
