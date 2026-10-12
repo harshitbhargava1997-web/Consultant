@@ -366,3 +366,21 @@
  .implementation-actions>.btn{width:100%}
  .implementation-voice-controls .btn{width:100%}
 }
+
+
+/* Focused voice-first teacher submissions */
+.implementation-competency-picker{margin:15px 0;padding:13px;border-radius:11px;border:1px solid #dce8e8;background:#f9fcfb}
+.implementation-competency-picker>strong{font-size:12px;color:#244953}
+.implementation-competency-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;max-height:210px;overflow:auto;padding:6px 3px}
+.implementation-competency-picker>small{color:#667d82;font-size:11px}
+.implementation-voice textarea{white-space:pre-wrap;line-height:1.6}
+.assessor-history-ratings>.assessor-skill-evidence{display:flex;flex-direction:column;gap:10px;align-items:stretch}
+.assessor-history-skill-title{display:flex;justify-content:space-between;gap:10px;width:100%;align-items:flex-start}
+.assessor-history-skill-title span{min-width:0}
+.assessor-attached-media{display:flex;flex-wrap:wrap;gap:10px}
+.assessor-attached-media>div{border:1px solid #e2e9e8;background:#f9fcfb;display:flex;flex-direction:column;gap:8px;padding:9px;border-radius:10px;max-width:230px;min-width:130px}
+.assessor-attached-media img,.assessor-attached-media video{width:100%;max-width:210px;max-height:180px;object-fit:contain;border-radius:6px}
+.assessor-attached-media a{font-size:11px;overflow-wrap:anywhere;color:#087b73}
+.assessor-upload-evidence{display:flex;flex-direction:column;align-items:flex-start;gap:8px;font-size:11px;color:#45626a;border-top:1px solid #e7eeeb;padding-top:8px}
+.assessor-upload-evidence input{font-size:11px;max-width:100%}
+@media(max-width:750px){.implementation-competency-options{grid-template-columns:1fr}}
