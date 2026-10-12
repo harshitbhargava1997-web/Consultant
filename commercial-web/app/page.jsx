@@ -330,7 +330,7 @@ export default function Home(){
  const availableNav=navigation.filter(n=>{
   if(n.id==="permissions")return identity.admin;
   if(n.id==="overview")return true;
-  if(n.id==="users")return !!schoolId&&
+  if(n.id==="users")return identity.admin||!!schoolId&&
    (can("users.manage")||can("classes.view")||can("classes.manage")||can("classes.import")||
     can("staff.import")||can("students.import")||can("students.manage")||
     can("teachers.assign")||can("data.export"));
@@ -350,12 +350,12 @@ export default function Home(){
  {page==="overview"&&<><div className="stats"><div className="stat"><span>Schools assigned</span><strong>{new Set([...identity.memberships.map(m=>m.school_id),...identity.consultantSchools]).size}</strong><small>School access</small></div><div className="stat"><span>Classes</span><strong>{visibleClasses.length}</strong><small>Accessible classes</small></div><div className="stat"><span>Students</span><strong>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).length}</strong><small>Registered learners</small></div><div className="stat"><span>Assessment sessions</span><strong>{assessments.filter(a=>visibleClasses.some(c=>c.id===a.class_id)).length}</strong><small>Last 500 loaded</small></div></div><div className="two-col"><Box title="Your learning workflow"><div className="workflow">{["Set up school and staff","Create classes and student rosters","Assess cumulative competencies","Review literacy level and interventions"].map((t,i)=><div key={t} className="workflow-row"><span>{i+1}</span>{t}<CircleCheck size={16}/></div>)}</div></Box><Box title="Product readiness"><div className="readiness"><p><CircleCheck size={17}/> Unified authentication and role-aware interface</p><p><CircleCheck size={17}/> Cumulative student assessment and reports</p><p><AlertCircle size={17}/> Legacy evidence migration requires secure ID mapping</p><p><AlertCircle size={17}/> Production security review and end-to-end testing pending</p></div></Box></div></>}
  {page==="permissions"&&identity.admin&&<RolePermissions session={session}/>}
  {page==="schools"&&can("schools.view")&&<div className="two-col"><Box title="Registered schools">{identity.schools.length?<div className="rows">{identity.schools.map(s=><div className="record" key={s.id}><School size={17}/><strong>{s.name}</strong></div>)}</div>:<Empty title="No schools yet" detail="Create your first school to begin."/>}</Box>{identity.admin&&<Box title="Register a school"><form onSubmit={addSchool} className="stack"><label>School name<input required maxLength={180} value={newSchool} onChange={e=>setNewSchool(e.target.value)} placeholder="Full registered school name"/></label><Btn kind="primary" type="submit" disabled={busy}><Plus size={16}/> Create school</Btn></form></Box>}</div>}
- {page==="users"&&schoolId&&
+ {page==="users"&&(identity.admin||schoolId)&&
   (can("users.manage")||can("classes.view")||can("classes.manage")||can("classes.import")||
    can("teachers.assign")||can("staff.import")||can("students.manage")||
    can("students.import")||can("data.export"))&&
   <SchoolManagementWorkspace client={client} session={session} schoolId={schoolId}
-   schoolName={school?.name||"Selected school"} classes={visibleClasses}
+   schoolName={school?.name||"Selected school"} schools={identity.schools} classes={visibleClasses}
    students={students.filter(s=>visibleClasses.some(c=>c.id===s.class_id))}
    members={members} teacherClasses={teacherClasses}
    grants={roleGrants} isAdmin={identity.admin} canManageAllRoles={canManageAllRoles}
