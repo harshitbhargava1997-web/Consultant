@@ -13,7 +13,7 @@ const CATEGORY_LABELS={
 };
 const EXT={
  "application/pdf":"pdf","image/jpeg":"jpg","image/png":"png","image/webp":"webp",
- "video/mp4":"mp4","video/quicktime":"mov","video/webm":"webm",
+ "video/mp4":"mp4","video/quicktime":"mov","video/webm":"webm","video/x-m4v":"m4v","video/x-msvideo":"avi",
  "audio/wav":"wav","audio/webm":"webm","audio/mp4":"m4a","audio/mpeg":"mp3","audio/x-m4a":"m4a"
 };
 const allowedMime=(category,mime)=>{
@@ -81,7 +81,7 @@ function validateFileMeta(ctx,file){
   path=txt(file.path,350),name=txt(file.name,240),size=Number(file.size);
  if(!allowedMime(category,mime)||!path.startsWith(uploadPrefix(ctx))||
   !/^[a-f0-9-]{36}\.[a-z0-9]+$/i.test(path.slice(uploadPrefix(ctx).length))||
-  !name||name.length>240||!Number.isInteger(size)||size<1||size>MAX_BYTES)throw Error("Invalid or unauthorized evidence file.");
+  !path.endsWith("."+EXT[mime])||!name||name.length>240||!Number.isInteger(size)||size<1||size>MAX_BYTES)throw Error("Invalid or unauthorized evidence file.");
  if(path.split("/").some(v=>v===".."||v==="."))throw Error("Invalid upload path.");
  return {category,content_type:mime,object_path:path,file_name:name,size_bytes:size};
 }
@@ -180,7 +180,7 @@ export async function POST(request){
      subject=txt(p.subject,100),topic=txt(p.topic,300),
      reflection=txt(p.reflection,5000),voiceNotes=txt(p.voiceNotes,5000);
     if(!Number.isInteger(period)||period<1||period>10||seen.has(period)||!byClass.has(cid)||
-     !/^\d{4}-\d{2}-\d{2}$/.test(date)||date>new Date().toISOString().slice(0,10)||
+     !/^\d{4}-\d{2}-\d{2}$/.test(date)||date>new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"})||
      subject.length<2||subject.length>100||topic.length<3||topic.length>300||
      reflection.length>5000||voiceNotes.length>5000)
      return send({error:"Check period "+(i+1)+" (assigned class, lesson date, subject, lesson topic and reflection)."},400);
@@ -251,8 +251,9 @@ export async function POST(request){
     status==="needs_follow_up"&&!feedback)
     return send({error:"Choose a review status and add feedback when follow-up is required."},400);
    const {data:entry,error:entryError}=await ctx.admin.from("literacy_implementation_entries")
-    .select("id").eq("id",body.entryId).eq("school_id",ctx.schoolId).maybeSingle();
+    .select("id,teacher_user_id").eq("id",body.entryId).eq("school_id",ctx.schoolId).maybeSingle();
    if(entryError||!entry)return send({error:"Implementation not found in this school."},404);
+   if(entry.teacher_user_id===ctx.user.id)return send({error:"You cannot review your own classroom evidence."},403);
    const {error}=await ctx.admin.from("literacy_implementation_reviews").upsert({
     entry_id:entry.id,reviewer_id:ctx.user.id,status,feedback,reviewed_at:new Date().toISOString()
    },{onConflict:"entry_id"});
