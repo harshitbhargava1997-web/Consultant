@@ -18,6 +18,7 @@ const EXT={
 };
 const allowedMime=(category,mime)=>{
  if(!Object.keys(CATEGORY_LABELS).includes(category)||!EXT[mime])return false;
+ if(!["voice","lesson_plan","activity","phonics"].includes(category))return false;
  if(category==="voice")return mime.startsWith("audio/");
  if(category==="event_pictures")return mime.startsWith("image/");
  if(["lesson_plan","writing","assessment"].includes(category))return mime==="application/pdf"||mime.startsWith("image/");
@@ -121,7 +122,7 @@ export async function GET(request){
   const url=new URL(request.url),schoolId=txt(url.searchParams.get("schoolId"),40);
   const ctx=await authorize(request,schoolId);
   if(ctx.error)return send({error:ctx.error},ctx.status);
-  return send({...await getEntries(ctx,url),role:ctx.role,isAdmin:ctx.isAdmin,
+  return send({...await getEntries(ctx,url),transcriptionAvailable:!!process.env.OPENAI_API_KEY,role:ctx.role,isAdmin:ctx.isAdmin,
    canSubmit:ctx.role==="teacher"&&ctx.can("implementation.submit"),
    canReview:ctx.can("implementation.review"),canFeedback:ctx.can("implementation.feedback"),
    categories:CATEGORY_LABELS});
@@ -147,6 +148,34 @@ export async function POST(request){
    const {data,error}=await ctx.admin.storage.from(BUCKET).createSignedUploadUrl(path);
    if(error)throw error;
    return send({path,token:data.token});
+  }
+  if(action==="transcribeVoice"){
+   if(ctx.role!=="teacher"||!ctx.can("implementation.submit"))
+    return send({error:"Only an authorized teacher may transcribe their recording."},403);
+   if(!process.env.OPENAI_API_KEY)
+    return send({error:"Uploaded audio transcription needs an OPENAI_API_KEY configured on Vercel."},503);
+   const path=txt(body.path,350),language=txt(body.language,12);
+   if(!path.startsWith(uploadPrefix(ctx))||!/^[a-f0-9-]{36}\.(webm|m4a|mp3|wav)$/i.test(path.slice(uploadPrefix(ctx).length)))
+    return send({error:"Invalid audio recording path."},400);
+   if(!["en","hi",""].includes(language))
+    return send({error:"Choose English or Hindi transcription."},400);
+   const {data:obj,error:downloadError}=await ctx.admin.storage.from(BUCKET).download(path);
+   if(downloadError||!obj)return send({error:"Audio recording was not uploaded successfully."},404);
+   if(obj.size>25*1024*1024)return send({error:"Audio transcription supports files up to 25 MB. You may still submit the audio recording as evidence."},413);
+   const extension=path.split(".").at(-1);
+   const mime=extension==="webm"?"audio/webm":extension==="m4a"?"audio/mp4":extension==="mp3"?"audio/mpeg":"audio/wav";
+   const form=new FormData();
+   form.append("model","gpt-4o-mini-transcribe");
+   form.append("file",new File([obj],"teacher-reflection."+extension,{type:mime}));
+   if(language)form.append("language",language);
+   const response=await fetch("https://api.openai.com/v1/audio/transcriptions",{
+    method:"POST",headers:{Authorization:"Bearer "+process.env.OPENAI_API_KEY},body:form,
+    signal:AbortSignal.timeout(90000)
+   });
+   if(!response.ok)return send({error:"Speech transcription service was unable to process the recording. Audio is still available for submission."},502);
+   const transcription=await response.json();
+   const transcript=txt(transcription.text,5000);
+   return send({transcript,message:"Voice transcribed. Review and edit the text before submitting."});
   }
   if(action==="cleanupUploads"){
    if(ctx.role!=="teacher"||!ctx.can("implementation.submit"))return send({error:"Not authorized."},403);
@@ -186,20 +215,20 @@ export async function POST(request){
      return send({error:"Check period "+(i+1)+" (assigned class, lesson date, subject, lesson topic and reflection)."},400);
     seen.add(period);
     const competency=txt(p.competencyId,40),course=txt(p.trainingCourseId,40);
-    if(competency&&!UUID.test(competency)||course&&!UUID.test(course))
+    if(competency&&!UUID.test(competency))
      return send({error:"Invalid linked competency or course."},400);
     const periodFiles=Array.isArray(p.files)?p.files:[];
     if(periodFiles.length>20)return send({error:"Maximum 20 evidence files per period."},400);
+    if(!periodFiles.some(f=>f.category==="voice"))
+     return send({error:"Voice reflection audio is required for every period ("+period+")."},400);
     for(const f of periodFiles)filePayloads.push({period,...validateFileMeta(ctx,f)});
     entryPayloads.push({school_id:ctx.schoolId,class_id:cid,teacher_user_id:ctx.user.id,
      submission_key:body.submissionKey,period_number:period,implementation_date:date,
-     subject,lesson_topic:topic,voice_reflection_note:voiceNotes,teacher_reflection:reflection,
-     competency_id:competency||null,training_course_id:course||null});
+     subject,lesson_topic:topic,voice_reflection_note:voiceNotes,teacher_reflection:"",
+     competency_id:competency||null,training_course_id:null});
    }
    if(filePayloads.length>30||new Set(filePayloads.map(f=>f.object_path)).size!==filePayloads.length)
     return send({error:"Maximum 30 unique evidence files per submission."},400);
-   if(filePayloads.length===0&&entryPayloads.every(p=>!p.teacher_reflection&&!p.voice_reflection_note))
-    return send({error:"Add at least one reflection or evidence file."},400);
    // Verify that every signed-upload file really exists in our private bucket.
    for(const f of filePayloads){
     const {data:object,error:infoError}=await ctx.admin.storage.from(BUCKET).info(f.object_path);
@@ -212,15 +241,6 @@ export async function POST(request){
     const {data,error}=await ctx.admin.from("literacy_competencies")
      .select("id").in("id",ids).eq("active",true);
     if(error||data?.length!==ids.length)return send({error:"A linked competency is no longer published."},400);
-   }
-   if(entryPayloads.some(e=>e.training_course_id)){
-    const ids=[...new Set(entryPayloads.map(e=>e.training_course_id).filter(Boolean))];
-    const {data,error}=await ctx.admin.from("literacy_training_courses")
-     .select("id,target_roles,status").in("id",ids).eq("status","published").contains("target_roles",["teacher"]);
-    if(error||data?.length!==ids.length)return send({error:"Linked training must be published for teachers."},400);
-    const {data:links,error:linkError}=await ctx.admin.from("literacy_training_course_schools")
-     .select("course_id").eq("school_id",ctx.schoolId).in("course_id",ids);
-    if(linkError||links?.length!==ids.length)return send({error:"Linked course is not assigned to this school."},400);
    }
    const {data:saved,error:saveError}=await ctx.admin.from("literacy_implementation_entries")
     .insert(entryPayloads).select("id,period_number");
