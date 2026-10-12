@@ -72,7 +72,7 @@ function ProgressSummary({skills,previous,student}){
   </div>}
  </section>;
 }
-export default function AssessorWorkspace({client,schoolId,classes,students,competencies,canCreate=true,canViewHistory=true,onSaved}){
+export default function AssessorWorkspace({client,session,schoolId,classes,students,competencies,canCreate=true,canViewHistory=true,canUploadEvidence=true,canViewEvidence=true,onSaved}){
  const [classId,setClassId]=useState(""),[studentId,setStudentId]=useState("");
  const [scope,setScope]=useState("cumulative"),[stage,setStage]=useState("baseline");
  const [assessmentDate,setAssessmentDate]=useState(localToday);
@@ -82,6 +82,8 @@ export default function AssessorWorkspace({client,schoolId,classes,students,comp
  const [saving,setSaving]=useState(false),[loadingHistory,setLoadingHistory]=useState(false);
  const [message,setMessage]=useState(""),[error,setError]=useState("");
  const [sessions,setSessions]=useState([]),[results,setResults]=useState([]);
+ const [media,setMedia]=useState([]),[mediaBusy,setMediaBusy]=useState(""),[mediaVersion,setMediaVersion]=useState(0);
+ const [mediaError,setMediaError]=useState("");
  const [historyVersion,setHistoryVersion]=useState(0),[expanded,setExpanded]=useState("");
  const [historyTruncated,setHistoryTruncated]=useState(false);
  const activeClass=classes.find(c=>c.id===classId)||classes[0];
@@ -142,6 +144,51 @@ export default function AssessorWorkspace({client,schoolId,classes,students,comp
   })();
   return()=>{alive=false;};
  },[canViewHistory,client,schoolId,activeClass?.id,studentId,historyVersion]);
+ useEffect(()=>{
+  if(!session?.access_token||!studentId||!activeClass?.id||!canViewHistory||!canViewEvidence){
+   setMedia([]);return;
+  }
+  let alive=true;
+  fetch("/api/assessment-evidence?schoolId="+encodeURIComponent(schoolId)+"&studentId="+encodeURIComponent(studentId),{
+   headers:{Authorization:"Bearer "+session.access_token},cache:"no-store"
+  }).then(async response=>{
+   const data=await response.json().catch(()=>({}));
+   if(!response.ok)throw Error(data.error||"Student media could not be loaded.");
+   return data.items||[];
+  }).then(items=>{if(alive){setMedia(items);setMediaError("");}})
+   .catch(e=>{if(alive){setMedia([]);setMediaError(e.message);}});
+  return()=>{alive=false;};
+ },[studentId,activeClass?.id,schoolId,session?.access_token,canViewHistory,canViewEvidence,mediaVersion]);
+ async function uploadCompetencyMedia(assessmentId,competencyId,file){
+  if(!file||!chosenStudent||!canCreate||!canUploadEvidence)return;
+  if(file.size>50*1024*1024||!file.size){
+   setMediaError("Select an image or video up to 50 MB.");return;
+  }
+  const mime=file.type;
+  if(!["image/jpeg","image/png","image/webp","video/mp4","video/quicktime","video/webm","video/x-m4v","video/x-msvideo"].includes(mime)){
+   setMediaError("Only supported photos and videos can be uploaded.");return;
+  }
+  const key=assessmentId+":"+competencyId;
+  setMediaBusy(key);setMediaError("");
+  try{
+   async function call(action,body){
+    const response=await fetch("/api/assessment-evidence?schoolId="+encodeURIComponent(schoolId),{
+     method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},
+     body:JSON.stringify({action,studentId:chosenStudent.id,assessmentId,competencyId,...body})
+    });
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(result.error||"Media upload failed.");
+    return result;
+   }
+   const ticket=await call("uploadTicket",{name:file.name,contentType:mime,size:file.size});
+   const {error}=await client.storage.from("vision-assessment-evidence")
+    .uploadToSignedUrl(ticket.path,ticket.token,file,{contentType:mime});
+   if(error)throw error;
+   await call("attach",{path:ticket.path,name:file.name,contentType:mime,size:file.size});
+   setMediaVersion(v=>v+1);setMessage("Student competency evidence uploaded successfully.");
+  }catch(e){setMediaError("Photo/video upload failed: "+e.message);}
+  finally{setMediaBusy("");}
+ }
  function rate(id,rating){
   setRatings(previous=>({...previous,[id]:rating}));
   if(rating==="Not Assessed")setEvidence(previous=>({...previous,[id]:""}));
@@ -277,9 +324,30 @@ export default function AssessorWorkspace({client,schoolId,classes,students,comp
          {!details.length?<p>No ratings recorded in this session.</p>:
           <div className="assessor-history-ratings">{details.map(r=>{
            const c=competencies.find(skill=>skill.id===r.competency_id);
-           return <div key={r.competency_id}><span><strong>{c?.title||"Archived competency"}</strong>
-            <small>{c?.grade||""}{r.evidence_notes?" · "+r.evidence_notes:""}</small></span>
-            <em>{r.rating}</em></div>;
+           const attachments=media.filter(f=>f.assessment_id===item.id&&f.competency_id===r.competency_id);
+           return <div key={r.competency_id} className="assessor-skill-evidence">
+            <div className="assessor-history-skill-title">
+             <span><strong>{c?.title||"Archived competency"}</strong>
+              <small>{c?.grade||""}{r.evidence_notes?" · "+r.evidence_notes:""}</small></span>
+             <em>{r.rating}</em>
+            </div>
+            {canViewEvidence&&attachments.length>0&&<div className="assessor-attached-media">
+             {attachments.map(f=><div key={f.id}>
+              {f.content_type.startsWith("image/")&&f.url&&<a href={f.url} target="_blank" rel="noopener noreferrer"><img loading="lazy" src={f.url} alt={f.file_name}/></a>}
+              {f.content_type.startsWith("video/")&&f.url&&<video controls preload="metadata" src={f.url}/>}
+              {f.url&&<a href={f.url} target="_blank" rel="noopener noreferrer">{f.file_name}</a>}
+             </div>)}
+            </div>}
+            {canCreate&&canUploadEvidence&&<label className="assessor-upload-evidence">
+             Add student photo/video for this competency (optional)
+             <input type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime,video/x-m4v,video/x-msvideo"
+              disabled={!!mediaBusy} onChange={e=>{
+               const file=e.target.files?.[0];e.target.value="";
+               if(file)uploadCompetencyMedia(item.id,r.competency_id,file);
+              }}/>
+             {mediaBusy===item.id+":"+r.competency_id&&<small>Uploading student evidence…</small>}
+            </label>}
+           </div>;
           })}</div>}
         </div>}
        </div>;
@@ -288,6 +356,6 @@ export default function AssessorWorkspace({client,schoolId,classes,students,comp
     {historyTruncated&&<p className="helper">Some older competency details exceed the recent-history limit. Use the student progress report for cumulative trends.</p>}
    </section>}
   </>}
-  {(error||message)&&<div className={"notice assessor-feedback"} role="status">{error||message}</div>}
+  {(error||message||mediaError)&&<div className={"notice assessor-feedback"} role="status">{mediaError||error||message}</div>}
  </div>;
 }
