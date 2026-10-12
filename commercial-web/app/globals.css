@@ -191,3 +191,27 @@
  .manage-class-checks{grid-template-columns:1fr}
  .manage-bulk-area>.btn{width:100%}
 }
+
+
+/* Super Admin school-owner, principal and coordinator account workspace */
+.management-admin-leaders{display:flex;flex-direction:column;gap:18px}
+.management-admin-leaders>.panel{margin-bottom:0}
+.management-admin-leaders .panel-head h2{display:flex;align-items:center;gap:8px}
+.management-admin-leaders .stack{display:flex;flex-direction:column;gap:13px}
+.management-admin-leaders .stack button{align-self:flex-start}
+.management-role-types{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;margin:16px 0 3px}
+.management-role-type{display:flex;flex-direction:column;gap:7px;padding:14px;border:1px solid #dce8e7;border-radius:10px;background:#f6faf9}
+.management-role-type svg{color:#19827c}
+.management-role-type strong{font-size:12px;color:#234553}
+.management-role-type span{font-size:11px;color:#70818c}
+.management-admin-leaders .table-wrap{max-height:440px;overflow:auto;margin:12px 0}
+.management-admin-leaders .table-wrap table{min-width:580px;width:100%}
+.management-admin-leaders .table-wrap td{font-size:11px;vertical-align:middle;line-height:1.4}
+.management-admin-leaders .table-wrap th{white-space:nowrap}
+.management-admin-leaders .management-filters{margin:12px 0}
+@media(max-width:760px){
+ .management-role-types{grid-template-columns:1fr}
+ .management-role-type{flex-direction:row;align-items:center;gap:11px}
+ .management-role-type span{margin-left:auto}
+ .management-admin-leaders .stack button{align-self:stretch}
+}
