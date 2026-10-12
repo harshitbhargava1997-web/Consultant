@@ -129,6 +129,9 @@ async function reviewSchool(ctx,courses,units){
   const ownCert=(certRes.data||[]).filter(v=>v.user_id===p.user_id);
   return {user_id:p.user_id,name:p.display_name||"Staff member",role:p.role,
    units_completed:mine.length,certificates:ownCert.length,
+   average_quiz_score:mine.filter(p=>p.quiz_percent!==null).length?
+    Math.round(mine.filter(p=>p.quiz_percent!==null)
+      .reduce((sum,p)=>sum+p.quiz_percent,0)/mine.filter(p=>p.quiz_percent!==null).length):null,
    attended_sessions:(attendanceRes.data||[]).filter(x=>x.user_id===p.user_id).length,
    courses:courses.filter(c=>c.target_roles.includes(p.role)).map(c=>{
     const lessonIds=new Set(units.filter(u=>u.course_id===c.id).map(u=>u.id));
@@ -242,7 +245,7 @@ async function studentOutcome(ctx,studentId){
  if(unitError||certError||sessionError)throw unitError||certError||sessionError;
  const unitIds=(units||[]).map(u=>u.id);
  const progress=unitIds.length&&teacherIds.length?await ctx.admin.from("literacy_training_progress")
-  .select("user_id,unit_id").eq("school_id",ctx.schoolId)
+  .select("user_id,unit_id,quiz_percent").eq("school_id",ctx.schoolId)
   .in("user_id",teacherIds).in("unit_id",unitIds).limit(2500):{data:[],error:null};
  if(progress.error)throw progress.error;
  const teacherAttend=teacherIds.length?await ctx.admin.from("literacy_training_session_attendees")
@@ -255,8 +258,11 @@ async function studentOutcome(ctx,studentId){
   name:(membership||[]).find(m=>m.user_id===userId)?.display_name||"Assigned teacher",
   courses:allCourses.map(c=>{
    const unitSet=new Set((units||[]).filter(u=>u.course_id===c.id).map(u=>u.id));
+   const mine=(progress.data||[]).filter(p=>p.user_id===userId&&unitSet.has(p.unit_id));
+   const quizzes=mine.filter(p=>p.quiz_percent!==null);
    return {title:c.title,competency_id:c.competency_id,
-    units_completed:(progress.data||[]).filter(p=>p.user_id===userId&&unitSet.has(p.unit_id)).length,
+    units_completed:mine.length,average_quiz_score:quizzes.length?
+     Math.round(quizzes.reduce((a,p)=>a+p.quiz_percent,0)/quizzes.length):null,
     units_total:unitSet.size,
     certified:(certificates||[]).some(x=>x.user_id===userId&&x.course_id===c.id)};
   })
@@ -437,7 +443,7 @@ export async function POST(request){
     if(attemptError)throw attemptError;
     if(percent<course.pass_percent)
      return send({passed:false,score:percent,required:course.pass_percent,
-      message:"Exercise submitted. Passing score not reached; review and retry."});
+      message:"Score: "+percent+"%. Passing score: "+course.pass_percent+"%. Review and retry."});
     const {error}=await ctx.admin.from("literacy_training_progress").upsert({
      school_id:ctx.schoolId,user_id:ctx.user.id,unit_id:unit.id,quiz_percent:percent,
      completed_at:new Date().toISOString()
