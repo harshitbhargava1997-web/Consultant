@@ -137,6 +137,35 @@ async function importPeople(ctx,rows){
  }
  return results;
 }
+async function importClasses(ctx,rows){
+ const seen=new Set(),results=[],valid=[];
+ const existing=await ctx.admin.from("literacy_classes")
+  .select("grade,section,academic_year").eq("school_id",ctx.school.id);
+ if(existing.error)throw existing.error;
+ const known=new Set((existing.data||[]).map(c=>[c.grade,c.section,c.academic_year].join("|").toLowerCase()));
+ for(const row of rows){
+  const grade=clean(row.grade),section=clean(row.section)||"A",year=clean(row.academic_year);
+  if(!GRADES.includes(grade)||section.length>30||!section||!/^\\d{4}-\\d{2,4}$/.test(year)){
+   results.push(rowResult(row,"error","Provide valid grade, section and academic year (e.g. 2026-27)."));continue;
+  }
+  const key=[grade,section,year].join("|").toLowerCase();
+  if(seen.has(key)){results.push(rowResult(row,"error","Duplicate class in this upload batch."));continue;}
+  seen.add(key);
+  if(known.has(key)){results.push(rowResult(row,"saved","Class already exists; no changes needed."));continue;}
+  valid.push({row,payload:{school_id:ctx.school.id,grade,section,academic_year:year}});
+ }
+ if(valid.length){
+  const {error}=await ctx.admin.from("literacy_classes")
+   .upsert(valid.map(v=>v.payload),{onConflict:"school_id,grade,section,academic_year",ignoreDuplicates:true});
+  for(const v of valid)results.push(rowResult(v.row,error?"error":"saved",error?error.message:"Class registered."));
+ }
+ return results.sort((a,b)=>a.row_number-b.row_number);
+}
+async function exportClasses(ctx){
+ return allRows((from,to)=>ctx.admin.from("literacy_classes")
+  .select("grade,section,academic_year").eq("school_id",ctx.school.id)
+  .order("grade").order("section").range(from,to));
+}
 async function importStudents(ctx,rows){
  const {data:classes,error}=await ctx.admin.from("literacy_classes")
   .select("id,grade,section,academic_year").eq("school_id",ctx.school.id);
@@ -218,23 +247,27 @@ export async function POST(request){
   if(!/^[0-9a-f-]{36}$/i.test(schoolId))return response({error:"Select a school."},400);
   const ctx=await authorized(request,schoolId);
   if(ctx.error)return response({error:ctx.error},ctx.status);
-  if(body.action==="exportPeople"||body.action==="exportStudents"){
+  if(body.action==="exportPeople"||body.action==="exportStudents"||body.action==="exportClasses"){
    // Exporting roster or staff data is a platform-only permission.
    if(!ctx.isAdmin&&!ctx.granted.has("data.export"))
     return response({error:"Data export is disabled for your role."},403);
    if(body.action==="exportPeople")return response({rows:await exportPeople(ctx),school:ctx.school.name});
+   if(body.action==="exportClasses")return response({rows:await exportClasses(ctx),school:ctx.school.name});
    return response({rows:await exportStudents(ctx),school:ctx.school.name});
   }
   if(body.action==="importPeople"&&!ctx.isAdmin&&!ctx.granted.has("staff.import"))
    return response({error:"Stakeholder upload is disabled for your role."},403);
   if(body.action==="importStudents"&&!ctx.isAdmin&&!ctx.granted.has("students.import"))
    return response({error:"Student upload is disabled for your role."},403);
-  if(body.action!=="importPeople"&&body.action!=="importStudents")
+  if(body.action==="importClasses"&&!ctx.isAdmin&&!ctx.granted.has("classes.import"))
+   return response({error:"Class bulk upload is disabled for your role."},403);
+  if(!["importPeople","importStudents","importClasses"].includes(body.action))
    return response({error:"Unsupported bulk action."},400);
   if(!Array.isArray(body.rows)||body.rows.length<1||body.rows.length>100)
    return response({error:"Upload 1–100 records per batch."},400);
   const results=body.action==="importPeople"
-   ?await importPeople(ctx,body.rows):await importStudents(ctx,body.rows);
+   ?await importPeople(ctx,body.rows):body.action==="importClasses"
+    ?await importClasses(ctx,body.rows):await importStudents(ctx,body.rows);
   return response({results,school:ctx.school.name});
  }catch(e){
   // Do not reflect request data or password values in errors.
