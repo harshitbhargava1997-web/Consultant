@@ -289,7 +289,13 @@ export async function GET(request){
   const [own,people,sessions]=await Promise.all([
    ownLearning(ctx,units,courses),reviewSchool(ctx,courses,units),trainingSessions(ctx,courses)
   ]);
-  return send({courses,units,...own,review:people,sessions,learnerName,role:ctx.role,isAdmin:ctx.isAdmin});
+  const {data:trainingStaff,error:staffError}=ctx.schoolId&&ctx.can("training.deliver")
+   ?await ctx.admin.from("literacy_memberships").select("user_id,display_name")
+    .eq("school_id",ctx.schoolId).eq("role","teacher").order("display_name").limit(500)
+   :{data:[],error:null};
+  if(staffError)throw staffError;
+  return send({courses,units,...own,review:people,sessions,trainingStaff:trainingStaff||[],
+   learnerName,role:ctx.role,isAdmin:ctx.isAdmin});
  }catch(e){return send({error:"Training library unavailable: "+(e.message||"Unknown error")},500);}
 }
 export async function POST(request){
