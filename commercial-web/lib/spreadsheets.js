@@ -118,7 +118,7 @@ async function normalizeSpreadsheetML(arrayBuffer){
   const prefix='xmlns:x="'+spreadsheetML+'"';
   if(!source.includes(prefix))continue;
   const fixed=source.replaceAll(prefix,'xmlns="'+spreadsheetML+'"')
-   .replace(/<(\\/?)x:/g,"<$1");
+   .replace(/<(\/?)x:/g,"<$1");
   archive.file(name,fixed);
   changed++;
  }
