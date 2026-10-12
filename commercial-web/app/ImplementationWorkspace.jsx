@@ -38,7 +38,7 @@ function EvidenceFile({file}){
     <span className="helper">Preview unavailable. Refresh to renew access.</span>}</div>
  </div>;
 }
-function ReviewCard({entry,files=[],review,teacher,classLabel,canFeedback,onSave,busy}){
+function ReviewCard({entry,files=[],review,teacher,classLabel,competencyTitles=[],canFeedback,onSave,busy}){
  const [status,setStatus]=useState(review?.status||"reviewed");
  const [feedback,setFeedback]=useState(review?.feedback||"");
  useEffect(()=>{setStatus(review?.status||"reviewed");setFeedback(review?.feedback||"");},
@@ -55,6 +55,7 @@ function ReviewCard({entry,files=[],review,teacher,classLabel,canFeedback,onSave
    <span>Submitted: {new Date(entry.submitted_at).toLocaleString("en-IN")}</span>
    <span>{files.length} files</span>
   </div>
+  {competencyTitles.length>0&&<p className="helper">Linked competencies: {competencyTitles.join(" · ")}</p>}
   {entry.voice_reflection_note&&<div className="implementation-reflection"><strong>Voice reflection transcription</strong>
    <p>{entry.voice_reflection_note}</p></div>}
   {entry.teacher_reflection&&<div className="implementation-reflection"><strong>Implementation reflection</strong>
@@ -82,7 +83,7 @@ function ReviewCard({entry,files=[],review,teacher,classLabel,canFeedback,onSave
 }
 export default function ImplementationWorkspace({client,session,schoolId,schoolName,competencies=[],isAdmin=false,grants=[]}){
  const can=feature=>isAdmin||grants.includes(feature);
- const [info,setInfo]=useState({entries:[],files:[],reviews:[],people:[],classes:[],canSubmit:false,canReview:false,canFeedback:false});
+ const [info,setInfo]=useState({entries:[],files:[],reviews:[],people:[],competencyLinks:[],classes:[],canSubmit:false,canReview:false,canFeedback:false,transcriptionAvailable:false});
  const [periods,setPeriods]=useState([emptyPeriod()]);
  const [tab,setTab]=useState("submit");
  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[message,setMessage]=useState("");
@@ -143,7 +144,7 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
   }catch(e){setMessage(e.message);}finally{setLoading(false);}
  }
  useEffect(()=>{
-  let active=true;setInfo({entries:[],files:[],reviews:[],people:[],classes:[],canSubmit:false,canReview:false,canFeedback:false});
+  let active=true;setInfo({entries:[],files:[],reviews:[],people:[],competencyLinks:[],classes:[],canSubmit:false,canReview:false,canFeedback:false,transcriptionAvailable:false});
   setMessage("");setLoading(true);setPeriods([emptyPeriod()]);setReceipt("");
   if(!schoolId){setLoading(false);return;}
   fetch("/api/implementation?schoolId="+encodeURIComponent(schoolId),{
@@ -288,7 +289,7 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
   <section className="panel">
    <div className="panel-head"><h2><ClipboardCheck size={20}/> Teacher Implementation Evidence</h2>
     <span className="eyebrow">{schoolName||"SCHOOL WORKSPACE"}</span></div>
-   <p className="helper">Daily classroom implementation and learning reflections. Submit period-wise evidence of lesson planning, teaching activities, student work, phonics, assessment, portfolio and voice reflections. School leaders, assigned Consultants and Super Admins can review submissions according to their access settings.</p>
+   <p className="helper">Daily classroom implementation evidence. Record a required voice reflection and add classroom activity and phonics implementation photos or videos; lesson plans are optional. Student-level assessment media is kept in Literacy Assessor. School leaders, assigned Consultants and Super Admins can review submissions according to their access settings.</p>
    <div className="implementation-summary">
     <div><small>Recent submissions</small><strong>{aggregate.entries}</strong></div>
     <div><small>Evidence files</small><strong>{aggregate.files}</strong></div>
@@ -321,39 +322,46 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
      <label>Implementation date<input required type="date" max={today()} value={p.date}
       onChange={e=>update(p.key,{date:e.target.value})}/></label>
     </div>
-    <label>Lesson Plan No. & Topic / Chapter<input required minLength={3} maxLength={300}
-     value={p.topic} placeholder="LP 12 – Plants Around Us"
+    <label>Topic / Chapter<input required minLength={3} maxLength={300}
+     value={p.topic} placeholder="e.g. Letter A – Sound and Action"
      onChange={e=>update(p.key,{topic:e.target.value})}/></label>
-    <div className="two-col">
-     <label>Linked published literacy competency (optional)<select value={p.competencyId}
-      onChange={e=>update(p.key,{competencyId:e.target.value})}>
-      <option value="">No single competency linked</option>
-      {competencies.filter(c=>c.active).map(c=><option key={c.id} value={c.id}>{c.grade} · {c.title}</option>)}
-     </select></label>
-     <label>Training programme applied (optional)<select value={p.trainingCourseId}
-      onChange={e=>update(p.key,{trainingCourseId:e.target.value})}>
-      <option value="">No training course linked</option>
-      {courseList.filter(c=>c.target_roles.includes("teacher")).map(c=><option value={c.id} key={c.id}>{c.title}</option>)}
-     </select></label>
+    <div className="implementation-competency-picker">
+     <strong>Linked published competencies (optional, multiple)</strong>
+     <p className="helper">Select the teaching competencies demonstrated in this lesson.</p>
+     <div className="implementation-competency-options">
+      {competencies.filter(c=>c.active).map(c=><label key={c.id} className="manage-check">
+       <input type="checkbox" checked={p.competencyIds.includes(c.id)}
+        onChange={e=>update(p.key,{competencyIds:e.target.checked?[...p.competencyIds,c.id]:
+         p.competencyIds.filter(id=>id!==c.id)})}/>
+       <span><strong>{c.grade} · {c.title}</strong></span>
+      </label>)}
+     </div>
+     <small>{p.competencyIds.length} competencies linked</small>
     </div>
-    <label>Teacher's implementation reflection<textarea rows={3} maxLength={5000}
-     placeholder="What was the learning objective? How did you demonstrate, involve students, practise and review? What did students learn?"
-     value={p.reflection} onChange={e=>update(p.key,{reflection:e.target.value})}/></label>
     <div className="implementation-voice">
-     <h3><Mic size={17}/> Voice reflection</h3>
-     <p className="helper">Use the microphone to record a short reflection, upload an existing audio file, or type a reflection summary.</p>
+     <h3><Mic size={17}/> Voice reflection (required)</h3>
+     <p className="helper">Record or upload a reflection describing the learning objective, classroom demonstration, student participation, practice and follow-up. The editable transcript appears below. You do not need to type a separate teacher reflection.</p>
      <div className="implementation-voice-controls">
-      <button type="button" className={"btn "+(recording===p.key?"primary":"outline")} disabled={busy||recording&&recording!==p.key}
+      <label>Voice language<select value={p.language} onChange={e=>update(p.key,{language:e.target.value})}>
+       <option value="en-IN">English (India)</option><option value="hi-IN">Hindi (India)</option>
+      </select></label>
+      <button type="button" className={"btn "+(recording===p.key?"primary":"outline")}
+       disabled={busy||transcribing!==null||!!recording&&recording!==p.key}
        onClick={()=>toggleMicrophone(p.key)}><Mic size={15}/>{recording===p.key?"Stop recording":"Record voice"}</button>
-      <label>Upload an audio recording<input type="file" multiple accept="audio/webm,audio/wav,audio/mp4,audio/mpeg,audio/x-m4a"
+      <label>Or upload a recording<input type="file" accept="audio/webm,audio/wav,audio/mp4,audio/mpeg,audio/x-m4a"
        onChange={e=>uploadInput(p.key,"voice",e.target.files)}/></label>
      </div>
-     {p.attachments.voice?.length>0&&<p className="helper">{p.attachments.voice.map(f=>f.name).join(", ")}</p>}
-     <label>Voice reflection notes (optional)<textarea rows={2} maxLength={5000} value={p.voiceNotes}
-      onChange={e=>update(p.key,{voiceNotes:e.target.value})}/></label>
+     {p.attachments.voice?.length>0&&<p className="helper">Audio selected: {p.attachments.voice.map(f=>f.name).join(", ")}</p>}
+     {transcribing===p.key&&<p className="helper">Transcribing uploaded audio. Please wait…</p>}
+     {!info.transcriptionAvailable&&<p className="helper">Live voice-to-text is available in supported browsers. Automatic transcription of uploaded recordings requires the speech-to-text service to be configured. Audio can still be submitted.</p>}
+     <label>Voice reflection transcription (editable)
+      <textarea rows={5} maxLength={5000} value={p.voiceNotes}
+       placeholder="The spoken reflection will appear here. Review and correct names, sounds and classroom terminology before submission."
+       onChange={e=>update(p.key,{voiceNotes:e.target.value})}/>
+     </label>
     </div>
-    <h3 className="implementation-section-heading">Classroom Implementation & Learning Reflections</h3>
-    <p className="helper">Attach photographs, documents or demonstration videos to the relevant evidence category. Multiple files per category are supported.</p>
+    <h3 className="implementation-section-heading">Classroom implementation evidence</h3>
+    <p className="helper">Attach classroom activity and phonics demonstration evidence where available; lesson plans are optional. Student-specific photos/videos belong in Literacy Assessor under each student and competency.</p>
     <div className="implementation-uploads">{CATEGORIES.map(category=><label key={category.id}
       className="implementation-file-category">
       <strong>{category.label}</strong>
@@ -366,10 +374,10 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
     <button type="button" className="btn outline" disabled={busy||periods.length>=10}
      onClick={()=>setPeriods(old=>[...old,emptyPeriod(info.classes[0]?.id||"")])}>
      <Plus size={16}/> Add another period ({periods.length}/10)</button>
-    <button type="submit" className="btn primary" disabled={busy||!info.classes.length}>
+    <button type="submit" className="btn primary" disabled={busy||transcribing!==null||!!recording||!info.classes.length}>
      <Send size={16}/>{busy?"Uploading and saving…":"Submit daily implementation"}</button>
    </div>
-   <p className="helper">Maximum 50 MB per file, 30 files across one submission, and up to 10 periods. A submission receipt is shown after saving. Do not share files containing unnecessary student personal details.</p>
+   <p className="helper">Voice recording is required for each period. Maximum 50 MB per file, 30 files across one submission, and up to 10 periods. A submission receipt is shown after saving. Do not share files containing unnecessary student personal details.</p>
   </form>}
   {(tab==="review"&&hasReview||tab==="mine"&&hasSubmit)&&<>
    <section className="panel">
@@ -414,7 +422,7 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
    </section>
    {reviewerRows.map(e=><ReviewCard key={e.id} entry={e} files={filesByEntry(e.id)}
     review={reviewByEntry(e.id)} teacher={personName(e.teacher_user_id)}
-    classLabel={className(e.class_id)} canFeedback={tab==="review"&&hasFeedback}
+    classLabel={className(e.class_id)} competencyTitles={(info.competencyLinks||[]).filter(link=>link.entry_id===e.id).map(link=>competencies.find(c=>c.id===link.competency_id)?.title).filter(Boolean)} canFeedback={tab==="review"&&hasFeedback}
     onSave={saveReview} busy={busy}/>)}
    {!reviewerRows.length&&!loading&&<section className="panel"><p className="helper">
     No implementation evidence matches the selected filters yet.</p></section>}
