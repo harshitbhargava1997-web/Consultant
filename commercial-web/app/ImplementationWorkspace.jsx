@@ -10,11 +10,11 @@ const SUBJECTS=[
 ];
 const CATEGORIES=[
  {id:"lesson_plan",label:"Lesson Plan",accept:"image/jpeg,image/png,image/webp,application/pdf"},
- {id:"activity",label:"Classroom Activity Conducted",accept:"image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,application/pdf"},
+ {id:"activity",label:"Classroom Activity Conducted",accept:"image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,video/x-m4v,video/x-msvideo,application/pdf"},
  {id:"writing",label:"Student Written Work / Writing Practice",accept:"image/jpeg,image/png,image/webp,application/pdf"},
- {id:"phonics",label:"Phonics / Phonetics Implementation",accept:"image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,application/pdf"},
+ {id:"phonics",label:"Phonics / Phonetics Implementation",accept:"image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,video/x-m4v,video/x-msvideo,application/pdf"},
  {id:"assessment",label:"Student Assessment",accept:"image/jpeg,image/png,image/webp,application/pdf"},
- {id:"portfolio",label:"Student Portfolio",accept:"image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,application/pdf"},
+ {id:"portfolio",label:"Student Portfolio",accept:"image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,video/x-m4v,video/x-msvideo,application/pdf"},
  {id:"event_pictures",label:"Event Pictures",accept:"image/jpeg,image/png,image/webp"}
 ];
 const LABELS={voice:"Voice reflection",...Object.fromEntries(CATEGORIES.map(c=>[c.id,c.label]))};
