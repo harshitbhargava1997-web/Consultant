@@ -121,11 +121,15 @@ async function reviewSchool(ctx,courses,units){
  const certRes=await ctx.admin.from("literacy_training_certificates")
   .select("user_id,course_id,issued_at").eq("school_id",ctx.schoolId).limit(4000);
  if(certRes.error)throw certRes.error;
+ const attendanceRes=await ctx.admin.from("literacy_training_session_attendees")
+  .select("user_id").eq("school_id",ctx.schoolId).limit(4000);
+ if(attendanceRes.error)throw attendanceRes.error;
  return people.map(p=>{
   const mine=(progressRes.data||[]).filter(v=>v.user_id===p.user_id);
   const ownCert=(certRes.data||[]).filter(v=>v.user_id===p.user_id);
   return {user_id:p.user_id,name:p.display_name||"Staff member",role:p.role,
    units_completed:mine.length,certificates:ownCert.length,
+   attended_sessions:(attendanceRes.data||[]).filter(x=>x.user_id===p.user_id).length,
    courses:courses.filter(c=>c.target_roles.includes(p.role)).map(c=>{
     const lessonIds=new Set(units.filter(u=>u.course_id===c.id).map(u=>u.id));
     return {id:c.id,title:c.title,units_completed:mine.filter(v=>lessonIds.has(v.unit_id)).length,
@@ -276,10 +280,16 @@ export async function GET(request){
    return send({error:"Training access is disabled for your role."},403);
   const {courses}=await coursesFor(ctx);
   const units=await safeUnits(ctx,courses,ctx.can("training.access"));
+  const {data:memberName}=ctx.schoolId?await ctx.admin.from("literacy_memberships")
+   .select("display_name").eq("school_id",ctx.schoolId).eq("user_id",ctx.user.id).maybeSingle():{data:null};
+  const {data:consultantName}=ctx.role==="consultant"?await ctx.admin.from("literacy_consultants")
+   .select("display_name").eq("user_id",ctx.user.id).maybeSingle():{data:null};
+  const learnerName=memberName?.display_name||consultantName?.display_name||
+   ctx.user.user_metadata?.full_name||ctx.user.email||"Learner";
   const [own,people,sessions]=await Promise.all([
    ownLearning(ctx,units,courses),reviewSchool(ctx,courses,units),trainingSessions(ctx,courses)
   ]);
-  return send({courses,units,...own,review:people,sessions,role:ctx.role,isAdmin:ctx.isAdmin});
+  return send({courses,units,...own,review:people,sessions,learnerName,role:ctx.role,isAdmin:ctx.isAdmin});
  }catch(e){return send({error:"Training library unavailable: "+(e.message||"Unknown error")},500);}
 }
 export async function POST(request){
@@ -405,6 +415,11 @@ export async function POST(request){
      return send({error:"Answer all questions before submitting."},400);
     const correct=questions.filter((q,i)=>answers[i]===q.correctIndex).length;
     const percent=Math.round(100*correct/questions.length);
+    const {error:attemptError}=await ctx.admin.from("literacy_training_quiz_attempts").insert({
+     school_id:ctx.schoolId,user_id:ctx.user.id,unit_id:unit.id,
+     score_percent:percent,passed:percent>=course.pass_percent
+    });
+    if(attemptError)throw attemptError;
     if(percent<course.pass_percent)
      return send({passed:false,score:percent,required:course.pass_percent,
       message:"Exercise submitted. Passing score not reached; review and retry."});
@@ -436,12 +451,29 @@ export async function POST(request){
       !Number.isInteger(attendeeCount)||attendeeCount<0||attendeeCount>10000||
       notes.length>4000||nextAction.length>2000)
     return send({error:"Check the session date, attendance count and notes."},400);
-   const {error}=await ctx.admin.from("literacy_training_sessions").insert({
+   const attendeeIds=[...new Set(Array.isArray(body.attendeeIds)?body.attendeeIds:[])];
+   if(attendeeIds.length>250||attendeeIds.some(id=>!UUID.test(id)))
+    return send({error:"Select up to 250 valid teacher attendees."},400);
+   if(attendeeIds.length){
+    const {data:matched,error:attendeeError}=await ctx.admin.from("literacy_memberships")
+     .select("user_id").eq("school_id",ctx.schoolId).eq("role","teacher").in("user_id",attendeeIds);
+    if(attendeeError||matched?.length!==attendeeIds.length)
+     return send({error:"Some selected attendees are not teachers in this school."},400);
+   }
+   const {data:saved,error}=await ctx.admin.from("literacy_training_sessions").insert({
     school_id:ctx.schoolId,course_id:body.courseId,trainer_user_id:ctx.user.id,
-    held_on:heldOn,attendee_count:attendeeCount,notes,next_action:nextAction
-   });
+    held_on:heldOn,attendee_count:attendeeIds.length||attendeeCount,notes,next_action
+   }).select("id").single();
    if(error)throw error;
-   return send({message:"Trainer-led professional development session recorded."});
+   if(attendeeIds.length){
+    const {error:attendanceError}=await ctx.admin.from("literacy_training_session_attendees")
+     .insert(attendeeIds.map(id=>({session_id:saved.id,school_id:ctx.schoolId,user_id:id})));
+    if(attendanceError){
+     await ctx.admin.from("literacy_training_sessions").delete().eq("id",saved.id);
+     throw attendanceError;
+    }
+   }
+   return send({message:"Trainer-led session saved"+(attendeeIds.length?" with "+attendeeIds.length+" named teacher attendees.":".")});
   }
   return send({error:"Unknown training action."},400);
  }catch(e){return send({error:"Training operation failed: "+(e.message||"Unknown error")},500);}
