@@ -27,7 +27,7 @@ export default function TrainingImpactPanel({session,schoolId,studentId,enabled=
   {report&&<>
    <h3>Assigned teachers & their training</h3>
    {report.teachers.length?report.teachers.map((teacher,i)=><div className="training-impact-teacher" key={i}>
-    <strong><Users size={15}/> {teacher.name}</strong>
+    <strong><Users size={15}/> {teacher.name}</strong><p className="helper">Recorded attendance: {teacher.attended_sessions||0} matching school training sessions</p>
     {!teacher.courses.length?<p className="helper">No published training matched to this student's grade.</p>:
     <div className="training-impact-courses">{teacher.courses.map((course,j)=>
      <div key={j}><BookOpen size={15}/>
