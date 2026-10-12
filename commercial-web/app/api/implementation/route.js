@@ -137,7 +137,7 @@ export async function POST(request){
   let body;try{body=JSON.parse(raw);}catch{return send({error:"Invalid JSON submission."},400);}
   const action=txt(body.action,35);
   if(action==="uploadTicket"){
-   if(ctx.role!=="teacher"||!ctx.can("implementation.submit"))return send({error:"Teacher evidence upload is disabled.",403},403);
+   if(ctx.role!=="teacher"||!ctx.can("implementation.submit"))return send({error:"Teacher evidence upload is disabled."},403);
    const mime=txt(body.contentType,70),category=txt(body.category,32),
     name=txt(body.name,240),size=Number(body.size);
    if(!allowedMime(category,mime)||!name||name.length>240||
