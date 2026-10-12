@@ -91,6 +91,7 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
  const [courseList,setCourseList]=useState([]);
  const [teacherFilter,setTeacherFilter]=useState("all"),[classFilter,setClassFilter]=useState("all");
  const [statusFilter,setStatusFilter]=useState("all"),[categoryFilter,setCategoryFilter]=useState("all"),[search,setSearch]=useState("");
+ const [dateFrom,setDateFrom]=useState(""),[dateTo,setDateTo]=useState("");
  const [receipt,setReceipt]=useState("");
  const [recording,setRecording]=useState(null);
  const recorder=useRef(null),audioStream=useRef(null);
@@ -114,6 +115,7 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
  const reviewerRows=reviewRows.filter(e=>
   (teacherFilter==="all"||e.teacher_user_id===teacherFilter)&&
   (classFilter==="all"||e.class_id===classFilter)&&
+  (!dateFrom||e.implementation_date>=dateFrom)&&(!dateTo||e.implementation_date<=dateTo)&&
   (statusFilter==="all"||statusFilter==="pending"&&!reviewByEntry(e.id)||
    statusFilter!=="pending"&&reviewByEntry(e.id)?.status===statusFilter)&&
   (categoryFilter==="all"||filesByEntry(e.id).some(f=>f.category===categoryFilter))&&
@@ -338,9 +340,28 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
       <option value="reviewed">Reviewed</option><option value="needs_follow_up">Needs follow-up</option></select></label>
      <label>Evidence category<select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}>
       <option value="all">All materials</option>{Object.entries(LABELS).map(([id,label])=><option value={id} key={id}>{label}</option>)}</select></label>
+     <label>From lesson date<input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}/></label>
+     <label>To lesson date<input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}/></label>
      <label>Search lesson<input type="search" value={search} onChange={e=>setSearch(e.target.value)}
       placeholder="Topic / subject / teacher"/></label>
     </div>
+    {hasReview&&<div className="implementation-teacher-summary">
+     <h3>Teacher implementation evidence coverage</h3>
+     <p className="helper">Counts represent submitted evidence, not the quality of teaching. Review period is limited to the recent 150 entries loaded.</p>
+     <div className="table-wrap"><table><thead><tr>
+      <th>Teacher</th><th>Periods</th><th>Files</th><th>Voice</th><th>Lesson plans</th>
+      <th>Activities</th><th>Writing</th><th>Phonics</th><th>Assessment</th><th>Portfolio</th><th>Pending reviews</th>
+     </tr></thead><tbody>{allTeacherIds.map(id=>{
+      const periods=reviewerRows.filter(e=>e.teacher_user_id===id);
+      const evidences=periods.flatMap(e=>filesByEntry(e.id));
+      const count=type=>evidences.filter(f=>f.category===type).length;
+      return <tr key={id}><td>{personName(id)}</td><td>{periods.length}</td>
+       <td>{evidences.length}</td><td>{count("voice")}</td><td>{count("lesson_plan")}</td>
+       <td>{count("activity")}</td><td>{count("writing")}</td><td>{count("phonics")}</td>
+       <td>{count("assessment")}</td><td>{count("portfolio")}</td>
+       <td>{periods.filter(e=>!reviewByEntry(e.id)).length}</td></tr>;
+     })}</tbody></table></div>
+    </div>}
     {hasReview&&<div className="implementation-category-counts">
      {Object.entries(aggregate.categoryCounts).map(([id,count])=><span key={id}>{LABELS[id]}: <strong>{count}</strong></span>)}
     </div>}
