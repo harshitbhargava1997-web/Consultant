@@ -145,7 +145,7 @@ async function importClasses(ctx,rows){
  const known=new Set((existing.data||[]).map(c=>[c.grade,c.section,c.academic_year].join("|").toLowerCase()));
  for(const row of rows){
   const grade=clean(row.grade),section=clean(row.section)||"A",year=clean(row.academic_year);
-  if(!GRADES.includes(grade)||section.length>30||!section||!/^\\d{4}-\\d{2,4}$/.test(year)){
+  if(!GRADES.includes(grade)||section.length>30||!section||!/^\d{4}-\d{2,4}$/.test(year)){
    results.push(rowResult(row,"error","Provide valid grade, section and academic year (e.g. 2026-27)."));continue;
   }
   const key=[grade,section,year].join("|").toLowerCase();
