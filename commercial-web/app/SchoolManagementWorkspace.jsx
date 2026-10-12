@@ -3,9 +3,13 @@
 import {useEffect,useMemo,useState} from "react";
 import {BookMarked,Check,GraduationCap,Plus,Search,Trash2,Users,FileUp} from "lucide-react";
 import BulkWorkspace from "./BulkWorkspace";
+import SuperAdminStakeholders from "./SuperAdminStakeholders";
+import {ConsultantManagement} from "./ConsultantWorkspace";
 import {LEVELS} from "../lib/supabase";
 
 const tabs=[
+ {id:"leaders",label:"School leadership",icon:Users},
+ {id:"consultants",label:"Consultants",icon:Users},
  {id:"classes",label:"Classes",icon:BookMarked},
  {id:"teachers",label:"Teachers & staff",icon:Users},
  {id:"students",label:"Students",icon:GraduationCap}
@@ -13,16 +17,18 @@ const tabs=[
 function firstClass(classes){return classes.length?classes[0].id:"";}
 function displayClass(c){return [c.grade,c.section,c.academic_year].join(" · ");}
 export default function SchoolManagementWorkspace({
- client,session,schoolId,schoolName,classes=[],students=[],members=[],teacherClasses=[],
+ client,session,schoolId,schoolName,schools=[],classes=[],students=[],members=[],teacherClasses=[],
  grants=[],isAdmin=false,canManageAllRoles=false,onChanged
 }){
  const can=feature=>isAdmin||grants.includes(feature);
- const availableTabs=tabs.filter(t=>
-  t.id==="classes"?(can("classes.view")||can("classes.manage")||can("classes.import")):
-  t.id==="teachers"?(can("users.manage")||can("teachers.assign")||can("staff.import")):
-  (can("classes.view")||can("students.manage")||can("students.import"))
- );
- const [tab,setTab]=useState("classes"),[expandedBulk,setExpandedBulk]=useState("");
+ const availableTabs=tabs.filter(t=>{
+  if(t.id==="leaders"||t.id==="consultants")return isAdmin;
+  if(!schoolId)return false;
+  return t.id==="classes"?(can("classes.view")||can("classes.manage")||can("classes.import")):
+   t.id==="teachers"?(can("users.manage")||can("teachers.assign")||can("staff.import")):
+    (can("classes.view")||can("students.manage")||can("students.import"));
+ });
+ const [tab,setTab]=useState(isAdmin?"leaders":"classes"),[expandedBulk,setExpandedBulk]=useState("");
  const [busy,setBusy]=useState(false),[notice,setNotice]=useState("");
  const [classForm,setClassForm]=useState({grade:"Nursery",section:"A",academic_year:"2026-27"});
  const [staff,setStaff]=useState({name:"",email:"",role:"teacher",initialPassword:"",confirmPassword:""});
@@ -41,7 +47,7 @@ export default function SchoolManagementWorkspace({
  const studentCounts=new Map();
  for(const tc of validTeacherAssignments)teacherCounts.set(tc.class_id,(teacherCounts.get(tc.class_id)||0)+1);
  for(const s of students)if(s.active!==false)studentCounts.set(s.class_id,(studentCounts.get(s.class_id)||0)+1);
- useEffect(()=>{setNotice("");setExpandedBulk("");setTab(availableTabs[0]?.id||"classes");setSelectedTeacher("");setStudentClass("");},[schoolId]);
+ useEffect(()=>{setNotice("");setExpandedBulk("");setTab(availableTabs[0]?.id||(isAdmin?"leaders":"classes"));setSelectedTeacher("");setStudentClass("");},[schoolId]);
  useEffect(()=>{if(availableTabs.length&&!availableTabs.some(t=>t.id===tab))setTab(availableTabs[0].id);},
   [tab,grants.join(","),isAdmin,availableTabs.map(t=>t.id).join("|")]);
  useEffect(()=>{setStudentClass(old=>classes.some(c=>c.id===old)?old:firstClass(classes));},[classes]);
@@ -73,7 +79,7 @@ export default function SchoolManagementWorkspace({
    const response=await fetch("/api/admin",{
     method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},
     body:JSON.stringify({action:"createUser",schoolId,fullName:staff.name.trim(),
-     email:staff.email.trim(),role:canManageAllRoles?staff.role:"teacher",
+     email:staff.email.trim(),role:isAdmin?"teacher":canManageAllRoles?staff.role:"teacher",
      initialPassword:staff.initialPassword})
    });
    const data=await response.json().catch(()=>({}));
@@ -150,7 +156,9 @@ export default function SchoolManagementWorkspace({
  return <div className="management-workspace">
   <section className="panel">
    <div className="panel-head"><h2>School user management</h2><span className="eyebrow">ONE SCHOOL WORKSPACE</span></div>
-   <p className="helper">Create, bulk upload and review classes, school staff and student rosters together. Teachers can be assigned to several classes; each student has one current class.</p>
+   <p className="helper">{isAdmin
+    ?"Super Admin account management: create School Owner, Principal, Coordinator, Consultant and Teacher logins; manage class assignments, student rosters and Excel uploads in one place."
+    :"Create, bulk upload and review classes, teachers and students. A teacher may teach several classes, while each student has one current class."}</p>
    <div className="management-overview">
     <div><small>Classes</small><strong>{classes.length}</strong></div>
     <div><small>Teachers</small><strong>{teachers.length}</strong></div>
@@ -163,6 +171,9 @@ export default function SchoolManagementWorkspace({
    </div>
   </section>
   {notice&&<div className="notice" role="status">{notice}</div>}
+  {isAdmin&&tab==="leaders"&&<SuperAdminStakeholders
+   session={session} schools={schools} selectedSchoolId={schoolId} onChanged={reload}/>}
+  {isAdmin&&tab==="consultants"&&<ConsultantManagement session={session} schools={schools}/>}
   {tab==="classes"&&availableTabs.some(t=>t.id==="classes")&&<>
    <div className="two-col">
     {can("classes.manage")&&<section className="panel">
@@ -192,7 +203,7 @@ export default function SchoolManagementWorkspace({
      <form className="stack" onSubmit={createStaff}>
       <label>Name<input required minLength={2} maxLength={160} value={staff.name} onChange={e=>setStaff({...staff,name:e.target.value})}/></label>
       <label>Login email<input required type="email" value={staff.email} onChange={e=>setStaff({...staff,email:e.target.value})}/></label>
-      {canManageAllRoles&&<label>Stakeholder role<select value={staff.role} onChange={e=>setStaff({...staff,role:e.target.value})}>
+      {canManageAllRoles&&!isAdmin&&<label>Stakeholder role<select value={staff.role} onChange={e=>setStaff({...staff,role:e.target.value})}>
        {["teacher","owner","principal","coordinator"].map(r=><option value={r} key={r}>{r}</option>)}</select></label>}
       <label>Initial password (new accounts)<input type="password" minLength={12} maxLength={128} autoComplete="new-password" value={staff.initialPassword} onChange={e=>setStaff({...staff,initialPassword:e.target.value})}/></label>
       <label>Confirm password<input type="password" minLength={12} maxLength={128} autoComplete="new-password" value={staff.confirmPassword} onChange={e=>setStaff({...staff,confirmPassword:e.target.value})}/></label>
