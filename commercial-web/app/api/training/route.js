@@ -245,7 +245,13 @@ async function studentOutcome(ctx,studentId){
   .select("user_id,unit_id").eq("school_id",ctx.schoolId)
   .in("user_id",teacherIds).in("unit_id",unitIds).limit(2500):{data:[],error:null};
  if(progress.error)throw progress.error;
+ const teacherAttend=teacherIds.length?await ctx.admin.from("literacy_training_session_attendees")
+  .select("user_id,session_id").eq("school_id",ctx.schoolId)
+  .in("user_id",teacherIds).limit(4000):{data:[],error:null};
+ if(teacherAttend.error)throw teacherAttend.error;
+ const sessionSet=new Set((sessions||[]).map(x=>x.id));
  const teachersReport=teacherIds.map(userId=>({
+  attended_sessions:(teacherAttend.data||[]).filter(a=>a.user_id===userId&&sessionSet.has(a.session_id)).length,
   name:(membership||[]).find(m=>m.user_id===userId)?.display_name||"Assigned teacher",
   courses:allCourses.map(c=>{
    const unitSet=new Set((units||[]).filter(u=>u.course_id===c.id).map(u=>u.id));
