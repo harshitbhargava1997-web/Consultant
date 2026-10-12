@@ -160,6 +160,16 @@ export async function POST(request){
     return send({error:"Invalid audio recording path."},400);
    if(!["en","hi",""].includes(language))
     return send({error:"Choose English or Hindi transcription."},400);
+   const utcDay=new Date();utcDay.setUTCHours(0,0,0,0);
+   const {count:requests,error:countError}=await ctx.admin.from("literacy_voice_transcription_requests")
+    .select("id",{head:true,count:"exact"})
+    .eq("school_id",ctx.schoolId).eq("user_id",ctx.user.id).gte("requested_at",utcDay.toISOString());
+   if(countError)throw countError;
+   if(requests>=30)return send({error:"Daily transcription limit reached (30 recordings). Existing audio can still be submitted."},429);
+   const {error:requestError}=await ctx.admin.from("literacy_voice_transcription_requests").insert({
+    school_id:ctx.schoolId,user_id:ctx.user.id,object_path:path
+   });
+   if(requestError)return send({error:"This recording has already been sent for transcription. Upload a new recording to retry."},409);
    const {data:obj,error:downloadError}=await ctx.admin.storage.from(BUCKET).download(path);
    if(downloadError||!obj)return send({error:"Audio recording was not uploaded successfully."},404);
    if(obj.size>25*1024*1024)return send({error:"Audio transcription supports files up to 25 MB. You may still submit the audio recording as evidence."},413);
