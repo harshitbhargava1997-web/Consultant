@@ -69,7 +69,7 @@ async function coursesFor(ctx){
  return {courses:courses.map(c=>({...c,school_ids:links.filter(l=>l.course_id===c.id).map(l=>l.school_id)})),
   links};
 }
-async function safeUnits(ctx,courses){
+async function safeUnits(ctx,courses,exposeMedia){
  const ids=courses.map(c=>c.id);
  if(!ids.length)return [];
  const {data,error}=await ctx.admin.from("literacy_training_units")
@@ -81,13 +81,13 @@ async function safeUnits(ctx,courses){
   const questions=(Array.isArray(unit.questions)?unit.questions:[]).map((q,i)=>({
    id:i,prompt:q.prompt,options:q.options
   }));
-  let resource_url=unit.external_url||"";
-  if(unit.file_path){
+  let resource_url=exposeMedia?(unit.external_url||""):"";
+  if(unit.file_path&&exposeMedia){
    const {data:link,error:linkError}=await ctx.admin.storage.from(BUCKET).createSignedUrl(unit.file_path,3600);
    if(!linkError)resource_url=link?.signedUrl||"";
   }
   const {file_path,questions:answers,...other}=unit;
-  return {...other,questions,resource_url};
+  return {...other,questions:exposeMedia?questions:[],content:exposeMedia?other.content:"",description:exposeMedia?other.description:"",external_url:exposeMedia?other.external_url:"",resource_url};
  }));
  return enriched;
 }
@@ -99,7 +99,7 @@ async function ownLearning(ctx,units,courses){
   .select("unit_id,completed_at,quiz_percent").eq("school_id",ctx.schoolId)
   .eq("user_id",ctx.user.id).in("unit_id",unitIds):
   Promise.resolve({data:[],error:null});
- const c=ids.length?ctx.admin.from("literacy_training_certificates")
+ const c=ctx.can("training.certificates")&&ids.length?ctx.admin.from("literacy_training_certificates")
   .select("id,code,course_id,issued_at").eq("school_id",ctx.schoolId)
   .eq("user_id",ctx.user.id).in("course_id",ids):
   Promise.resolve({data:[],error:null});
@@ -275,7 +275,7 @@ export async function GET(request){
   if(!ctx.can("training.access")&&!ctx.can("training.review")&&!ctx.can("training.deliver"))
    return send({error:"Training access is disabled for your role."},403);
   const {courses}=await coursesFor(ctx);
-  const units=await safeUnits(ctx,courses);
+  const units=await safeUnits(ctx,courses,ctx.can("training.access"));
   const [own,people,sessions]=await Promise.all([
    ownLearning(ctx,units,courses),reviewSchool(ctx,courses,units),trainingSessions(ctx,courses)
   ]);
