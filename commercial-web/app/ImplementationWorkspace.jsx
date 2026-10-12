@@ -177,7 +177,7 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
    const rec=new MediaRecorder(stream,type?{mimeType:type}:undefined),parts=[];
    rec.ondataavailable=e=>{if(e.data.size)parts.push(e.data);};
    rec.onstop=()=>{
-    const actual=rec.mimeType||type||"audio/webm";
+    const actual=(rec.mimeType||type||"audio/webm").split(";")[0];
     const file=new File(parts,"voice-reflection-"+Date.now()+"."+(actual.includes("mp4")?"m4a":"webm"),{type:actual});
     setPeriods(old=>old.map(p=>p.key===key?{...p,attachments:{
      ...p.attachments,voice:[...(p.attachments.voice||[]),file]
