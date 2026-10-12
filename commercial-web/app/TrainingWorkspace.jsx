@@ -360,10 +360,10 @@ export default function TrainingWorkspace({
    <p className="helper">Review staff participation, unit completion and certificates for the selected school. This is not an export and does not show private login credentials.</p>
    <label>Find staff member<input type="search" value={reviewFilter} onChange={e=>setReviewFilter(e.target.value)}
     placeholder="Search by name or role"/></label>
-   <div className="table-wrap"><table><thead><tr><th>Stakeholder</th><th>Role</th><th>Completed units</th><th>Certificates</th><th>Training sessions attended</th><th>Course status</th></tr></thead>
+   <div className="table-wrap"><table><thead><tr><th>Stakeholder</th><th>Role</th><th>Completed units</th><th>Certificates</th><th>Training sessions attended</th><th>Average quiz score</th><th>Course status</th></tr></thead>
     <tbody>{schoolParticipants.map(p=><tr key={p.user_id}>
      <td>{p.name}</td><td>{nameOf(p.role)}</td>
-     <td>{p.units_completed}</td><td>{p.certificates}</td><td>{p.attended_sessions||0}</td>
+     <td>{p.units_completed}</td><td>{p.certificates}</td><td>{p.attended_sessions||0}</td><td>{p.average_quiz_score===null?"—":p.average_quiz_score+"%"}</td>
      <td>{p.courses.map(c=>c.title+": "+c.units_completed+"/"+c.units_total+(c.certified?" certified":"")).join(" · ")||"No assigned courses"}</td>
     </tr>)}</tbody></table></div>
    {!schoolParticipants.length&&<p className="helper">No matching staff members or training records.</p>}
