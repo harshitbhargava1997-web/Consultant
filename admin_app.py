@@ -280,6 +280,42 @@ def normalize_identity_columns(df):
     return out
 
 
+# The company now exports separate Type/Module values instead of a single Library
+# category. Classify source activity by Type, not by the presence of a book title:
+# E-Books can also have a populated Book field. Unrecognized types are not guessed.
+RESOURCE_LABELS = {"additional": "Additional Materials", "ebook": "E-Books"}
+
+
+def resource_usage_masks(df):
+    """Return disjoint masks for book/content, additional materials and E-Books."""
+    types = df.get("Type", pd.Series("", index=df.index)).fillna("").astype(str)
+    normalized = types.str.casefold().str.replace(r"[^a-z0-9]+", "", regex=True)
+    additional = normalized.str.contains(r"additional(?:learning)?materials?|supplementarymaterials?|extramaterials?|additionalresources?", regex=True)
+    ebook = normalized.str.contains(r"ebooks?|electronicbooks?|digitalbooks?", regex=True) & ~additional
+    additional = additional & ~ebook
+    # Retain the existing company-specific book/content predicate. The two new
+    # modules take priority if the source row also contains a 'Book' title.
+    legacy_library = normalized.isin(("library", "libraryusage"))
+    book = usage_masks(df)[2] & ~additional & ~ebook & ~legacy_library
+    # A generic old 'Library' event has no mapping in the new company export;
+    # never present it as either Additional Materials or E-Books.
+    return {"book": book, "additional": additional, "ebook": ebook}
+
+
+def resource_usage_detail(df, resource_key):
+    """Detail rows for the requested module, preserving source Type/Book values."""
+    return df.loc[resource_usage_masks(df)[resource_key]].copy()
+
+
+def resource_usage_totals(df, group_keys):
+    """Independent module minute totals with no double counting."""
+    result = {}
+    masks = resource_usage_masks(df)
+    for category, mask in masks.items():
+        result[category] = df.loc[mask].groupby(group_keys)["Duration_Min"].sum()
+    return result
+
+
 # --- CALCULATION & WORKING DAYS HELPERS ---
 def get_working_days(start_date, end_date, excluded_dates_list=None, exclude_sundays=True):
     try:
@@ -394,8 +430,8 @@ def init_observation_db():
         with conn.engine.begin() as c:
             c.execute(text(create_query))
             c.execute(text('ALTER TABLE classroom_observations ADD COLUMN IF NOT EXISTS evidence_links TEXT;'))
-    except Exception:
-        pass
+    except Exception as exc:
+        st.warning(f"Classroom observation database schema could not be checked: {exc}")
 
 
 def init_teacher_records_hash_column():
@@ -456,13 +492,13 @@ def save_observation_to_db(meta, rubrics, narratives, pdf_url="", evidence_links
         ) VALUES (
             :school, :teacher, :class_section, :subject, :topic,
             :visit_date, :duration, :students_present, :print_displayed,
-            :academic_mentor, :rubric_json, :flow_of_class, :high_points,
+            :academic_mentor, CAST(:rubric_json AS jsonb), :flow_of_class, :high_points,
             :recommendations, :pdf_url, :evidence_links
-        )
+        ) RETURNING id
     """)
     try:
         with conn.engine.begin() as c:
-            c.execute(insert_query, {
+            saved_id = c.execute(insert_query, {
                 "school": meta.get("School", ""),
                 "teacher": meta.get("Teacher", ""),
                 "class_section": meta.get("Class", ""),
@@ -479,11 +515,12 @@ def save_observation_to_db(meta, rubrics, narratives, pdf_url="", evidence_links
                 "recommendations": narratives.get("Recommendations", ""),
                 "pdf_url": pdf_url,
                 "evidence_links": evidence_links
-            })
-        return True
+            }).scalar_one()
+        fetch_observation_history.clear()
+        return int(saved_id)
     except Exception as e:
         st.error(f"Error saving visit observation to database: {e}")
-        return False
+        return None
 
 
 def update_observation_in_db(obs_id, meta, rubrics, narratives, pdf_url="", evidence_links=""):
@@ -499,17 +536,18 @@ def update_observation_in_db(obs_id, meta, rubrics, narratives, pdf_url="", evid
             students_present = :students_present,
             print_displayed = :print_displayed,
             academic_mentor = :academic_mentor,
-            rubric_json = :rubric_json,
+            rubric_json = CAST(:rubric_json AS jsonb),
             flow_of_class = :flow_of_class,
             high_points = :high_points,
             recommendations = :recommendations,
             pdf_url = COALESCE(NULLIF(:pdf_url, ''), pdf_url),
             evidence_links = :evidence_links
         WHERE id = :obs_id
+        RETURNING id
     """)
     try:
         with conn.engine.begin() as c:
-            c.execute(update_query, {
+            updated_id = c.execute(update_query, {
                 "obs_id": int(obs_id),
                 "school": meta.get("School", ""),
                 "teacher": meta.get("Teacher", ""),
@@ -527,7 +565,10 @@ def update_observation_in_db(obs_id, meta, rubrics, narratives, pdf_url="", evid
                 "recommendations": narratives.get("Recommendations", ""),
                 "pdf_url": pdf_url,
                 "evidence_links": evidence_links
-            })
+            }).scalar_one_or_none()
+        if updated_id is None:
+            st.error(f"Observation #{obs_id} was not found; no record was updated.")
+            return False
         fetch_observation_history.clear()
         return True
     except Exception as e:
@@ -554,7 +595,8 @@ def fetch_observation_history(teacher_name=None, school_name=None):
     try:
         with conn.engine.connect() as c:
             return pd.read_sql(text(query), con=c, params=params)
-    except Exception:
+    except Exception as exc:
+        st.error(f"Could not load classroom observation history from PostgreSQL: {exc}")
         return pd.DataFrame()
 
 
@@ -676,13 +718,13 @@ def crm_school_metrics(tab_name, school):
     # Recompute from the recipient's school and the current tab scope.
     if tab_name == 'Lesson Plan Prep Tracker':
         data = tab1_active_df; roster = tab1_active_roster; metric = 'prep'; daily = daily_ld_target_t1
-    elif tab_name == 'Library Usage Tracker':
-        data = tab2_active_df; roster = tab2_active_roster; metric = 'library'; daily = daily_lib_target_t2
+    elif tab_name == 'Supplementary Resource Tracker':
+        data = tab2_active_df; roster = tab2_active_roster; metric = 'resource'; daily = daily_resource_target_t2
     else:
         data = t3_df; roster = t3_roster; metric = 'content'; daily = daily_content_target_t3
     data = data[data.Institution.eq(school)]
     roster = roster[roster.Institution.eq(school)]
-    mask = usage_masks(data)[{'prep':0,'library':1,'content':2}[metric]]
+    mask = resource_usage_masks(data)[t2_resource_key] if metric == 'resource' else (usage_masks(data)[0] if metric == 'prep' else resource_usage_masks(data)['book'])
     totals = data[mask].groupby('FullName').Duration_Min.sum().to_dict()
     lines = []
     for teacher in roster.FullName.unique():
@@ -707,7 +749,8 @@ def upload_pdf_to_supabase(pdf_buffer, school_name, subfolder="reports", file_su
         )
         public_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{remote_path}"
         return public_url
-    except Exception:
+    except Exception as exc:
+        st.warning(f"Could not upload PDF to Supabase Storage: {exc}")
         return None
 
 
@@ -1802,7 +1845,7 @@ def delete_evidence_item(record_id, column_name, object_key, url):
     return True, r2_warning
 
 
-def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_content_kpi, calc_lib_kpi, daily_ld_target, daily_content_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True, active_metric_mode="Content / Book Usage", show_lesson_plan_report=True, show_evidence_section=True):
+def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_content_kpi, calc_lib_kpi, daily_ld_target, daily_content_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True, active_metric_mode="Content / Book Usage", show_lesson_plan_report=True, show_evidence_section=True, daily_ebook_target=None, calc_ebook_kpi=None):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     story = []
@@ -1823,6 +1866,13 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     card_header = ParagraphStyle('CardHead', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748B'), fontName='PortalSans-Bold', alignment=1)
     card_value = ParagraphStyle('CardVal', parent=styles['Normal'], fontSize=11, leading=14, textColor=primary_color, fontName='PortalSans-Bold', alignment=1)
 
+    # The obsolete Library aggregate is intentionally not used for reporting.
+    # Old caller parameters calc_lib_kpi/daily_lib_target are retained for
+    # compatibility but now represent the Additional Materials benchmark.
+    if daily_ebook_target is None:
+        daily_ebook_target = daily_lib_target
+    if calc_ebook_kpi is None:
+        calc_ebook_kpi = calculate_kpi_target(daily_ebook_target, selected_num_days, enable_quant_kpi)
     if isinstance(school_name, (list, tuple, set, np.ndarray, pd.Series)) and len(school_name) > 1:
         from pypdf import PdfReader, PdfWriter
         writer = PdfWriter()
@@ -1833,7 +1883,8 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             buf = generate_comprehensive_school_pdf_report(school,names,school_filtered_df,filtered_df,filter_desc,
                 calc_ld_kpi,calc_content_kpi,calc_lib_kpi,daily_ld_target,daily_content_target,daily_lib_target,
                 selected_num_days,target_vid_count,target_writing_count,target_lp_combo_count,target_phonics_count,
-                target_portfolio_count,enable_quant_kpi,enable_qual_kpi,active_metric_mode,show_lesson_plan_report,show_evidence_section)
+                target_portfolio_count,enable_quant_kpi,enable_qual_kpi,active_metric_mode,show_lesson_plan_report,show_evidence_section,
+                daily_ebook_target=daily_ebook_target,calc_ebook_kpi=calc_ebook_kpi)
             writer.append(PdfReader(buf))
         merged = BytesIO(); writer.write(merged); merged.seek(0)
         return merged
@@ -1847,6 +1898,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         calc_ld_kpi = calculate_kpi_target(daily_ld_target,selected_num_days,enable_quant_kpi)
         calc_content_kpi = calculate_kpi_target(daily_content_target,selected_num_days,enable_quant_kpi)
         calc_lib_kpi = calculate_kpi_target(daily_lib_target,selected_num_days,enable_quant_kpi)
+        calc_ebook_kpi = calculate_kpi_target(daily_ebook_target,selected_num_days,enable_quant_kpi)
     if isinstance(school_name, (list, tuple, set, np.ndarray, pd.Series)):
         school_names = [str(x) for x in school_name if str(x).strip()]
         school_curr_df = filtered_df[filtered_df['Institution'].isin(school_names)]
@@ -1854,44 +1906,53 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         school_names = [str(school_name)]
         school_curr_df = filtered_df[filtered_df['Institution'] == school_name]
 
-    include_content = "Content" in active_metric_mode or "Both" in active_metric_mode
-    include_library = "Library" in active_metric_mode or "Both" in active_metric_mode
+    # Every comprehensive PDF presents all THREE real, disjoint usage modules.
+    # The tab selector controls the dashboard view, not which report data vanish.
+    include_content = True
+    include_additional = True
+    include_ebook = True
 
     story.append(Paragraph(f"<b>Comprehensive School Audit & Feature-Wise Report</b>", title_style))
     story.append(Spacer(1, 4))
     story.append(Paragraph(f"<b>Institution / School Focus:</b> {school_name}", school_style))
     story.append(Spacer(1, 3))
-    story.append(Paragraph(f"Observation Window: {filter_desc} | Focus Mode: {active_metric_mode}", subtitle_style))
+    story.append(Paragraph(f"Observation Window: {filter_desc} | Usage Sections: Book/Content, Additional Materials, E-Books", subtitle_style))
     story.append(Spacer(1, 8))
     story.append(HRFlowable(width="100%", thickness=1.5, color=primary_color, spaceAfter=12))
 
     ld_df = school_curr_df[usage_masks(school_curr_df)[0]]
     ld_usage = ld_df.groupby('FullName')['Duration_Min'].sum().to_dict()
     
-    lib_df = school_curr_df[usage_masks(school_curr_df)[1]]
-    lib_usage = lib_df.groupby('FullName')['Duration_Min'].sum().to_dict()
+    additional_df = resource_usage_detail(school_curr_df, "additional")
+    ebook_df = resource_usage_detail(school_curr_df, "ebook")
+    additional_usage = additional_df.groupby('FullName')['Duration_Min'].sum().to_dict()
+    ebook_usage = ebook_df.groupby('FullName')['Duration_Min'].sum().to_dict()
 
     content_raw = school_curr_df[school_curr_df['Book'].str.len() > 0]
-    content_df = content_raw[usage_masks(content_raw)[2]]
+    content_df = resource_usage_detail(content_raw, "book")
     content_usage = content_df.groupby('FullName')['Duration_Min'].sum().to_dict()
     content_books_opened = content_df.groupby('FullName')['Book'].nunique().to_dict()
 
     total_teachers_count = len(teachers_list)
     met_ld_count = 0
     met_content_count = 0
-    met_lib_count = 0
+    met_additional_count = 0
+    met_ebook_count = 0
 
     for t_name in teachers_list:
         t_ld = ld_usage.get(t_name, 0.0)
         t_content = content_usage.get(t_name, 0.0)
-        t_lib = lib_usage.get(t_name, 0.0)
+        t_additional = additional_usage.get(t_name, 0.0)
+        t_ebook = ebook_usage.get(t_name, 0.0)
         
         if (calc_ld_kpi > 0 and t_ld >= calc_ld_kpi) or (calc_ld_kpi == 0 and t_ld > 0):
             met_ld_count += 1
         if (calc_content_kpi > 0 and t_content >= calc_content_kpi) or (calc_content_kpi == 0 and t_content > 0):
             met_content_count += 1
-        if (calc_lib_kpi > 0 and t_lib >= calc_lib_kpi) or (calc_lib_kpi == 0 and t_lib > 0):
-            met_lib_count += 1
+        if (calc_lib_kpi > 0 and t_additional >= calc_lib_kpi) or (calc_lib_kpi == 0 and t_additional > 0):
+            met_additional_count += 1
+        if (calc_ebook_kpi > 0 and t_ebook >= calc_ebook_kpi) or (calc_ebook_kpi == 0 and t_ebook > 0):
+            met_ebook_count += 1
 
     school_summary_metrics = {
         "Active Roster Teachers": total_teachers_count,
@@ -1902,8 +1963,10 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             school_summary_metrics["Met Lesson Prep KPI"] = f"{met_ld_count} / {total_teachers_count}"
         if include_content:
             school_summary_metrics["Met Content (Book) KPI"] = f"{met_content_count} / {total_teachers_count}"
-        if include_library:
-            school_summary_metrics["Met Library KPI"] = f"{met_lib_count} / {total_teachers_count}"
+        if include_additional:
+            school_summary_metrics["Met Additional Materials KPI"] = f"{met_additional_count} / {total_teachers_count}"
+        if include_ebook:
+            school_summary_metrics["Met E-Books KPI"] = f"{met_ebook_count} / {total_teachers_count}"
 
     headers_row = [Paragraph(k, card_header) for k in school_summary_metrics.keys()]
     values_row = [Paragraph(str(v), card_value) for v in school_summary_metrics.values()]
@@ -1927,12 +1990,14 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             story.append(Paragraph(f"• <b>Lesson Plan Prep Standard:</b> {daily_ld_target:.0f} mins/day × {selected_num_days} working days ({calc_ld_kpi:.0f} mins total benchmark standard)", normal_style))
         if include_content:
             story.append(Paragraph(f"• <b>Content / Book Usage Standard:</b> {daily_content_target:.0f} mins/day × {selected_num_days} working days ({calc_content_kpi:.0f} mins total benchmark standard)", normal_style))
-        if include_library:
-            story.append(Paragraph(f"• <b>Library Usage Standard:</b> {daily_lib_target:.0f} mins/day × {selected_num_days} working days ({calc_lib_kpi:.0f} mins total benchmark standard)", normal_style))
+        if include_additional:
+            story.append(Paragraph(f"• <b>Additional Materials Standard:</b> {daily_lib_target:.0f} mins/day × {selected_num_days} working days ({calc_lib_kpi:.0f} mins total benchmark standard)", normal_style))
+        if include_ebook:
+            story.append(Paragraph(f"• <b>E-Books Standard:</b> {daily_ebook_target:.0f} mins/day × {selected_num_days} working days ({calc_ebook_kpi:.0f} mins total benchmark standard)", normal_style))
         story.append(Spacer(1, 10))
 
     # Section numbers are computed dynamically instead of hardcoded, since
-    # any of Lesson Plan / Content / Library can now be individually
+    # lesson plans / activity evidence can still be individually
     # switched off for the PDF — a fixed "1. / 2. / 3." would produce gaps
     # or wrong numbers depending on which sections are actually included.
     summary_sec_num = 1
@@ -2002,36 +2067,28 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         story.append(content_table_obj)
         story.append(Spacer(1, 14))
 
-    if include_library:
-        story.append(Paragraph(f"<b>{summary_sec_num}. Library Usage Overview </b>", sec_head_style))
+    for resource_name, use_map, benchmark in [
+        ("Additional Materials", additional_usage, calc_lib_kpi),
+        ("E-Books", ebook_usage, calc_ebook_kpi),
+    ]:
+        story.append(Paragraph(f"<b>{summary_sec_num}. {resource_name} Usage Overview</b>", sec_head_style))
         summary_sec_num += 1
-        lib_summary_table_data = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Status"]]
+        resource_rows = [["Teacher Name", "Total Minutes Logged", "Average Mins/Day", "Status"]]
         for t_name in teachers_list:
-            t_lib_mins = lib_usage.get(t_name, 0.0)
-            t_lib_avg = t_lib_mins / selected_num_days if selected_num_days > 0 else 0.0
-            if not enable_quant_kpi or calc_lib_kpi == 0:
-                t_lib_stat = "Activity Logged" if t_lib_mins > 0 else "No Activity Logged"
-            elif t_lib_mins >= calc_lib_kpi:
-                t_lib_stat = f"Met KPI (>= {calc_lib_kpi:.0f}m)"
-            elif t_lib_mins > 0:
-                t_lib_stat = f"Below KPI (< {calc_lib_kpi:.0f}m)"
-            else:
-                t_lib_stat = "No recorded usage (0 Mins)"
-            lib_summary_table_data.append([t_name, f"{t_lib_mins:.1f}m", f"{t_lib_avg:.1f}m/day", t_lib_stat])
-
-        lib_table_obj = Table(lib_summary_table_data, colWidths=[140, 110, 100, 190])
-        lib_table_obj.setStyle(TableStyle([
+            minutes = use_map.get(t_name, 0.0)
+            average = minutes / selected_num_days if selected_num_days > 0 else 0.0
+            status = re.sub(r"^[^A-Za-z]+", "", calculate_kpi_status(minutes, benchmark, enable_quant_kpi))
+            resource_rows.append([t_name, f"{minutes:.1f}m", f"{average:.1f}m/day", status])
+        resource_table = Table(resource_rows, colWidths=[140, 110, 100, 190])
+        resource_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'PortalSans-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.4, border_color),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('TOPPADDING', (0, 0), (-1, -1), 5),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
         ]))
-        story.append(lib_table_obj)
+        story.append(resource_table)
         story.append(Spacer(1, 14))
 
     if enable_qual_kpi and show_evidence_section:
@@ -2075,19 +2132,24 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         teacher_date_data = school_curr_df[school_curr_df['FullName'] == target_teacher]
 
         t_day_ld = teacher_date_data[usage_masks(teacher_date_data)[0]]['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
-        t_day_lib = teacher_date_data[usage_masks(teacher_date_data)[1]]['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
-        
+        teacher_additional = resource_usage_detail(teacher_date_data, "additional")
+        teacher_ebooks = resource_usage_detail(teacher_date_data, "ebook")
+        t_day_additional = duration_sum(teacher_additional)
+        t_day_ebook = duration_sum(teacher_ebooks)
+
         t_books_raw = teacher_date_data[teacher_date_data['Book'].str.len() > 0]
-        teacher_books = t_books_raw[usage_masks(t_books_raw)[2]]
+        teacher_books = resource_usage_detail(t_books_raw, "book")
         t_day_content = teacher_books['Duration_Min'].sum() if not teacher_books.empty else 0.0
 
         ld_pct = safe_percentage(t_day_ld, calc_ld_kpi)
         content_pct = safe_percentage(t_day_content, calc_content_kpi)
-        lib_pct = safe_percentage(t_day_lib, calc_lib_kpi)
+        additional_pct = safe_percentage(t_day_additional, calc_lib_kpi)
+        ebook_pct = safe_percentage(t_day_ebook, calc_ebook_kpi)
 
         ld_advice = f"Steady Execution ({t_day_ld:.1f}m logged)" if (calc_ld_kpi > 0 and t_day_ld >= calc_ld_kpi) else (f"In-Progress ({t_day_ld:.1f}m logged)" if t_day_ld > 0 else "Pending Activity")
         content_advice = f"Steady Execution ({t_day_content:.1f}m logged)" if (calc_content_kpi > 0 and t_day_content >= calc_content_kpi) else (f"In-Progress ({t_day_content:.1f}m logged)" if t_day_content > 0 else "Pending Activity")
-        lib_advice = f"Steady Execution ({t_day_lib:.1f}m logged)" if (calc_lib_kpi > 0 and t_day_lib >= calc_lib_kpi) else (f"In-Progress ({t_day_lib:.1f}m logged)" if t_day_lib > 0 else "Pending Activity")
+        additional_advice = f"Steady Execution ({t_day_additional:.1f}m logged)" if (calc_lib_kpi > 0 and t_day_additional >= calc_lib_kpi) else (f"In-Progress ({t_day_additional:.1f}m logged)" if t_day_additional > 0 else "Pending Activity")
+        ebook_advice = f"Steady Execution ({t_day_ebook:.1f}m logged)" if (calc_ebook_kpi > 0 and t_day_ebook >= calc_ebook_kpi) else (f"In-Progress ({t_day_ebook:.1f}m logged)" if t_day_ebook > 0 else "Pending Activity")
 
         evidence_source = teacher_date_data
 
@@ -2144,8 +2206,10 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             summary_metrics["Lesson Prep"] = f"{t_day_ld:.1f}m"
         if include_content:
             summary_metrics["Content (Book)"] = f"{t_day_content:.1f}m"
-        if include_library:
-            summary_metrics["Library Usage"] = f"{t_day_lib:.1f}m"
+        if include_additional:
+            summary_metrics["Additional Materials"] = f"{t_day_additional:.1f}m"
+        if include_ebook:
+            summary_metrics["E-Books"] = f"{t_day_ebook:.1f}m"
         if show_evidence_section:
             summary_metrics["Phonics / Portfolio"] = f"{len(v_phonics)} / {len(v_portfolio)}"
             summary_metrics["Assessments / Events"] = f"{len(v_assessment)} / {len(v_events)}"
@@ -2171,16 +2235,20 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             sec1_items.append(f"Lesson Preparation Duration: {t_day_ld:.1f} Minutes" + (f" ({ld_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""))
         if include_content:
             sec1_items.append(f"Content Usage (Textbooks/Chapters) Duration: {t_day_content:.1f} Minutes" + (f" ({content_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else "") + f" across {teacher_books['Book'].nunique() if not teacher_books.empty else 0} unique textbook(s)/chapter(s).")
-        if include_library:
-            sec1_items.append(f"Library Usage Duration: {t_day_lib:.1f} Minutes" + (f" ({lib_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""))
+        if include_additional:
+            sec1_items.append(f"Additional Materials Duration: {t_day_additional:.1f} Minutes" + (f" ({additional_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""))
+        if include_ebook:
+            sec1_items.append(f"E-Books Duration: {t_day_ebook:.1f} Minutes" + (f" ({ebook_pct:.0f}% of Academic Benchmark)" if enable_quant_kpi else ""))
 
         assessment_parts = []
         if show_lesson_plan_report:
             assessment_parts.append(f"{ld_advice} in lesson preparation")
         if include_content:
             assessment_parts.append(f"{content_advice} in textbook content delivery")
-        elif include_library:
-            assessment_parts.append(f"{lib_advice} in library integration")
+        if include_additional:
+            assessment_parts.append(f"{additional_advice} in additional materials")
+        if include_ebook:
+            assessment_parts.append(f"{ebook_advice} in E-Books")
         if assessment_parts:
             sec1_items.append(f"Consultant Assessment: " + ", ".join(assessment_parts) + ".")
 
@@ -2195,6 +2263,21 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             per_teacher_sec_num += 1
         if include_content:
             sections[f"{per_teacher_sec_num}. Detailed Textbook & Chapter Breakdown"] = pdf_book_items
+            per_teacher_sec_num += 1
+        for resource_name, resource_frame in [("Additional Materials", teacher_additional), ("E-Books", teacher_ebooks)]:
+            detail_items = []
+            if not resource_frame.empty:
+                for (type_label, book_label, subject_label), grp in resource_frame.groupby(
+                    ["Type", "Book", "Subject"], dropna=False
+                ):
+                    detail_items.append(
+                        f"{resource_name}: {str(book_label).strip() or 'Unspecified item'}"
+                        f" | Module: {type_label} | Subject: {subject_label or 'N/A'}"
+                        f" | {grp['Duration_Min'].sum():.1f} Minutes"
+                    )
+            else:
+                detail_items = [f"No {resource_name.lower()} events recorded in this period."]
+            sections[f"{per_teacher_sec_num}. Detailed {resource_name} Usage"] = detail_items
             per_teacher_sec_num += 1
         if show_evidence_section:
             sections[f"{per_teacher_sec_num}. Activity Evidence & Qualitative Artifacts"] = pdf_link_items if pdf_link_items else ["No activity or evidence submission links recorded in active window."]
@@ -2819,7 +2902,7 @@ else:
     ) if use_teacher_eligible_days else {}
 
     # Global Content / Book dataset derivation
-    global_content_df = filtered_df[usage_masks(filtered_df)[2]]
+    global_content_df = resource_usage_detail(filtered_df, "book")
 
     if filtered_roster.empty:
         st.info("No teachers in the selected scope. Choose a state, consultant, school and teacher to continue.")
@@ -2856,7 +2939,7 @@ else:
     # 6 Dedicated Active Tabs
     tab1, tab2, tab3, tab4, tab7, tab8, tab9, tab10 = st.tabs([
         "📘 1. Lesson Plan Preparation Tracker", 
-        "📚 2. Library Usage Tracker", 
+        "📚 2. Supplementary Resource Usage", 
         "📖 3. Content & Chapters (Primary KPI)", 
         "👤 4. Teacher 360° Profile Report",
         "📬 5. Live Evidence Submissions Feed",
@@ -2951,6 +3034,8 @@ else:
                         daily_ld_target=daily_ld_target_t1,
                         daily_content_target=st.session_state.get('daily_content_target_t3', 30.0),
                         daily_lib_target=st.session_state.get('daily_lib_target_t2', 30.0),
+                        daily_ebook_target=st.session_state.get('daily_ebook_target_t2', 30.0),
+                        calc_ebook_kpi=st.session_state.get('calc_ebook_kpi_t2', calculate_kpi_target(30.0, selected_num_days, True)),
                         selected_num_days=selected_num_days,
                         enable_quant_kpi=enable_quant_kpi_t1,
                         enable_qual_kpi=True,
@@ -2995,19 +3080,30 @@ else:
 
     # TAB 2: LIBRARY USAGE TRACKER
     with tab2:
-        st.header("📚 Library Usage Tracker")
-        st.caption("Review digital library research, supplementary assets, and general platform exploration.")
+        st.header("📚 Additional Materials & E-Books Tracker")
+        st.caption("Company usage export: select the resource module to review; legacy generic Library rows are not counted as either module.")
+        t2_resource = st.radio("Resource module", ["Additional Materials", "E-Books"], horizontal=True, key="tab2_resource_mode")
+        t2_resource_key = "additional" if t2_resource == "Additional Materials" else "ebook"
+        old_library_events = filtered_df.get("Type", pd.Series("", index=filtered_df.index)).fillna("").astype(str).str.strip().str.casefold().isin(["library", "library usage"])
+        if old_library_events.any():
+            st.warning(f"{int(old_library_events.sum())} legacy generic Library event(s) excluded: the new export does not identify which new module they belong to.")
         
-        with st.expander("🎯 Library Target Benchmark Settings", expanded=False):
+        with st.expander("🎯 Resource Benchmark Settings", expanded=False):
+            enable_quant_kpi_t2 = st.checkbox("Enable Resource Quantitative Benchmark", value=True, key="t2_enable_quant_kpi")
             t2_kcol1, t2_kcol2 = st.columns(2)
             with t2_kcol1:
-                enable_quant_kpi_t2 = st.checkbox("Enable Library Quantitative Benchmark", value=True, key="t2_enable_quant_kpi")
+                daily_additional_target_t2 = st.number_input("Additional Materials Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t2_additional_target", disabled=not enable_quant_kpi_t2)
             with t2_kcol2:
-                daily_lib_target_t2 = st.number_input("Library Usage Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t2_lib_target", disabled=not enable_quant_kpi_t2) if enable_quant_kpi_t2 else 0.0
-
-        calc_lib_kpi_t2 = calculate_kpi_target(daily_lib_target_t2, selected_num_days, enable_quant_kpi_t2)
-        st.session_state['calc_lib_kpi_t2'] = calc_lib_kpi_t2
-        st.session_state['daily_lib_target_t2'] = daily_lib_target_t2
+                daily_ebook_target_t2 = st.number_input("E-Books Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t2_ebook_target", disabled=not enable_quant_kpi_t2)
+        daily_lib_target_t2 = daily_additional_target_t2
+        calc_additional_kpi_t2 = calculate_kpi_target(daily_additional_target_t2, selected_num_days, enable_quant_kpi_t2)
+        calc_ebook_kpi_t2 = calculate_kpi_target(daily_ebook_target_t2, selected_num_days, enable_quant_kpi_t2)
+        daily_resource_target_t2 = daily_additional_target_t2 if t2_resource_key == "additional" else daily_ebook_target_t2
+        calc_lib_kpi_t2 = calc_additional_kpi_t2 if t2_resource_key == "additional" else calc_ebook_kpi_t2
+        st.session_state['calc_lib_kpi_t2'] = calc_additional_kpi_t2  # compatible PDF argument, now Additional Materials
+        st.session_state['daily_lib_target_t2'] = daily_additional_target_t2
+        st.session_state['calc_ebook_kpi_t2'] = calc_ebook_kpi_t2
+        st.session_state['daily_ebook_target_t2'] = daily_ebook_target_t2
 
         tab2_col_f1, tab2_col_f2 = st.columns(2)
         with tab2_col_f1:
@@ -3026,15 +3122,29 @@ else:
             tab2_active_roster = tab2_active_roster[tab2_active_roster['FullName'] == tab2_selected_teacher]
 
         if enable_quant_kpi_t2 and calc_lib_kpi_t2 > 0:
-            st.caption(f"Benchmark Standard: **At least {calc_lib_kpi_t2:.0f} Minutes** ({daily_lib_target_t2:.0f} mins/day across {selected_num_days} working day(s)).")
+            st.caption(f"Benchmark Standard: **At least {calc_lib_kpi_t2:.0f} Minutes** ({daily_resource_target_t2:.0f} mins/day across {selected_num_days} working day(s)).")
         else:
-            st.caption(f"Reviewing cumulative library usage minutes across {selected_num_days} working day(s).")
+            st.caption(f"Reviewing cumulative {t2_resource.lower()} usage minutes across {selected_num_days} working day(s).")
 
-        lib_df = tab2_active_df[usage_masks(tab2_active_df)[1]]
+        with st.expander("Inspect company Excel usage module labels", expanded=False):
+            module_masks = resource_usage_masks(tab2_active_df)
+            module_audit = tab2_active_df[["Type", "Duration_Min"]].copy()
+            module_audit["Reporting Module"] = np.select(
+                [module_masks["book"], module_masks["additional"], module_masks["ebook"]],
+                ["Book / Content", "Additional Materials", "E-Books"],
+                default="Other / Lesson Prep / Unmapped"
+            )
+            module_audit = module_audit.groupby(["Type", "Reporting Module"], dropna=False).agg(
+                Events=("Duration_Min", "size"), Minutes=("Duration_Min", "sum")
+            ).reset_index().sort_values(["Reporting Module", "Type"])
+            st.dataframe(module_audit, use_container_width=True)
+            st.caption("Check that your company's Additional Materials and E-Books entries are mapped correctly. Other rows are not assigned to those new resource categories.")
+
+        lib_df = resource_usage_detail(tab2_active_df, t2_resource_key)
         lib_usage = lib_df.groupby(['Institution', 'FullName'])['Duration_Min'].sum().reset_index()
         lib_daily = tab2_active_roster.merge(lib_usage, on=['Institution', 'FullName'], how='left').fillna(0.0)
         lib_daily['Eligible Working Days'] = lib_daily.apply(lambda r: teacher_days.get((r['Institution'], r['FullName']), selected_num_days) if use_teacher_eligible_days else selected_num_days, axis=1)
-        lib_daily['Performance Benchmark (Min)'] = lib_daily['Eligible Working Days'] * daily_lib_target_t2
+        lib_daily['Performance Benchmark (Min)'] = lib_daily['Eligible Working Days'] * daily_resource_target_t2
         
         lib_daily['Performance Indicator Status'] = lib_daily.apply(lambda r: calculate_kpi_status(r['Duration_Min'], r['Performance Benchmark (Min)'], enable_quant_kpi_t2, r['Eligible Working Days'] == 0), axis=1)
 
@@ -3051,7 +3161,7 @@ else:
         lib_daily['Teacher / School'] = lib_daily['FullName'] + ' | ' + lib_daily['Institution']
         fig_lib = px.bar(
             lib_daily, x="Teacher / School", y="Duration_Min", color="Performance Indicator Status",
-            title=f"Library Usage Minutes per Teacher" + (f" vs. {calc_lib_kpi_t2:.0f} Min Standard" if enable_quant_kpi_t2 else ""),
+            title=f"{t2_resource} Minutes per Teacher" + (f" vs. {calc_lib_kpi_t2:.0f} Min Standard" if enable_quant_kpi_t2 else ""),
             labels={"FullName": "Teacher Name", "Duration_Min": "Minutes Logged"},
             text_auto=".1f"
         )
@@ -3059,6 +3169,9 @@ else:
             fig_lib.add_trace(go.Scatter(x=lib_daily["Teacher / School"], y=lib_daily["Performance Benchmark (Min)"], mode="markers", name="Applicable target", marker=dict(symbol="line-ew", size=18, color="black")))
         st.plotly_chart(fig_lib, use_container_width=True)
 
+        st.markdown(f"##### {t2_resource} — Source Usage Logs")
+        resource_columns = ['Institution', 'FullName', 'Type', 'Book', 'Grade', 'Subject', 'StartTime', 'Duration_Min']
+        st.dataframe(lib_df[[c for c in resource_columns if c in lib_df.columns]], use_container_width=True)
         display_lib_table = lib_daily.rename(columns={'Institution': 'School', 'FullName': 'Teacher Name', 'Duration_Min': 'Minutes Logged'}).round({'Minutes Logged': 1})
         st.dataframe(display_lib_table, use_container_width=True)
 
@@ -3066,8 +3179,8 @@ else:
         with col_t2_d1:
             t2_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t2_show_lp_section")
             t2_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t2_show_evidence_section")
-            if st.button("⚙️ Compile Tab 2 PDF Report (Library Only)", key="prep_pdf_tab2_btn"):
-                with st.spinner("Compiling Library PDF report..."):
+            if st.button("⚙️ Compile Tab 2 PDF Report (All Three Modules)", key="prep_pdf_tab2_btn"):
+                with st.spinner("Compiling Book, Additional Materials and E-Books PDF report..."):
                     pdf_bytes = generate_comprehensive_school_pdf_report(
                         school_name=tab2_selected_school if tab2_selected_school != "All Selected Schools" else tab2_active_roster.Institution.unique().tolist(),
                         teachers_list=tab2_active_roster[["Institution","FullName"]].drop_duplicates().apply(tuple,axis=1).tolist(),
@@ -3076,14 +3189,16 @@ else:
                         filter_desc=filter_description_text,
                         calc_ld_kpi=st.session_state.get('calc_ld_kpi_t1', calculate_kpi_target(10.0, selected_num_days, True)),
                         calc_content_kpi=st.session_state.get('calc_content_kpi_t3', calculate_kpi_target(30.0, selected_num_days, True)),
-                        calc_lib_kpi=calc_lib_kpi_t2,
+                        calc_lib_kpi=calc_additional_kpi_t2,
                         daily_ld_target=st.session_state.get('daily_ld_target_t1', 10.0),
                         daily_content_target=st.session_state.get('daily_content_target_t3', 30.0),
-                        daily_lib_target=daily_lib_target_t2,
+                        daily_lib_target=daily_additional_target_t2,
+                        daily_ebook_target=daily_ebook_target_t2,
+                        calc_ebook_kpi=calc_ebook_kpi_t2,
                         selected_num_days=selected_num_days,
                         enable_quant_kpi=enable_quant_kpi_t2,
                         enable_qual_kpi=True,
-                        active_metric_mode="Library Usage",
+                        active_metric_mode="Book, Additional Materials and E-Books",
                         show_lesson_plan_report=t2_show_lp,
                         show_evidence_section=t2_show_evidence
                     ).getvalue()
@@ -3093,7 +3208,7 @@ else:
                 st.download_button(
                     label="📄 Download Tab 2 Report (PDF)",
                     data=st.session_state["tab2_pdf_ready"],
-                    file_name=f"Library_Usage_Report_{selected_month.replace(' ', '_')}.pdf",
+                    file_name=f"Supplementary_Resources_Report_{selected_month.replace(' ', '_')}.pdf",
                     mime="application/pdf",
                     key="btn_pdf_tab2"
                 )
@@ -3102,25 +3217,26 @@ else:
             if st.button("⚙️ Prepare Tab 2 Excel Export", key="prep_xlsx_tab2_btn"):
                 buf_t2_xlsx = BytesIO()
                 with pd.ExcelWriter(buf_t2_xlsx, engine='openpyxl') as writer:
-                    display_lib_table.to_excel(writer, index=False, sheet_name="Library_Usage_Logs")
+                    display_lib_table.to_excel(writer, index=False, sheet_name="Resource_Teacher_Totals")
+                    lib_df[[c for c in resource_columns if c in lib_df.columns]].to_excel(writer, index=False, sheet_name="Resource_Event_Details")
                 st.session_state["tab2_xlsx_ready"] = buf_t2_xlsx.getvalue()
 
             if "tab2_xlsx_ready" in st.session_state:
                 st.download_button(
                     label="📥 Download Tab 2 Data (Excel)",
                     data=st.session_state["tab2_xlsx_ready"],
-                    file_name=f"Library_Usage_{selected_month.replace(' ', '_')}.xlsx",
+                    file_name=f"{t2_resource_key}_Usage_{selected_month.replace(' ', '_')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="btn_xlsx_tab2"
                 )
 
         teacher_lib_breakdown = "\n\n".join([f"• **{r['FullName']}**: {r['Duration_Min']:.1f} mins ({r['Performance Indicator Status']})" for _, r in lib_daily.iterrows()])
         tab2_metrics_summary = (
-            f"🎯 Target KPI: {daily_lib_target_t2:.0f} mins/day × {selected_num_days} working days = {calc_lib_kpi_t2:.0f} mins total standard\n"
+            f"🎯 {t2_resource} Target KPI: {daily_resource_target_t2:.0f} mins/day × {selected_num_days} working days = {calc_lib_kpi_t2:.0f} mins total standard\n"
             f"Total Roster: {lib_total_teachers} teachers | Active Met Standard: {lib_met_count} | Inactive: {lib_inactive_count} | Engagement Rate: {(lib_met_count/lib_total_teachers*100 if lib_total_teachers>0 else 0):.1f}%\n\n"
-            f"Detailed Teacher Library Usage Logs:\n{teacher_lib_breakdown}"
+            f"Detailed Teacher {t2_resource} Usage Logs:\n{teacher_lib_breakdown}"
         )
-        render_universal_crm_box("Library Usage Tracker", tab2_active_roster.Institution.unique().tolist(), filter_description_text, tab2_metrics_summary)
+        render_universal_crm_box("Supplementary Resource Tracker", tab2_active_roster.Institution.unique().tolist(), filter_description_text, tab2_metrics_summary)
 
     # TAB 3: CONTENT & CHAPTERS (PRIMARY QUANTITATIVE BENCHMARK)
     with tab3:
@@ -3265,6 +3381,8 @@ else:
                             daily_ld_target=st.session_state.get('daily_ld_target_t1', 10.0),
                             daily_content_target=daily_content_target_t3,
                             daily_lib_target=st.session_state.get('daily_lib_target_t2', 30.0),
+                            daily_ebook_target=st.session_state.get('daily_ebook_target_t2', 30.0),
+                            calc_ebook_kpi=st.session_state.get('calc_ebook_kpi_t2', calculate_kpi_target(30.0, selected_num_days, True)),
                             selected_num_days=selected_num_days,
                             enable_quant_kpi=enable_quant_kpi_t3,
                             enable_qual_kpi=True,
@@ -3303,7 +3421,8 @@ else:
                 enable_quant_kpi_t4 = st.checkbox("Enable Quantitative Benchmark", value=True, key="t4_enable_quant_kpi")
                 daily_ld_target_t4 = st.number_input("Lesson Prep Target (Mins/Day)", min_value=0.0, max_value=60.0, value=10.0, step=5.0, key="t4_ld_target", disabled=not enable_quant_kpi_t4) if enable_quant_kpi_t4 else 0.0
                 daily_content_target_t4 = st.number_input("Content / Book Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t4_content_target", disabled=not enable_quant_kpi_t4) if enable_quant_kpi_t4 else 0.0
-                daily_lib_target_t4 = st.number_input("Library Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t4_lib_target", disabled=not enable_quant_kpi_t4) if enable_quant_kpi_t4 else 0.0
+                daily_lib_target_t4 = st.number_input("Additional Materials Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t4_additional_target", disabled=not enable_quant_kpi_t4)
+                daily_ebook_target_t4 = st.number_input("E-Books Target (Mins/Day)", min_value=0.0, max_value=120.0, value=30.0, step=5.0, key="t4_ebook_target", disabled=not enable_quant_kpi_t4)
             with t4_kcol2:
                 enable_qual_kpi_t4 = st.checkbox("Enable Qualitative Benchmark", value=True, key="t4_enable_qual_kpi")
                 target_vid_count_t4 = st.number_input("Min. Activity Files", min_value=0, max_value=100, value=3, step=1, key="t4_vid_cnt", disabled=not enable_qual_kpi_t4) if enable_qual_kpi_t4 else 0
@@ -3322,6 +3441,7 @@ else:
         calc_ld_kpi_t4 = calculate_kpi_target(daily_ld_target_t4, selected_num_days, enable_quant_kpi_t4)
         calc_content_kpi_t4 = calculate_kpi_target(daily_content_target_t4, selected_num_days, enable_quant_kpi_t4)
         calc_lib_kpi_t4 = calculate_kpi_target(daily_lib_target_t4, selected_num_days, enable_quant_kpi_t4)
+        calc_ebook_kpi_t4 = calculate_kpi_target(daily_ebook_target_t4, selected_num_days, enable_quant_kpi_t4)
 
         t4_fcol1, t4_fcol2, t4_fcol3 = st.columns([1, 1, 1.2])
         with t4_fcol1:
@@ -3339,7 +3459,9 @@ else:
                 target_teacher = st.selectbox("Select Teacher to Audit:", options=all_roster_teachers, key="top_teacher_select")
 
         with t4_fcol3:
-            primary_view_metric = st.radio("Focus Metric in Audit & PDF:", ["📖 Content (Book) Usage", "📚 Library Usage", "Both Side-by-Side"], horizontal=True, key="t4_metric_focus")
+            primary_view_metric = st.radio("Supplementary Resource Toggle:", ["Additional Materials", "E-Books"], horizontal=True, key="t4_metric_focus")
+            selected_resource_key_t4 = "additional" if primary_view_metric == "Additional Materials" else "ebook"
+            st.caption("Book/Content stays visible. PDFs always include all three modules.")
         
         if target_teacher:
             teacher_all_data = school_filtered_df[(school_filtered_df['FullName'] == target_teacher) & school_filtered_df.Institution.eq(t4_selected_school)]
@@ -3347,24 +3469,31 @@ else:
             teacher_school = t4_selected_school
 
             t_day_ld = teacher_date_data[usage_masks(teacher_date_data)[0]]['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
-            t_day_lib = teacher_date_data[usage_masks(teacher_date_data)[1]]['Duration_Min'].sum() if not teacher_date_data.empty else 0.0
-            
+            teacher_additional = resource_usage_detail(teacher_date_data, "additional")
+            teacher_ebooks = resource_usage_detail(teacher_date_data, "ebook")
+            selected_resource_df_t4 = teacher_additional if selected_resource_key_t4 == "additional" else teacher_ebooks
+            t_day_additional = duration_sum(teacher_additional)
+            t_day_ebook = duration_sum(teacher_ebooks)
+            t_day_resource = t_day_additional if selected_resource_key_t4 == "additional" else t_day_ebook
+
             t_books_raw = teacher_date_data[teacher_date_data['Book'].str.len() > 0]
-            teacher_books = t_books_raw[usage_masks(t_books_raw)[2]]
+            teacher_books = resource_usage_detail(t_books_raw, "book")
             t_day_content = teacher_books['Duration_Min'].sum() if not teacher_books.empty else 0.0
 
             t_eligible_days = teacher_days.get((teacher_school, target_teacher), selected_num_days) if use_teacher_eligible_days else selected_num_days
             t_calc_ld_kpi = calculate_kpi_target(daily_ld_target_t4, t_eligible_days, enable_quant_kpi_t4)
             t_calc_content_kpi = calculate_kpi_target(daily_content_target_t4, t_eligible_days, enable_quant_kpi_t4)
             t_calc_lib_kpi = calculate_kpi_target(daily_lib_target_t4, t_eligible_days, enable_quant_kpi_t4)
+            t_calc_ebook_kpi = calculate_kpi_target(daily_ebook_target_t4, t_eligible_days, enable_quant_kpi_t4)
+            t_calc_resource_kpi = t_calc_lib_kpi if selected_resource_key_t4 == "additional" else t_calc_ebook_kpi
             
             ld_pct = safe_percentage(t_day_ld, t_calc_ld_kpi)
             content_pct = safe_percentage(t_day_content, t_calc_content_kpi)
-            lib_pct = safe_percentage(t_day_lib, t_calc_lib_kpi)
+            resource_pct = safe_percentage(t_day_resource, t_calc_resource_kpi)
 
             ld_advice = f"🌟 Steady Execution ({t_day_ld:.1f}m logged)" if (t_calc_ld_kpi > 0 and t_day_ld >= t_calc_ld_kpi) else (f"⚠️ In-Progress ({t_day_ld:.1f}m logged)" if t_day_ld > 0 else "❌ Pending Activity")
             content_advice = f"🌟 Steady Execution ({t_day_content:.1f}m logged)" if (t_calc_content_kpi > 0 and t_day_content >= t_calc_content_kpi) else (f"⚠️ In-Progress ({t_day_content:.1f}m logged)" if t_day_content > 0 else "❌ Pending Activity")
-            lib_advice = f"🌟 Steady Execution ({t_day_lib:.1f}m logged)" if (t_calc_lib_kpi > 0 and t_day_lib >= t_calc_lib_kpi) else (f"⚠️ In-Progress ({t_day_lib:.1f}m logged)" if t_day_lib > 0 else "❌ Pending Activity")
+            resource_advice = f"🌟 Steady Execution ({t_day_resource:.1f}m logged)" if (t_calc_resource_kpi > 0 and t_day_resource >= t_calc_resource_kpi) else (f"⚠️ In-Progress ({t_day_resource:.1f}m logged)" if t_day_resource > 0 else "❌ Pending Activity")
 
             evidence_source = teacher_date_data
             
@@ -3396,6 +3525,8 @@ else:
                             daily_ld_target=daily_ld_target_t4,
                             daily_content_target=daily_content_target_t4,
                             daily_lib_target=daily_lib_target_t4,
+                            daily_ebook_target=daily_ebook_target_t4,
+                            calc_ebook_kpi=t_calc_ebook_kpi,
                             selected_num_days=selected_num_days,
                             target_vid_count=target_vid_count_t4,
                             target_writing_count=target_writing_count_t4,
@@ -3435,6 +3566,8 @@ else:
                             daily_ld_target=daily_ld_target_t4,
                             daily_content_target=daily_content_target_t4,
                             daily_lib_target=daily_lib_target_t4,
+                            daily_ebook_target=daily_ebook_target_t4,
+                            calc_ebook_kpi=t_calc_ebook_kpi,
                             selected_num_days=selected_num_days,
                             target_vid_count=target_vid_count_t4,
                             target_writing_count=target_writing_count_t4,
@@ -3470,17 +3603,13 @@ else:
                 s1, s2, s3 = st.columns(3)
                 s1.metric("Lesson Prep Mins", f"{t_day_ld:.1f} mins", delta=f"{ld_pct:.0f}% of Standard" if enable_quant_kpi_t4 else None)
                 
-                if "Content" in primary_view_metric or "Both" in primary_view_metric:
-                    s2.metric("Content (Book) Mins", f"{t_day_content:.1f} mins", delta=f"{content_pct:.0f}% of Standard" if enable_quant_kpi_t4 else None)
-                if "Library" in primary_view_metric or "Both" in primary_view_metric:
-                    s3.metric("Library Usage Mins", f"{t_day_lib:.1f} mins", delta=f"{lib_pct:.0f}% of Standard" if enable_quant_kpi_t4 else None)
+                s2.metric("Content (Book) Mins", f"{t_day_content:.1f} mins", delta=f"{content_pct:.0f}% of Standard" if enable_quant_kpi_t4 else None)
+                s3.metric(f"{primary_view_metric} Mins", f"{t_day_resource:.1f} mins", delta=f"{resource_pct:.0f}% of Standard" if enable_quant_kpi_t4 else None)
                 
                 st.markdown("##### 💡 Academic Consultant Observation")
                 st.write(f"• **Lesson Plan Preparation**: {ld_advice}")
-                if "Content" in primary_view_metric or "Both" in primary_view_metric:
-                    st.write(f"• **Content / Book Delivery**: {content_advice}")
-                if "Library" in primary_view_metric or "Both" in primary_view_metric:
-                    st.write(f"• **Library Usage**: {lib_advice}")
+                st.write(f"• **Content / Book Delivery**: {content_advice}")
+                st.write(f"• **{primary_view_metric}**: {resource_advice}")
 
             with col_sum2:
                 st.markdown("##### 📊 Performance Indicator Achievement Comparison")
@@ -3490,15 +3619,13 @@ else:
                 plot_logs.append(t_day_ld)
                 plot_benches.append(t_calc_ld_kpi)
                 
-                if "Content" in primary_view_metric or "Both" in primary_view_metric:
-                    plot_cats.append(f'Content Book ({t_calc_content_kpi:.0f}m)' if enable_quant_kpi_t4 else 'Content Book')
-                    plot_logs.append(t_day_content)
-                    plot_benches.append(t_calc_content_kpi)
-                    
-                if "Library" in primary_view_metric or "Both" in primary_view_metric:
-                    plot_cats.append(f'Library ({t_calc_lib_kpi:.0f}m)' if enable_quant_kpi_t4 else 'Library')
-                    plot_logs.append(t_day_lib)
-                    plot_benches.append(t_calc_lib_kpi)
+                plot_cats.append(f'Content Book ({t_calc_content_kpi:.0f}m)' if enable_quant_kpi_t4 else 'Content Book')
+                plot_logs.append(t_day_content)
+                plot_benches.append(t_calc_content_kpi)
+
+                plot_cats.append(f'{primary_view_metric} ({t_calc_resource_kpi:.0f}m)' if enable_quant_kpi_t4 else primary_view_metric)
+                plot_logs.append(t_day_resource)
+                plot_benches.append(t_calc_resource_kpi)
 
                 ach_df = pd.DataFrame({
                     'Performance Indicator Category': plot_cats,
@@ -3524,29 +3651,36 @@ else:
 
             st.markdown("---")
 
-            if "Content" in primary_view_metric or "Both" in primary_view_metric:
-                st.subheader("2. Detailed Textbook & Chapter Time Breakdown")
-                if teacher_books.empty:
-                    st.info(f"No digital textbooks or modules recorded for **{target_teacher}**.")
-                else:
-                    col_b1, col_b2 = st.columns(2)
-                    with col_b1:
-                        t_book_summary = teacher_books.groupby(['Book', 'Grade', 'Subject'])['Duration_Min'].sum().reset_index()
-                        fig_tb_bar = px.bar(
-                            t_book_summary, x="Duration_Min", y="Book", color="Grade", orientation="h",
-                            title=f"Time Spent per Book/Chapter by {target_teacher} (Minutes)",
-                            labels={"Duration_Min": "Time Spent (Minutes)", "Book": "Book / Chapter"},
-                            text_auto=".1f"
-                        )
-                        fig_tb_bar.update_layout(yaxis={'categoryorder':'total ascending'}, height=320)
-                        st.plotly_chart(fig_tb_bar, use_container_width=True)
-                        
-                    with col_b2:
-                        st.markdown("##### ⏱️ Time Allocation Table")
-                        display_book_table = t_book_summary.rename(columns={'Book': 'Textbook / Module', 'Grade': 'Grade', 'Subject': 'Subject', 'Duration_Min': 'Time Spent (Mins)'}).round({'Time Spent (Mins)': 1})
-                        st.dataframe(display_book_table, use_container_width=True)
+            st.subheader("2. Detailed Textbook & Chapter Time Breakdown")
+            if teacher_books.empty:
+                st.info(f"No digital textbooks or modules recorded for **{target_teacher}**.")
+            else:
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    t_book_summary = teacher_books.groupby(['Book', 'Grade', 'Subject'])['Duration_Min'].sum().reset_index()
+                    fig_tb_bar = px.bar(
+                        t_book_summary, x="Duration_Min", y="Book", color="Grade", orientation="h",
+                        title=f"Time Spent per Book/Chapter by {target_teacher} (Minutes)",
+                        labels={"Duration_Min": "Time Spent (Minutes)", "Book": "Book / Chapter"},
+                        text_auto=".1f"
+                    )
+                    fig_tb_bar.update_layout(yaxis={'categoryorder':'total ascending'}, height=320)
+                    st.plotly_chart(fig_tb_bar, use_container_width=True)
+                    
+                with col_b2:
+                    st.markdown("##### ⏱️ Time Allocation Table")
+                    display_book_table = t_book_summary.rename(columns={'Book': 'Textbook / Module', 'Grade': 'Grade', 'Subject': 'Subject', 'Duration_Min': 'Time Spent (Mins)'}).round({'Time Spent (Mins)': 1})
+                    st.dataframe(display_book_table, use_container_width=True)
 
-                st.markdown("---")
+            st.markdown("---")
+
+            st.subheader(f"2b. Detailed {primary_view_metric} Usage")
+            if selected_resource_df_t4.empty:
+                st.info(f"No {primary_view_metric.lower()} activity recorded for {target_teacher} within this review window.")
+            else:
+                resource_fields = ['Type', 'Book', 'Grade', 'Subject', 'StartTime', 'Duration_Min']
+                st.dataframe(selected_resource_df_t4[[c for c in resource_fields if c in selected_resource_df_t4]], use_container_width=True)
+                st.caption(f"Total {primary_view_metric}: {t_day_resource:.1f} minutes over {len(selected_resource_df_t4)} usage events.")
 
             with st.expander("Classroom observations for this teacher"):
                 observations = fetch_observation_history(target_teacher, teacher_school)
@@ -3637,7 +3771,7 @@ else:
             ld_m = sch_data[usage_masks(sch_data)[0]].groupby('FullName')['Duration_Min'].sum().to_dict()
             
             sch_content_raw = sch_data[sch_data['Book'].str.len() > 0]
-            sch_content_df = sch_content_raw[usage_masks(sch_content_raw)[2]]
+            sch_content_df = resource_usage_detail(sch_content_raw, "book")
             content_m = sch_content_df.groupby('FullName')['Duration_Min'].sum().to_dict()
 
             met_ld = 0
@@ -3679,6 +3813,8 @@ else:
                         daily_ld_target=daily_ld_target_t4,
                         daily_content_target=daily_content_target_t4,
                         daily_lib_target=daily_lib_target_t4,
+                        daily_ebook_target=daily_ebook_target_t4,
+                        calc_ebook_kpi=t_calc_ebook_kpi,
                         selected_num_days=t_eligible_days,
                         target_vid_count=target_vid_count_t4,
                         target_writing_count=target_writing_count_t4,
@@ -4163,43 +4299,26 @@ else:
                         )
                         if not observation_updated:
                             st.stop()
-                        st.success(f"🎉 Observation Visit `#{st.session_state['editing_obs_id']}` updated successfully for **{active_eval_teacher}**!")
+                        st.session_state["latest_saved_obs_id"] = st.session_state["editing_obs_id"]
+                        st.success(f"Observation Visit `#{st.session_state['editing_obs_id']}` updated for **{active_eval_teacher}**!")
                         st.session_state.pop("editing_obs_id", None)
                         st.session_state.pop("edit_meta_cache", None)
                     else:
-                        with conn.engine.begin() as c:
-                            c.execute(text("""
-                                INSERT INTO classroom_observations (
-                                    school, teacher, class_section, subject, topic,
-                                    visit_date, duration, students_present, print_displayed,
-                                    academic_mentor, rubric_json, flow_of_class, high_points,
-                                    recommendations, pdf_url, evidence_links
-                                ) VALUES (
-                                    :school, :teacher, :class_section, :subject, :topic,
-                                    :visit_date, :duration, :students_present, :print_displayed,
-                                    :academic_mentor, :rubric_json, :flow_of_class, :high_points,
-                                    :recommendations, :pdf_url, :evidence_links
-                                )
-                            """), {
-                                "school": obs_meta_payload["School"],
-                                "teacher": obs_meta_payload["Teacher"],
-                                "class_section": obs_meta_payload["Class"],
-                                "subject": obs_meta_payload["Subject"],
-                                "topic": obs_meta_payload["Topic"],
-                                "visit_date": obs_meta_payload["Date"],
-                                "duration": obs_meta_payload["Duration"],
-                                "students_present": int(obs_meta_payload["Students"]),
-                                "print_displayed": obs_meta_payload["PrintDisplay"],
-                                "academic_mentor": obs_meta_payload["Mentor"],
-                                "rubric_json": json.dumps(final_rubric_responses),
-                                "flow_of_class": obs_narrative_payload["Flow"],
-                                "high_points": obs_narrative_payload["HighPoints"],
-                                "recommendations": obs_narrative_payload["Recommendations"],
-                                "pdf_url": uploaded_obs_url or "",
-                                "evidence_links": media_links_str
-                            })
-                        fetch_observation_history.clear()
-                        st.success(f"🎉 Observation Audit stored and compiled for **{active_eval_teacher}** at **{input_school}**!")
+                        saved_observation_id = save_observation_to_db(
+                            meta=obs_meta_payload,
+                            rubrics=final_rubric_responses,
+                            narratives=obs_narrative_payload,
+                            pdf_url=uploaded_obs_url or "",
+                            evidence_links=media_links_str
+                        )
+                        if saved_observation_id is None:
+                            st.error("Observation was NOT saved. You can still re-submit; check the database error above.")
+                            st.stop()
+                        st.session_state["latest_saved_obs_id"] = saved_observation_id
+                        st.success(f"Observation #{saved_observation_id} saved for {active_eval_teacher} at {input_school}.")
+
+                    if not uploaded_obs_url:
+                        st.warning("The database visit record was saved, but the cloud PDF upload failed. Download the PDF below and check Supabase Storage settings.")
 
                     st.session_state["latest_obs_pdf_bytes"] = obs_pdf_buffer.getvalue()
                     st.session_state["latest_obs_pdf_url"] = uploaded_obs_url
@@ -4223,23 +4342,34 @@ else:
         with subtab_history:
             st.subheader("📊 Historical Classroom Observation Audits")
             
+            if st.session_state.get("latest_saved_obs_id"):
+                st.success(f"Most recently saved observation: #{st.session_state['latest_saved_obs_id']}. Use the filters below to find it.")
+            obs_history_all = fetch_observation_history()
+            historical_schools = sorted(obs_history_all["school"].dropna().astype(str).unique().tolist()) if not obs_history_all.empty else []
+            historical_teachers = sorted(obs_history_all["teacher"].dropna().astype(str).unique().tolist()) if not obs_history_all.empty else []
             hist_col1, hist_col2 = st.columns(2)
             with hist_col1:
-                hist_school = st.selectbox("Filter History by School:", options=["All Schools"] + selected_schools, key="hist_sch")
+                hist_school = st.selectbox("Filter History by School:", options=["All Schools"] + historical_schools, key="hist_sch")
             with hist_col2:
-                hist_teacher = st.selectbox("Filter History by Teacher:", options=["All Teachers"] + available_teachers, key="hist_teach")
+                hist_teacher = st.selectbox("Filter History by Teacher:", options=["All Teachers"] + historical_teachers, key="hist_teach")
 
-            obs_history_df = fetch_observation_history(hist_teacher, hist_school)
-            history_all_dates = st.checkbox("Show observation history across all dates", value=False, key="history_all_dates")
+            obs_history_df = obs_history_all
             if not obs_history_df.empty:
-                obs_history_df = obs_history_df[obs_history_df.school.isin(selected_schools)]
-                obs_history_df = obs_history_df[obs_history_df.teacher.isin(selected_teachers)]
-                if not history_all_dates:
-                    dates = pd.to_datetime(obs_history_df.visit_date).dt.date
-                    obs_history_df = obs_history_df[(dates >= c_start) & (dates <= c_end)]
+                if hist_school != "All Schools":
+                    obs_history_df = obs_history_df[obs_history_df.school.eq(hist_school)]
+                if hist_teacher != "All Teachers":
+                    obs_history_df = obs_history_df[obs_history_df.teacher.eq(hist_teacher)]
+            history_restrict_dates = st.checkbox(
+                "Restrict observation history to dashboard date range",
+                value=False, key="history_restrict_dates",
+                help="Off by default so visits outside the usage-report window remain visible."
+            )
+            if not obs_history_df.empty and history_restrict_dates:
+                dates = pd.to_datetime(obs_history_df.visit_date, errors="coerce").dt.date
+                obs_history_df = obs_history_df[(dates >= c_start) & (dates <= c_end)]
 
             if obs_history_df.empty:
-                st.info("No physical visit records found in the database for the selected filters.")
+                st.info("No observation records match the selected history filters (or the history database read failed; see any error above).")
             else:
                 st.markdown(f"**Total Observations Logged:** `{len(obs_history_df)}`")
                 
