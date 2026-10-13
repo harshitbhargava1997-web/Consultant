@@ -316,6 +316,62 @@ def resource_usage_totals(df, group_keys):
     return result
 
 
+def deduplicate_overlapping_book_sessions(df):
+    """Count each actual Book/Content session once, even if an export is
+    uploaded once without Book/Grade/Subject and again WITH those details.
+
+    Identity is school + teacher + exact source session times + minutes +
+    module. Only Book/Content upload events with BOTH timestamps are merged;
+    other modules, classroom evidence, and undated rows remain unchanged.
+    Prefer the record with the most populated Book/Grade/Subject fields.
+    This is read-only and does NOT delete stored PostgreSQL records.
+    """
+    if df is None or df.empty:
+        return df
+    out = df.reset_index(drop=True).copy()
+    types = out.get('Type', pd.Series('', index=out.index)).fillna('').astype(str)
+    kind = types.str.casefold().str.replace(r'[^a-z0-9]+', '', regex=True)
+    eligible = kind.isin(('book', 'bookusage', 'content', 'contentusage'))
+
+    # Never alter any observation/evidence submissions: they are not Excel
+    # usage-session duplicates, even if their Type or Book resembles Book.
+    evidence_cols = [c for c in EVIDENCE_COLUMNS if c in out.columns]
+    if evidence_cols:
+        has_evidence = pd.Series(False, index=out.index)
+        for col in evidence_cols:
+            has_evidence |= out[col].fillna('').astype(str).str.strip().ne('')
+        eligible &= ~has_evidence
+
+    if 'StartTime' not in out.columns or 'EndTime' not in out.columns:
+        return out
+    start = pd.to_datetime(out['StartTime'], errors='coerce', utc=True)
+    end = pd.to_datetime(out['EndTime'], errors='coerce', utc=True)
+    eligible &= start.notna() & end.notna()
+    if not eligible.any():
+        return out
+
+    part = out.loc[eligible].copy()
+    # Excel and PostgreSQL can represent the same timestamp at slightly
+    # different microsecond precision. Exports identify sessions to seconds.
+    part['_start_key'] = start.loc[eligible].dt.round('s').astype(str).values
+    part['_end_key'] = end.loc[eligible].dt.round('s').astype(str).values
+    part['_school_key'] = part['Institution'].fillna('').astype(str).str.strip().str.casefold()
+    part['_teacher_key'] = part['FullName'].fillna('').astype(str).str.strip().str.casefold()
+    part['_type_key'] = kind.loc[eligible].values
+    part['_duration_key'] = pd.to_numeric(part['Duration_Min'], errors='coerce').round(2)
+    meta_cols = [c for c in ('Book', 'Grade', 'Subject') if c in part.columns]
+    part['_metadata_score'] = sum(
+        (part[c].fillna('').astype(str).str.strip().ne('')).astype(int)
+        for c in meta_cols
+    ) if meta_cols else 0
+    identifiers = ['_school_key', '_teacher_key', '_type_key', '_start_key', '_end_key', '_duration_key']
+    # Stable order keeps rich metadata when both detail-free and detailed
+    # company exports contain identical source sessions.
+    preferred = part.sort_values('_metadata_score', kind='stable').drop_duplicates(identifiers, keep='last')
+    remove = part.index.difference(preferred.index)
+    return out.drop(index=remove).reset_index(drop=True)
+
+
 def pdf_known_value(value):
     """Use only genuinely supplied source metadata in usage-detail PDFs."""
     if value is None or pd.isna(value):
@@ -678,6 +734,10 @@ def fetch_master_db_from_supabase():
     raw = normalize_identity_columns(raw)
     for col in ['Book','Type','Subject','Grade','Section']:
         raw[col] = raw[col].fillna('').astype(str)
+    # Excel Book summaries can be re-exported with additional metadata.
+    # De-duplicate the underlying session here so all dashboards and PDFs
+    # consume the correct minutes. Richer Book/Grade/Subject metadata wins.
+    raw = deduplicate_overlapping_book_sessions(raw)
     # Keep raw timestamps for exports; add_review_dates normalizes only the review copy.
     return raw
 
@@ -1907,6 +1967,8 @@ def delete_evidence_item(record_id, column_name, object_key, url):
 
 
 def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_content_kpi, calc_lib_kpi, daily_ld_target, daily_content_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True, active_metric_mode="Content / Book Usage", show_lesson_plan_report=True, show_evidence_section=True, daily_ebook_target=None, calc_ebook_kpi=None, show_additional_materials=True, show_ebook_usage=True, teacher_additional_details=False):
+    # Defensive guard: PDF calls can also pass frames before live DB filtering.
+    filtered_df = deduplicate_overlapping_book_sessions(filtered_df)
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     story = []
@@ -2410,6 +2472,11 @@ def ingest_excel_to_postgresql(processed_dfs, source="UserMetrics / legacy impor
         combined = combined.drop(index=[int(error['Row']) for error in errors]).copy()
         if combined.empty:
             return 0, 0
+    # Avoid double importing the same Book session from the company's
+    # summary and metadata-rich export in the same batch.
+    before_session_dedup = len(combined)
+    combined = deduplicate_overlapping_book_sessions(combined)
+    overlapping_book_sessions = before_session_dedup - len(combined)
     combined['Record_Hash'] = combined.apply(compute_record_hash, axis=1)
     total = len(combined)
     combined = combined.drop_duplicates('Record_Hash', keep='last')
@@ -2450,8 +2517,8 @@ def ingest_excel_to_postgresql(processed_dfs, source="UserMetrics / legacy impor
         if c.execute(text("SELECT to_regclass('public.portal_import_runs')")).scalar():
             c.execute(text('INSERT INTO portal_import_runs(id,source,input_rows,inserted_rows,skipped_rows,actor) VALUES (:id,:source,:total,:inserted,:skipped,:actor)'),
                       dict(id=str(uuid.uuid4()), source=source,total=input_rows,inserted=count,skipped=input_rows-count,actor=employee_name))
-    st.session_state['last_import_result'] = {'source':source,'status':'Committed with rows needing review' if details else 'Committed','input_rows':input_rows,'inserted_rows':count,'skipped_duplicates':total-count,'invalid_rows':len(details),'examples':details[:20],'rejected_rows':details}
-    return count, total-count
+    st.session_state['last_import_result'] = {'source':source,'status':'Committed with rows needing review' if details else 'Committed','input_rows':input_rows,'inserted_rows':count,'skipped_duplicates':total-count+overlapping_book_sessions,'invalid_rows':len(details),'examples':details[:20],'rejected_rows':details}
+    return count, total-count+overlapping_book_sessions
 
 
 def prepare_usermetrics_file(file, consultant, state_zone):
@@ -2677,7 +2744,9 @@ with st.sidebar.expander("🛟 Restore from R2 Backups (Disaster Recovery)"):
                 st.sidebar.info("No R2 backup files found under backups/teacher_records/.")
 
 if not df.empty:
-    st.sidebar.metric("Database Total Records", len(df))
+    # Reports intentionally merge matching Book usage sessions from summary
+    # and detailed company exports, so this count is not the raw SQL count.
+    st.sidebar.metric("Report Records (deduplicated)", len(df))
 
     dedup_confirm = st.sidebar.checkbox("I have exported a backup before duplicate cleanup", disabled=not DESTRUCTIVE_ENABLED)
     if st.sidebar.button("🧹 Remove Exact Duplicate Records", disabled=not DESTRUCTIVE_ENABLED or not dedup_confirm):
