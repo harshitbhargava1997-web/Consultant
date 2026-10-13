@@ -2160,50 +2160,9 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         story.append(resource_table)
         story.append(Spacer(1, 14))
 
-    # Additional Materials source exports often omit Book/Grade/Subject entirely.
-    # Give schools a useful dated detailed log in the opening consolidated pages
-    # without repeating fictitious item/subject placeholders for every teacher.
-    if include_additional:
-        scoped_additional = additional_df[additional_df['FullName'].isin(teachers_list)]
-        detail_data = resource_date_and_details(scoped_additional)
-        # Keep long dated tables intact on the next opening summary page.
-        if len(detail_data) > 15:
-            story.append(PageBreak())
-        story.append(Paragraph(f"<b>{summary_sec_num}. Detailed Additional Materials Usage — School Consolidated</b>", sec_head_style))
-        summary_sec_num += 1
-        if detail_data.empty:
-            story.append(Paragraph("No additional materials usage recorded in this review period.", normal_style))
-        else:
-            has_material = detail_data['Material'].str.strip().ne('').any()
-            has_grade = detail_data['Grade'].str.strip().ne('').any()
-            has_subject = detail_data['Subject'].str.strip().ne('').any()
-            optional_fields = [col for col, ok in [('Material', has_material), ('Grade', has_grade), ('Subject', has_subject)] if ok]
-            columns = ['Teacher', 'Date'] + optional_fields + ['Sessions', 'Minutes']
-            headers = {'Teacher':'Teacher Name', 'Date':'Date', 'Material':'Material',
-                       'Grade':'Grade', 'Subject':'Subject', 'Sessions':'Sessions', 'Minutes':'Minutes'}
-            tab_data = [[headers[col] for col in columns]]
-            for _, log in detail_data.sort_values(['Teacher', 'Date', 'Material'], kind='stable').iterrows():
-                tab_data.append([f"{log[col]:.1f}" if col == 'Minutes' else
-                                 str(int(log[col])) if col == 'Sessions' else pdf_known_value(log[col])
-                                 for col in columns])
-            tab_data.append(['Total'] + ['']*(len(columns)-3) +
-                            [str(int(detail_data['Sessions'].sum())), f"{detail_data['Minutes'].sum():.1f}"])
-            optional_width = 73 * len(optional_fields)
-            base_remaining = 540 - optional_width
-            col_widths = [base_remaining * 0.42, base_remaining * 0.28] + [73]*len(optional_fields) + [base_remaining * 0.13, base_remaining * 0.17]
-            detail_table = Table(tab_data, colWidths=col_widths, repeatRows=1)
-            detail_table.setStyle(TableStyle([
-                ('BACKGROUND',(0,0),(-1,0),primary_color),
-                ('GRID',(0,0),(-1,-1),0.4,border_color),
-                ('VALIGN',(0,0),(-1,-1),'TOP'),
-                ('ROWBACKGROUNDS',(0,1),(-1,-2),[colors.white,light_bg]),
-                ('BACKGROUND',(0,-1),(-1,-1),light_bg),
-                ('FONTNAME',(0,-1),(-1,-1),'PortalSans-Bold'),
-                ('TOPPADDING',(0,0),(-1,-1),4),
-                ('BOTTOMPADDING',(0,0),(-1,-1),4),
-            ]))
-            story.append(detail_table)
-            story.append(Spacer(1,10))
+    # The school-level Additional Materials overview above is intentionally
+    # sufficient for the PDF. Avoid exporting a second dated school-wide log.
+    # Teachers' detailed usage can still be enabled explicitly in PDF settings.
 
     if enable_qual_kpi and show_evidence_section:
         story.append(Paragraph("<b>Classroom Submissions & Evidence Compliance</b>", sec_head_style))
@@ -3133,7 +3092,7 @@ else:
             t1_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t1_show_lp_section")
             t1_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t1_show_evidence_section")
             t1_show_additional = st.checkbox("Include Additional Materials Usage in PDF", value=True, key="t1_show_additional_materials")
-            t1_teacher_additional_detail = st.checkbox("Repeat Additional Materials details in each teacher profile", value=False, key="t1_teacher_additional_detail", disabled=not t1_show_additional, help="Off: teacher totals still appear, but dated details stay in the school consolidated pages only.")
+            t1_teacher_additional_detail = st.checkbox("Include detailed Additional Materials usage in teacher profiles", value=False, key="t1_teacher_additional_detail", disabled=not t1_show_additional, help="Off (default): include only the school overview and teacher usage totals. On: add dated usage details within each teacher profile.")
             t1_show_ebooks = st.checkbox("Include E-Books Usage in PDF", value=True, key="t1_show_ebook_usage")
             if st.button("⚙️ Compile Tab 1 PDF Report", key="prep_pdf_tab1_btn"):
                 with st.spinner("Compiling PDF report..."):
@@ -3300,7 +3259,7 @@ else:
             t2_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t2_show_lp_section")
             t2_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t2_show_evidence_section")
             t2_show_additional = st.checkbox("Include Additional Materials Usage in PDF", value=True, key="t2_show_additional_materials")
-            t2_teacher_additional_detail = st.checkbox("Repeat Additional Materials details in each teacher profile", value=False, key="t2_teacher_additional_detail", disabled=not t2_show_additional, help="Off: teacher totals still appear, but dated details stay in the school consolidated pages only.")
+            t2_teacher_additional_detail = st.checkbox("Include detailed Additional Materials usage in teacher profiles", value=False, key="t2_teacher_additional_detail", disabled=not t2_show_additional, help="Off (default): include only the school overview and teacher usage totals. On: add dated usage details within each teacher profile.")
             t2_show_ebooks = st.checkbox("Include E-Books Usage in PDF", value=True, key="t2_show_ebook_usage")
             if st.button("⚙️ Compile Tab 2 PDF Report", key="prep_pdf_tab2_btn"):
                 with st.spinner("Compiling selected usage modules into the PDF report..."):
@@ -3494,7 +3453,7 @@ else:
                 t3_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t3_show_lp_section")
                 t3_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t3_show_evidence_section")
                 t3_show_additional = st.checkbox("Include Additional Materials Usage in PDF", value=True, key="t3_show_additional_materials")
-                t3_teacher_additional_detail = st.checkbox("Repeat Additional Materials details in each teacher profile", value=False, key="t3_teacher_additional_detail", disabled=not t3_show_additional, help="Off: teacher totals still appear, but dated details stay in the school consolidated pages only.")
+                t3_teacher_additional_detail = st.checkbox("Include detailed Additional Materials usage in teacher profiles", value=False, key="t3_teacher_additional_detail", disabled=not t3_show_additional, help="Off (default): include only the school overview and teacher usage totals. On: add dated usage details within each teacher profile.")
                 t3_show_ebooks = st.checkbox("Include E-Books Usage in PDF", value=True, key="t3_show_ebook_usage")
                 if st.button("⚙️ Compile Tab 3 PDF Report", key="prep_pdf_tab3_btn"):
                     with st.spinner("Compiling Content PDF..."):
@@ -3569,11 +3528,11 @@ else:
         with t4_pcol1:
             t4_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t4_show_lp_section")
             t4_show_additional = st.checkbox("Include Additional Materials Usage in PDF", value=True, key="t4_show_additional_materials")
-            t4_teacher_additional_detail = st.checkbox("Repeat Additional Materials details in each teacher profile", value=False, key="t4_teacher_additional_detail", disabled=not t4_show_additional, help="Off: teacher totals still appear, but dated details stay in the school consolidated pages only.")
+            t4_teacher_additional_detail = st.checkbox("Include detailed Additional Materials usage in teacher profiles", value=False, key="t4_teacher_additional_detail", disabled=not t4_show_additional, help="Off (default): include only the school overview and teacher usage totals. On: add dated usage details within each teacher profile.")
         with t4_pcol2:
             t4_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t4_show_evidence_section")
             t4_show_ebooks = st.checkbox("Include E-Books Usage in PDF", value=True, key="t4_show_ebook_usage")
-        st.caption("Book/Content is always included. Additional Materials has a school-wide dated detail table. Teacher totals remain visible; repeating the dated detail inside profiles is optional.")
+        st.caption("Book/Content is always included. Additional Materials shows a school overview and teacher totals; individual dated usage details are optional.")
 
         calc_ld_kpi_t4 = calculate_kpi_target(daily_ld_target_t4, selected_num_days, enable_quant_kpi_t4)
         calc_content_kpi_t4 = calculate_kpi_target(daily_content_target_t4, selected_num_days, enable_quant_kpi_t4)
