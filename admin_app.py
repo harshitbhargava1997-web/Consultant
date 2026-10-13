@@ -296,7 +296,7 @@ def resource_usage_masks(df):
     # Retain the existing company-specific book/content predicate. The two new
     # modules take priority if the source row also contains a 'Book' title.
     legacy_library = normalized.isin(("library", "libraryusage"))
-    book = usage_masks(df)[2] & ~additional & ~ebook & ~legacy_library
+    book = (normalized.isin(("book", "bookusage", "content", "contentusage")) | usage_masks(df)[2]) & ~additional & ~ebook & ~legacy_library
     # A generic old 'Library' event has no mapping in the new company export;
     # never present it as either Additional Materials or E-Books.
     return {"book": book, "additional": additional, "ebook": ebook}
@@ -313,6 +313,67 @@ def resource_usage_totals(df, group_keys):
     masks = resource_usage_masks(df)
     for category, mask in masks.items():
         result[category] = df.loc[mask].groupby(group_keys)["Duration_Min"].sum()
+    return result
+
+
+def pdf_known_value(value):
+    """Use only genuinely supplied source metadata in usage-detail PDFs."""
+    if value is None or pd.isna(value):
+        return ""
+    label = str(value).strip()
+    if label.casefold() in {"", "nan", "none", "null", "n/a", "na", "unspecified", "unspecified item"}:
+        return ""
+    return label
+
+
+def resource_date_and_details(frame):
+    """Aggregate module events by teacher/date and any REAL resource metadata.
+
+    UserMetrics' additionalMaterial export usually has no Book, Grade or Subject.
+    Therefore none of these fields are required or synthesized.
+    """
+    if frame is None or frame.empty:
+        return pd.DataFrame(columns=["Teacher", "Date", "Material", "Grade", "Subject", "Sessions", "Minutes"])
+    rows = frame.copy()
+    if "Date" in rows.columns:
+        dates = pd.to_datetime(rows["Date"], errors="coerce")
+    elif "StartTime" in rows.columns:
+        dates = pd.to_datetime(rows["StartTime"], errors="coerce")
+    else:
+        dates = pd.Series(pd.NaT, index=rows.index)
+    rows["_usage_date"] = dates.dt.strftime("%Y-%m-%d").fillna("")
+    for key in ("Book", "Grade", "Subject"):
+        if key not in rows:
+            rows[key] = ""
+        rows[key] = rows[key].map(pdf_known_value)
+    rows["_teacher"] = rows["FullName"].fillna("").astype(str).str.strip()
+    rows["Duration_Min"] = pd.to_numeric(rows["Duration_Min"], errors="coerce").fillna(0.0)
+    grouped = (rows.groupby(["_teacher", "_usage_date", "Book", "Grade", "Subject"], dropna=False, sort=False)
+                 .agg(Sessions=("Duration_Min", "size"), Minutes=("Duration_Min", "sum"))
+                 .reset_index())
+    grouped = grouped.rename(columns={"_teacher": "Teacher", "_usage_date": "Date", "Book": "Material"})
+    return grouped[["Teacher", "Date", "Material", "Grade", "Subject", "Sessions", "Minutes"]]
+
+
+def pdf_resource_detail_lines(frame, resource_name):
+    """Readable teacher-level activity, omitting any unavailable item/subject."""
+    rows = resource_date_and_details(frame)
+    if rows.empty:
+        return [f"No {resource_name.lower()} events recorded in this period."]
+    result = []
+    for r in rows.itertuples(index=False):
+        parts = [f"{escape(resource_name)} usage"]
+        if r.Date:
+            parts.append(escape(r.Date))
+        if r.Material:
+            parts.append(f"Item: {escape(r.Material)}")
+        if r.Grade:
+            parts.append(f"Grade: {escape(r.Grade)}")
+        if r.Subject:
+            parts.append(f"Subject: {escape(r.Subject)}")
+        parts.append(f"{int(r.Sessions)} session(s)")
+        parts.append(f"{float(r.Minutes):.1f} Minutes")
+        result.append(" | ".join(parts))
     return result
 
 
@@ -1845,7 +1906,7 @@ def delete_evidence_item(record_id, column_name, object_key, url):
     return True, r2_warning
 
 
-def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_content_kpi, calc_lib_kpi, daily_ld_target, daily_content_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True, active_metric_mode="Content / Book Usage", show_lesson_plan_report=True, show_evidence_section=True, daily_ebook_target=None, calc_ebook_kpi=None, show_additional_materials=True, show_ebook_usage=True):
+def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_filtered_df, filtered_df, filter_desc, calc_ld_kpi, calc_content_kpi, calc_lib_kpi, daily_ld_target, daily_content_target, daily_lib_target, selected_num_days, target_vid_count=3, target_writing_count=3, target_lp_combo_count=3, target_phonics_count=2, target_portfolio_count=1, enable_quant_kpi=True, enable_qual_kpi=True, active_metric_mode="Content / Book Usage", show_lesson_plan_report=True, show_evidence_section=True, daily_ebook_target=None, calc_ebook_kpi=None, show_additional_materials=True, show_ebook_usage=True, teacher_additional_details=False):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     story = []
@@ -1885,7 +1946,8 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
                 selected_num_days,target_vid_count,target_writing_count,target_lp_combo_count,target_phonics_count,
                 target_portfolio_count,enable_quant_kpi,enable_qual_kpi,active_metric_mode,show_lesson_plan_report,show_evidence_section,
                 daily_ebook_target=daily_ebook_target,calc_ebook_kpi=calc_ebook_kpi,
-                show_additional_materials=show_additional_materials,show_ebook_usage=show_ebook_usage)
+                show_additional_materials=show_additional_materials,show_ebook_usage=show_ebook_usage,
+                teacher_additional_details=teacher_additional_details)
             writer.append(PdfReader(buf))
         merged = BytesIO(); writer.write(merged); merged.seek(0)
         return merged
@@ -1934,10 +1996,9 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
     additional_usage = additional_df.groupby('FullName')['Duration_Min'].sum().to_dict()
     ebook_usage = ebook_df.groupby('FullName')['Duration_Min'].sum().to_dict()
 
-    content_raw = school_curr_df[school_curr_df['Book'].str.len() > 0]
-    content_df = resource_usage_detail(content_raw, "book")
+    content_df = resource_usage_detail(school_curr_df, "book")
     content_usage = content_df.groupby('FullName')['Duration_Min'].sum().to_dict()
-    content_books_opened = content_df.groupby('FullName')['Book'].nunique().to_dict()
+    content_books_opened = content_df[content_df['Book'].fillna('').str.strip().ne('')].groupby('FullName')['Book'].nunique().to_dict()
 
     total_teachers_count = len(teachers_list)
     met_ld_count = 0
@@ -2099,6 +2160,51 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         story.append(resource_table)
         story.append(Spacer(1, 14))
 
+    # Additional Materials source exports often omit Book/Grade/Subject entirely.
+    # Give schools a useful dated detailed log in the opening consolidated pages
+    # without repeating fictitious item/subject placeholders for every teacher.
+    if include_additional:
+        scoped_additional = additional_df[additional_df['FullName'].isin(teachers_list)]
+        detail_data = resource_date_and_details(scoped_additional)
+        # Keep long dated tables intact on the next opening summary page.
+        if len(detail_data) > 15:
+            story.append(PageBreak())
+        story.append(Paragraph(f"<b>{summary_sec_num}. Detailed Additional Materials Usage — School Consolidated</b>", sec_head_style))
+        summary_sec_num += 1
+        if detail_data.empty:
+            story.append(Paragraph("No additional materials usage recorded in this review period.", normal_style))
+        else:
+            has_material = detail_data['Material'].str.strip().ne('').any()
+            has_grade = detail_data['Grade'].str.strip().ne('').any()
+            has_subject = detail_data['Subject'].str.strip().ne('').any()
+            optional_fields = [col for col, ok in [('Material', has_material), ('Grade', has_grade), ('Subject', has_subject)] if ok]
+            columns = ['Teacher', 'Date'] + optional_fields + ['Sessions', 'Minutes']
+            headers = {'Teacher':'Teacher Name', 'Date':'Date', 'Material':'Material',
+                       'Grade':'Grade', 'Subject':'Subject', 'Sessions':'Sessions', 'Minutes':'Minutes'}
+            tab_data = [[headers[col] for col in columns]]
+            for _, log in detail_data.sort_values(['Teacher', 'Date', 'Material'], kind='stable').iterrows():
+                tab_data.append([f"{log[col]:.1f}" if col == 'Minutes' else
+                                 str(int(log[col])) if col == 'Sessions' else pdf_known_value(log[col])
+                                 for col in columns])
+            tab_data.append(['Total'] + ['']*(len(columns)-3) +
+                            [str(int(detail_data['Sessions'].sum())), f"{detail_data['Minutes'].sum():.1f}"])
+            optional_width = 73 * len(optional_fields)
+            base_remaining = 540 - optional_width
+            col_widths = [base_remaining * 0.42, base_remaining * 0.28] + [73]*len(optional_fields) + [base_remaining * 0.13, base_remaining * 0.17]
+            detail_table = Table(tab_data, colWidths=col_widths, repeatRows=1)
+            detail_table.setStyle(TableStyle([
+                ('BACKGROUND',(0,0),(-1,0),primary_color),
+                ('GRID',(0,0),(-1,-1),0.4,border_color),
+                ('VALIGN',(0,0),(-1,-1),'TOP'),
+                ('ROWBACKGROUNDS',(0,1),(-1,-2),[colors.white,light_bg]),
+                ('BACKGROUND',(0,-1),(-1,-1),light_bg),
+                ('FONTNAME',(0,-1),(-1,-1),'PortalSans-Bold'),
+                ('TOPPADDING',(0,0),(-1,-1),4),
+                ('BOTTOMPADDING',(0,0),(-1,-1),4),
+            ]))
+            story.append(detail_table)
+            story.append(Spacer(1,10))
+
     if enable_qual_kpi and show_evidence_section:
         story.append(Paragraph("<b>Classroom Submissions & Evidence Compliance</b>", sec_head_style))
         qual_summary_table_data = [["Teacher Name", "LP / Audio", "Activities", "Writing", "Phonics", "Portfolio", "Assess.", "Events", "Status"]]
@@ -2145,8 +2251,7 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         t_day_additional = duration_sum(teacher_additional)
         t_day_ebook = duration_sum(teacher_ebooks)
 
-        t_books_raw = teacher_date_data[teacher_date_data['Book'].str.len() > 0]
-        teacher_books = resource_usage_detail(t_books_raw, "book")
+        teacher_books = resource_usage_detail(teacher_date_data, "book")
         t_day_content = teacher_books['Duration_Min'].sum() if not teacher_books.empty else 0.0
 
         ld_pct = safe_percentage(t_day_ld, calc_ld_kpi)
@@ -2174,11 +2279,17 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
         total_artifacts = lp_combo_total + len(v_vid) + len(v_writing) + len(v_phonics) + len(v_portfolio) + len(v_assessment) + len(v_events)
 
         pdf_book_items = []
-        if not teacher_books.empty:
-            b_summary_df = teacher_books.groupby(['Book', 'Grade', 'Subject'])['Duration_Min'].sum().reset_index()
+        named_books = teacher_books[teacher_books['Book'].fillna('').str.strip().ne('')]
+        if not named_books.empty:
+            b_summary_df = named_books.groupby(['Book', 'Grade', 'Subject'], dropna=False)['Duration_Min'].sum().reset_index()
             for _, br in b_summary_df.iterrows():
-                pdf_book_items.append(f"Book: {br['Book']} ({br['Grade']} - {br['Subject']}) | Time Spent: {br['Duration_Min']:.1f} Mins")
-        else:
+                meta = [pdf_known_value(br['Grade']), pdf_known_value(br['Subject'])]
+                suffix = f" ({' - '.join(part for part in meta if part)})" if any(meta) else ""
+                pdf_book_items.append(f"Book: {escape(str(br['Book']))}{escape(suffix)} | Time Spent: {br['Duration_Min']:.1f} Mins")
+        missing_titles = teacher_books[teacher_books['Book'].fillna('').str.strip().eq('')]
+        if not missing_titles.empty:
+            pdf_book_items.append(f"Book usage without title fields in source export: {duration_sum(missing_titles):.1f} Mins ({len(missing_titles)} sessions)")
+        if not pdf_book_items:
             pdf_book_items.append("No textbooks or digital modules opened.")
 
         pdf_link_items = []
@@ -2273,24 +2384,12 @@ def generate_comprehensive_school_pdf_report(school_name, teachers_list, school_
             sections[f"{per_teacher_sec_num}. Detailed Textbook & Chapter Breakdown"] = pdf_book_items
             per_teacher_sec_num += 1
         for resource_name, resource_frame, enabled in [
-            ("Additional Materials", teacher_additional, include_additional),
+            ("Additional Materials", teacher_additional, include_additional and teacher_additional_details),
             ("E-Books", teacher_ebooks, include_ebook),
         ]:
             if not enabled:
                 continue
-            detail_items = []
-            if not resource_frame.empty:
-                for (type_label, book_label, subject_label), grp in resource_frame.groupby(
-                    ["Type", "Book", "Subject"], dropna=False
-                ):
-                    detail_items.append(
-                        f"{resource_name}: {str(book_label).strip() or 'Unspecified item'}"
-                        f" | Module: {type_label} | Subject: {subject_label or 'N/A'}"
-                        f" | {grp['Duration_Min'].sum():.1f} Minutes"
-                    )
-            else:
-                detail_items = [f"No {resource_name.lower()} events recorded in this period."]
-            sections[f"{per_teacher_sec_num}. Detailed {resource_name} Usage"] = detail_items
+            sections[f"{per_teacher_sec_num}. Detailed {resource_name} Usage"] = pdf_resource_detail_lines(resource_frame, resource_name)
             per_teacher_sec_num += 1
         if show_evidence_section:
             sections[f"{per_teacher_sec_num}. Activity Evidence & Qualitative Artifacts"] = pdf_link_items if pdf_link_items else ["No activity or evidence submission links recorded in active window."]
@@ -3034,6 +3133,7 @@ else:
             t1_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t1_show_lp_section")
             t1_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t1_show_evidence_section")
             t1_show_additional = st.checkbox("Include Additional Materials Usage in PDF", value=True, key="t1_show_additional_materials")
+            t1_teacher_additional_detail = st.checkbox("Repeat Additional Materials details in each teacher profile", value=False, key="t1_teacher_additional_detail", disabled=not t1_show_additional, help="Off: teacher totals still appear, but dated details stay in the school consolidated pages only.")
             t1_show_ebooks = st.checkbox("Include E-Books Usage in PDF", value=True, key="t1_show_ebook_usage")
             if st.button("⚙️ Compile Tab 1 PDF Report", key="prep_pdf_tab1_btn"):
                 with st.spinner("Compiling PDF report..."):
@@ -3058,7 +3158,8 @@ else:
                         show_lesson_plan_report=t1_show_lp,
                         show_evidence_section=t1_show_evidence,
                 show_additional_materials=t1_show_additional,
-                show_ebook_usage=t1_show_ebooks
+                show_ebook_usage=t1_show_ebooks,
+                            teacher_additional_details=t1_teacher_additional_detail
                     ).getvalue()
                     st.session_state["tab1_pdf_ready"] = pdf_bytes
 
@@ -3188,7 +3289,9 @@ else:
 
         st.markdown(f"##### {t2_resource} — Source Usage Logs")
         resource_columns = ['Institution', 'FullName', 'Type', 'Book', 'Grade', 'Subject', 'StartTime', 'Duration_Min']
-        st.dataframe(lib_df[[c for c in resource_columns if c in lib_df.columns]], use_container_width=True)
+        shown_cols = [c for c in resource_columns if c in lib_df.columns and
+                      (c not in ('Book','Grade','Subject') or lib_df[c].fillna('').astype(str).str.strip().ne('').any())]
+        st.dataframe(lib_df[shown_cols], use_container_width=True)
         display_lib_table = lib_daily.rename(columns={'Institution': 'School', 'FullName': 'Teacher Name', 'Duration_Min': 'Minutes Logged'}).round({'Minutes Logged': 1})
         st.dataframe(display_lib_table, use_container_width=True)
 
@@ -3197,6 +3300,7 @@ else:
             t2_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t2_show_lp_section")
             t2_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t2_show_evidence_section")
             t2_show_additional = st.checkbox("Include Additional Materials Usage in PDF", value=True, key="t2_show_additional_materials")
+            t2_teacher_additional_detail = st.checkbox("Repeat Additional Materials details in each teacher profile", value=False, key="t2_teacher_additional_detail", disabled=not t2_show_additional, help="Off: teacher totals still appear, but dated details stay in the school consolidated pages only.")
             t2_show_ebooks = st.checkbox("Include E-Books Usage in PDF", value=True, key="t2_show_ebook_usage")
             if st.button("⚙️ Compile Tab 2 PDF Report", key="prep_pdf_tab2_btn"):
                 with st.spinner("Compiling selected usage modules into the PDF report..."):
@@ -3221,7 +3325,8 @@ else:
                         show_lesson_plan_report=t2_show_lp,
                         show_evidence_section=t2_show_evidence,
                 show_additional_materials=t2_show_additional,
-                show_ebook_usage=t2_show_ebooks
+                show_ebook_usage=t2_show_ebooks,
+                            teacher_additional_details=t2_teacher_additional_detail
                     ).getvalue()
                     st.session_state["tab2_pdf_ready"] = pdf_bytes
 
@@ -3389,6 +3494,7 @@ else:
                 t3_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t3_show_lp_section")
                 t3_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t3_show_evidence_section")
                 t3_show_additional = st.checkbox("Include Additional Materials Usage in PDF", value=True, key="t3_show_additional_materials")
+                t3_teacher_additional_detail = st.checkbox("Repeat Additional Materials details in each teacher profile", value=False, key="t3_teacher_additional_detail", disabled=not t3_show_additional, help="Off: teacher totals still appear, but dated details stay in the school consolidated pages only.")
                 t3_show_ebooks = st.checkbox("Include E-Books Usage in PDF", value=True, key="t3_show_ebook_usage")
                 if st.button("⚙️ Compile Tab 3 PDF Report", key="prep_pdf_tab3_btn"):
                     with st.spinner("Compiling Content PDF..."):
@@ -3413,7 +3519,8 @@ else:
                             show_lesson_plan_report=t3_show_lp,
                             show_evidence_section=t3_show_evidence,
                     show_additional_materials=t3_show_additional,
-                    show_ebook_usage=t3_show_ebooks
+                    show_ebook_usage=t3_show_ebooks,
+                    teacher_additional_details=t3_teacher_additional_detail
                         ).getvalue()
                         st.session_state["tab3_pdf_ready"] = pdf_t3
 
@@ -3462,10 +3569,11 @@ else:
         with t4_pcol1:
             t4_show_lp = st.checkbox("Include Lesson Plan section in PDF", value=True, key="t4_show_lp_section")
             t4_show_additional = st.checkbox("Include Additional Materials Usage in PDF", value=True, key="t4_show_additional_materials")
+            t4_teacher_additional_detail = st.checkbox("Repeat Additional Materials details in each teacher profile", value=False, key="t4_teacher_additional_detail", disabled=not t4_show_additional, help="Off: teacher totals still appear, but dated details stay in the school consolidated pages only.")
         with t4_pcol2:
             t4_show_evidence = st.checkbox("Include Classroom Activity Evidence in PDF", value=True, key="t4_show_evidence_section")
             t4_show_ebooks = st.checkbox("Include E-Books Usage in PDF", value=True, key="t4_show_ebook_usage")
-        st.caption("Book/Content is always included. The other four sections can be selected independently; this affects PDFs only.")
+        st.caption("Book/Content is always included. Additional Materials has a school-wide dated detail table. Teacher totals remain visible; repeating the dated detail inside profiles is optional.")
 
         calc_ld_kpi_t4 = calculate_kpi_target(daily_ld_target_t4, selected_num_days, enable_quant_kpi_t4)
         calc_content_kpi_t4 = calculate_kpi_target(daily_content_target_t4, selected_num_days, enable_quant_kpi_t4)
@@ -3499,8 +3607,7 @@ else:
             t_day_additional = duration_sum(teacher_additional)
             t_day_ebook = duration_sum(teacher_ebooks)
 
-            t_books_raw = teacher_date_data[teacher_date_data['Book'].str.len() > 0]
-            teacher_books = resource_usage_detail(t_books_raw, "book")
+            teacher_books = resource_usage_detail(teacher_date_data, "book")
             t_day_content = teacher_books['Duration_Min'].sum() if not teacher_books.empty else 0.0
 
             t_eligible_days = teacher_days.get((teacher_school, target_teacher), selected_num_days) if use_teacher_eligible_days else selected_num_days
@@ -3563,7 +3670,8 @@ else:
                             show_lesson_plan_report=t4_show_lp,
                             show_evidence_section=t4_show_evidence,
                             show_additional_materials=t4_show_additional,
-                            show_ebook_usage=t4_show_ebooks
+                            show_ebook_usage=t4_show_ebooks,
+                            teacher_additional_details=t4_teacher_additional_detail
                         ).getvalue()
                         st.session_state[f"pdf_360_{teacher_school}_{target_teacher}"] = single_pdf
 
@@ -3606,7 +3714,8 @@ else:
                             show_lesson_plan_report=t4_show_lp,
                             show_evidence_section=t4_show_evidence,
                             show_additional_materials=t4_show_additional,
-                            show_ebook_usage=t4_show_ebooks
+                            show_ebook_usage=t4_show_ebooks,
+                            teacher_additional_details=t4_teacher_additional_detail
                         ).getvalue()
                         st.session_state[f"bulk_pdf_{teacher_school}"] = bulk_pdf
 
@@ -3717,7 +3826,9 @@ else:
                 if resource_frame.empty:
                     st.info(f"No {resource_name.lower()} activity recorded for {target_teacher} within this review window.")
                 else:
-                    st.dataframe(resource_frame[[c for c in resource_fields if c in resource_frame]], use_container_width=True)
+                    shown_fields = [c for c in resource_fields if c in resource_frame and
+                                    (c not in ('Book','Grade','Subject') or resource_frame[c].fillna('').astype(str).str.strip().ne('').any())]
+                    st.dataframe(resource_frame[shown_fields], use_container_width=True)
                     st.caption(f"Total {resource_name}: {resource_minutes:.1f} minutes over {len(resource_frame)} usage events.")
 
             with st.expander("Classroom observations for this teacher"):
@@ -3808,8 +3919,7 @@ else:
 
             ld_m = sch_data[usage_masks(sch_data)[0]].groupby('FullName')['Duration_Min'].sum().to_dict()
             
-            sch_content_raw = sch_data[sch_data['Book'].str.len() > 0]
-            sch_content_df = resource_usage_detail(sch_content_raw, "book")
+            sch_content_df = resource_usage_detail(sch_data, "book")
             content_m = sch_content_df.groupby('FullName')['Duration_Min'].sum().to_dict()
 
             met_ld = 0
@@ -3865,7 +3975,8 @@ else:
                         show_lesson_plan_report=t4_show_lp,
                         show_evidence_section=t4_show_evidence,
                         show_additional_materials=t4_show_additional,
-                        show_ebook_usage=t4_show_ebooks
+                        show_ebook_usage=t4_show_ebooks,
+                            teacher_additional_details=t4_teacher_additional_detail
                     )
                     hosted_school_pdf_url = upload_pdf_to_supabase(school_pdf_buf, teacher_school)
                     st.session_state[f"hosted_pdf_url_{teacher_school}"] = hosted_school_pdf_url
