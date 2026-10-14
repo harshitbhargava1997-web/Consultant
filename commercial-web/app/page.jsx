@@ -3,7 +3,8 @@ import {useEffect,useMemo,useState} from "react";
 import {browserClient,LEVELS,RATINGS,MANAGERS,skillProgress,parseCsv} from "../lib/supabase";
 import BulkWorkspace from "./BulkWorkspace";
 import AssessorWorkspace from "./AssessorWorkspace";
-import PhonicsSoundPicker,{usePhonicsCatalog,soundDetailPayload,soundLabel} from "./PhonicsSoundPicker";
+import PhonicsSoundPicker,{usePhonicsCatalog,soundDetailPayload} from "./PhonicsSoundPicker";
+import TeacherReviewHistory from "./TeacherReviewHistory";
 import RolePermissions from "./RolePermissions";
 import SchoolManagementWorkspace from "./SchoolManagementWorkspace";
 import TrainingWorkspace from "./TrainingWorkspace";
@@ -400,7 +401,12 @@ export default function Home(){
   <PhonicsSoundPicker items={phonicsByCompetency[c.id]} value={teacherSoundRatings[c.id]||{}}
    onChange={val=>setTeacherSoundRatings(prev=>({...prev,[c.id]:val}))}
    disabled={busy} personLabel="teacher"/>}
- </div>):<Empty title="No published competencies" detail="Publish competency records before assessing learners."/>}<label>Observations and recommended intervention<textarea value={ratingNotes} onChange={e=>setRatingNotes(e.target.value)} rows={3}/></label><Btn kind="primary" type="submit" disabled={busy||!can("teacher_reviews.create")||!assessmentTarget||!criterionList.length}>Save assessment <ArrowRight size={16}/></Btn></form>}</Box>}
+ </div>):<Empty title="No published competencies" detail="Publish competency records before assessing learners."/>}<label>Observations and recommended intervention<textarea value={ratingNotes} onChange={e=>setRatingNotes(e.target.value)} rows={3}/></label><Btn kind="primary" type="submit" disabled={busy||!can("teacher_reviews.create")||!assessmentTarget||!criterionList.length}>Save assessment <ArrowRight size={16}/></Btn></form>}
+ {phonicsError&&<p className="notice" role="status">{phonicsError}</p>}
+ <TeacherReviewHistory client={client} schoolId={schoolId}
+  classId={classObj?.id} teacherId={assessmentSubject==="teacher"?assessmentTarget:""}
+  itemById={phonicsById} version={assessments.length}/>
+ </Box>}
  {page==="competencies"&&schoolId&&can("competencies.edit")&&<CurriculumEditor competencies={competencies} session={session} onSaved={refresh}/>}
  {page==="competencies"&&schoolId&&(can("competencies.view")||can("competencies.edit"))&&<Box title="Published literacy progression"><div className="level-grid">{LEVELS.map(l=><div key={l} className="level"><strong>{l}</strong><span>{competencies.filter(c=>c.active&&c.grade===l).length} competencies</span></div>)}</div><div className="rows">{competencies.filter(c=>c.active).sort((a,b)=>formatGrade(a.grade)-formatGrade(b.grade)||a.sequence-b.sequence).map(c=><div key={c.id} className="record"><BookOpen size={16}/><strong>{c.title}</strong><small>{c.grade}</small></div>)}</div><div className="helper">Only the Platform Super Admin can create, edit or publish competencies. Consultants and school stakeholders can view published learning progressions.</div></Box>}
  {page==="reports"&&schoolId&&can("reports.view")&&<Box title="Individual literacy progression"><label>Student<select value={reportStudent} onChange={e=>loadReport(e.target.value)}><option value="">Select student</option>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).map(s=><option key={s.id} value={s.id}>{s.student_name}</option>)}</select></label>{reportData&&<><div className="stats report-stats"><div className="stat"><span>Enrolled grade</span><strong>{reportData.cls?.grade}</strong></div><div className="stat"><span>Demonstrated level</span><strong>{reportData.progress.highest||"Not established"}</strong></div></div><div className="rows">{reportData.progress.byLevel.map(l=><div key={l.level} className="progress-row"><strong>{l.level}</strong><div className="progress-bar"><span style={{width:l.independence+"%"}}/></div><small>{l.assessed}/{l.count} assessed · {l.independence}% independent</small></div>)}</div><p className="helper">Provisional threshold: 80% assessed and 80% independent at each consecutive level. This is a screening indicator, not a diagnosis.</p><TrainingImpactPanel session={session} schoolId={schoolId}
