@@ -3,8 +3,7 @@ import {useEffect,useMemo,useState} from "react";
 import {browserClient,LEVELS,RATINGS,MANAGERS,skillProgress,parseCsv} from "../lib/supabase";
 import BulkWorkspace from "./BulkWorkspace";
 import AssessorWorkspace from "./AssessorWorkspace";
-import PhonicsSoundPicker,{usePhonicsCatalog,soundDetailPayload} from "./PhonicsSoundPicker";
-import TeacherReviewHistory from "./TeacherReviewHistory";
+import TeacherSkillsReview from "./TeacherSkillsReview";
 import RolePermissions from "./RolePermissions";
 import SchoolManagementWorkspace from "./SchoolManagementWorkspace";
 import TrainingWorkspace from "./TrainingWorkspace";
@@ -390,23 +389,10 @@ export default function Home(){
   client={client} session={session} schoolId={schoolId} classes={visibleClasses}
   students={students} competencies={competencies} canCreate={can("assessments.create")} canViewHistory={can("assessments.view")}
   canUploadEvidence={can("assessments.evidence.upload")} canViewEvidence={can("assessments.evidence.view")} onSaved={refresh}/>}
- {page==="teacher-review"&&schoolId&&can("teacher_reviews.create")&&<Box title="Existing teacher / competency review">{!visibleClasses.length?<Empty title="No classes assigned" detail="Create classes or assign a teacher to begin."/>:<form onSubmit={submitAssessment} className="stack"><div className="three-col"><label>Class<select value={classObj?.id||""} onChange={e=>setActiveClass(e.target.value)}>{visibleClasses.map(c=><option value={c.id} key={c.id}>{c.grade} · {c.section}</option>)}</select></label><label>Assessment type<select value={assessmentSubject} onChange={e=>setAssessmentSubject(e.target.value)}><option value="teacher">Teacher</option>}</select></label><label>Teacher<select required value={assessmentTarget} onChange={e=>setAssessmentTarget(e.target.value)}><option value="">Select person</option>{targets.filter(()=>assessmentSubject==="teacher").map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label></div><div className="skills-head"><h3>Competencies from Nursery to {grade}</h3><span>{criterionList.length} published skills</span></div>{criterionList.length?criterionList.map((c,i)=><div className="teacher-phonics-skill" key={c.id}>
- <div className="skill"><div><small>{c.grade} · {c.code}</small><strong>{c.title}</strong><p>{c.description}</p></div>
- <select aria-label={"Rating for "+c.title} value={ratingForm[c.id]||"Not Assessed"}
-  onChange={e=>{
-   setRatingForm({...ratingForm,[c.id]:e.target.value});
-   if(e.target.value==="Not Assessed")setTeacherSoundRatings(prev=>({...prev,[c.id]:{}}));
-  }}>{RATINGS.map(r=><option key={r}>{r}</option>)}</select></div>
- {ratingForm[c.id]&&ratingForm[c.id]!=="Not Assessed"&&(phonicsByCompetency[c.id]||[]).length>0&&
-  <PhonicsSoundPicker items={phonicsByCompetency[c.id]} value={teacherSoundRatings[c.id]||{}}
-   onChange={val=>setTeacherSoundRatings(prev=>({...prev,[c.id]:val}))}
-   disabled={busy} personLabel="teacher"/>}
- </div>):<Empty title="No published competencies" detail="Publish competency records before assessing learners."/>}<label>Observations and recommended intervention<textarea value={ratingNotes} onChange={e=>setRatingNotes(e.target.value)} rows={3}/></label><Btn kind="primary" type="submit" disabled={busy||!can("teacher_reviews.create")||!assessmentTarget||!criterionList.length}>Save assessment <ArrowRight size={16}/></Btn></form>}
- {phonicsError&&<p className="notice" role="status">{phonicsError}</p>}
- <TeacherReviewHistory client={client} schoolId={schoolId}
-  classId={classObj?.id} teacherId={assessmentSubject==="teacher"?assessmentTarget:""}
-  itemById={phonicsById} version={assessments.length}/>
- </Box>}
+ {page==="teacher-review"&&schoolId&&can("teacher_reviews.create")&&
+  <TeacherSkillsReview client={client} schoolId={schoolId}
+   classes={visibleClasses} members={members} teacherClasses={teacherClasses}
+   competencies={competencies} onSaved={refresh}/>}
  {page==="competencies"&&schoolId&&can("competencies.edit")&&<CurriculumEditor competencies={competencies} session={session} onSaved={refresh}/>}
  {page==="competencies"&&schoolId&&(can("competencies.view")||can("competencies.edit"))&&<Box title="Published literacy progression"><div className="level-grid">{LEVELS.map(l=><div key={l} className="level"><strong>{l}</strong><span>{competencies.filter(c=>c.active&&c.grade===l).length} competencies</span></div>)}</div><div className="rows">{competencies.filter(c=>c.active).sort((a,b)=>formatGrade(a.grade)-formatGrade(b.grade)||a.sequence-b.sequence).map(c=><div key={c.id} className="record"><BookOpen size={16}/><strong>{c.title}</strong><small>{c.grade}</small></div>)}</div><div className="helper">Only the Platform Super Admin can create, edit or publish competencies. Consultants and school stakeholders can view published learning progressions.</div></Box>}
  {page==="reports"&&schoolId&&can("reports.view")&&<Box title="Individual literacy progression"><label>Student<select value={reportStudent} onChange={e=>loadReport(e.target.value)}><option value="">Select student</option>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).map(s=><option key={s.id} value={s.id}>{s.student_name}</option>)}</select></label>{reportData&&<><div className="stats report-stats"><div className="stat"><span>Enrolled grade</span><strong>{reportData.cls?.grade}</strong></div><div className="stat"><span>Demonstrated level</span><strong>{reportData.progress.highest||"Not established"}</strong></div></div><div className="rows">{reportData.progress.byLevel.map(l=><div key={l.level} className="progress-row"><strong>{l.level}</strong><div className="progress-bar"><span style={{width:l.independence+"%"}}/></div><small>{l.assessed}/{l.count} assessed · {l.independence}% independent</small></div>)}</div><p className="helper">Provisional threshold: 80% assessed and 80% independent at each consecutive level. This is a screening indicator, not a diagnosis.</p><TrainingImpactPanel session={session} schoolId={schoolId}
