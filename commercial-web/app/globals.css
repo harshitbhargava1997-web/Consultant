@@ -384,3 +384,29 @@
 .assessor-upload-evidence{display:flex;flex-direction:column;align-items:flex-start;gap:8px;font-size:11px;color:#45626a;border-top:1px solid #e7eeeb;padding-top:8px}
 .assessor-upload-evidence input{font-size:11px;max-width:100%}
 @media(max-width:750px){.implementation-competency-options{grid-template-columns:1fr}}
+
+
+/* Read-only, openly discoverable phonics assessment structure */
+.assessment-structure{display:flex;flex-direction:column;gap:18px}
+.assessment-structure>.panel{margin:0}
+.assessment-structure .panel-head h2{display:flex;align-items:center;gap:9px}
+.assessment-structure-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;margin:17px 0}
+.assessment-structure-stats>div{display:flex;flex-direction:column;gap:8px;background:#f3faf8;border:1px solid #dfeae6;border-radius:10px;padding:15px}
+.assessment-structure-stats small{color:#5d777c;font-size:11px}
+.assessment-structure-stats strong{font-size:23px;color:#175d56;font-weight:760}
+.assessment-structure-actions{display:flex;flex-wrap:wrap;gap:10px;margin:15px 0}
+.assessment-structure-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:15px}
+.assessment-structure-items{display:grid;grid-template-columns:repeat(auto-fit,minmax(265px,1fr));gap:10px;margin:15px 0}
+.assessment-structure-item{display:flex;align-items:flex-start;gap:13px;padding:12px;background:#fcfefd;border:1px solid #e3edeb;border-radius:10px;min-width:0}
+.assessment-structure-grapheme{display:flex;align-items:center;justify-content:center;min-width:55px;max-width:75px;min-height:53px;border-radius:9px;background:#eaf5f2;color:#146d65;font-size:21px;font-weight:780;word-break:break-all;padding:5px}
+.assessment-structure-item>div{display:flex;flex:1;flex-direction:column;gap:5px;min-width:0}
+.assessment-structure-item strong{font-size:12px;color:#2b4d57}
+.assessment-structure-item small{font-size:11px;line-height:1.5;color:#647c84}
+@media(max-width:700px){
+ .assessment-structure-stats{gap:6px}
+ .assessment-structure-stats>div{padding:10px}
+ .assessment-structure-stats strong{font-size:18px}
+ .assessment-structure-filters{grid-template-columns:1fr}
+ .assessment-structure-items{grid-template-columns:1fr}
+ .assessment-structure-actions>.btn{width:100%}
+}
