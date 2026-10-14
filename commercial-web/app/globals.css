@@ -510,3 +510,15 @@
  .progress-course-row{flex-direction:column}
  .progress-course-row>span{text-align:left}
 }
+
+
+/* Linked, student-specific assessment evidence in progress reporting */
+.student-media-report{margin:20px 0;border-top:1px solid #e2e9e7;padding-top:16px}
+.student-media-report .panel-head h2{display:flex;gap:8px;align-items:center;font-size:16px}
+.student-media-items{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin:13px 0}
+.student-media-item{display:flex;flex-direction:column;gap:9px;padding:12px;border:1px solid #e1ebe8;background:#fff;border-radius:10px}
+.student-media-item strong{font-size:12px;color:#345863}
+.student-media-item strong small{color:#6f858a;font-weight:500}
+.student-media-item img,.student-media-item video{width:100%;height:auto;max-height:200px;object-fit:contain;border-radius:8px;background:#f5faf9}
+.student-media-item>a{font-size:11px;color:#126f68;display:flex;align-items:center;gap:6px;overflow-wrap:anywhere}
+.student-media-item>small{font-size:10px;color:#6c7c84}
