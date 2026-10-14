@@ -4,6 +4,7 @@ import {useEffect,useMemo,useState} from "react";
 import {BookOpen,CalendarDays,CheckCircle2,ClipboardCheck,Clock3,GraduationCap,RotateCcw,Search,TrendingUp} from "lucide-react";
 import {LEVELS,RATINGS,skillProgress} from "../lib/supabase";
 import PhonicsSoundPicker,{PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload,soundLabel} from "./PhonicsSoundPicker";
+import SoundProgressPanel from "./SoundProgressPanel";
 
 const STAGES=[
  {value:"baseline",name:"Baseline",detail:"Starting-point evidence"},
@@ -259,6 +260,9 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
   </section>
   {chosenStudent&&<>
    {canViewHistory&&<ProgressSummary skills={availableSkills} previous={previous} student={chosenGrade}/>}
+   {canViewHistory&&<SoundProgressPanel sessions={sessions} soundRows={soundHistory}
+    competencies={competencies} itemById={phonicsById} subjectLabel="student"
+    title="Student sound-by-sound progress"/>}
    {canCreate&&<section className="panel assessor-panel">
     <div className="panel-head"><h2><ClipboardCheck size={18}/> Assess observable learning</h2>
      <span className="eyebrow">{selectedCount} NEW RATINGS</span></div>
