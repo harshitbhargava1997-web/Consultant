@@ -10,6 +10,7 @@ import SchoolManagementWorkspace from "./SchoolManagementWorkspace";
 import TrainingWorkspace from "./TrainingWorkspace";
 import TrainingImpactPanel from "./TrainingImpactPanel";
 import StudentSoundReport from "./StudentSoundReport";
+import StudentAssessmentEvidence from "./StudentAssessmentEvidence";
 import TeacherSchoolReports from "./TeacherSchoolReports";
 import ImplementationWorkspace from "./ImplementationWorkspace";
 import CurriculumEditor from "./CurriculumEditor";
@@ -403,6 +404,9 @@ export default function Home(){
  {page==="reports"&&schoolId&&can("reports.view")&&reportsTab==="student"&&<Box title="Individual literacy progression"><label>Student<select value={reportStudent} onChange={e=>loadReport(e.target.value)}><option value="">Select student</option>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).map(s=><option key={s.id} value={s.id}>{s.student_name}</option>)}</select></label>{reportData&&<><div className="stats report-stats"><div className="stat"><span>Enrolled grade</span><strong>{reportData.cls?.grade}</strong></div><div className="stat"><span>Demonstrated level</span><strong>{reportData.progress.highest||"Not established"}</strong></div></div><div className="rows">{reportData.progress.byLevel.map(l=><div key={l.level} className="progress-row"><strong>{l.level}</strong><div className="progress-bar"><span style={{width:l.independence+"%"}}/></div><small>{l.assessed}/{l.count} assessed · {l.independence}% independent</small></div>)}</div><p className="helper">Provisional threshold: 80% assessed and 80% independent at each consecutive level. This is a screening indicator, not a diagnosis.</p><StudentSoundReport client={client} schoolId={schoolId}
    student={students.find(row=>row.id===reportStudent)} competencies={competencies}
    enabled={can("assessments.view")}/>
+   {can("assessments.evidence.view")&&<StudentAssessmentEvidence
+    session={session} schoolId={schoolId} studentId={reportStudent}
+    competencies={competencies}/>}
    <TrainingImpactPanel session={session} schoolId={schoolId}
    studentId={reportStudent} enabled={!!reportStudent}/></>}</Box>}
  {page==="reports"&&schoolId&&can("reports.view")&&(identity.admin||isManager)&&
