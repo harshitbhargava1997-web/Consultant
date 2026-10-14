@@ -1,6 +1,6 @@
 "use client";
 import {useEffect,useMemo,useState} from "react";
-import {Plus,Trash2} from "lucide-react";
+import {Plus,Trash2,Eye,ChevronDown} from "lucide-react";
 
 const SOUND_RATINGS=["Not Assessed","Emerging","Developing","Independent"];
 export function soundLabel(item){
@@ -40,6 +40,28 @@ export function usePhonicsCatalog(client){
 export function soundDetailPayload(value){
  return Object.entries(value||{}).filter(([,rating])=>rating!=="Not Assessed")
   .map(([item_id,rating])=>({item_id,rating}));
+}
+export function PhonicsStructurePreview({items=[],personLabel="learner"}){
+ const [open,setOpen]=useState(false);
+ if(!items.length)return null;
+ return <div className="phonics-structure-preview">
+  <button className="phonics-structure-toggle" type="button" aria-expanded={open}
+   onClick={()=>setOpen(value=>!value)}>
+   <Eye size={15}/>
+   <span>{open?"Hide":"Preview"} {items.length} linked sounds and patterns</span>
+   <ChevronDown size={15} className={open?"rotated":""}/>
+  </button>
+  {open&&<div className="phonics-structure-content">
+   <p className="helper">These are the published assessment items for this competency. This preview does not record a rating. To assess the {personLabel}, select an overall competency rating and then choose only the sounds actually observed.</p>
+   <div className="phonics-structure-grid">
+    {items.map(item=><div className="phonics-structure-entry" key={item.id}>
+     <strong>{item.grapheme} <span>{item.phoneme}</span></strong>
+     <small>Example: {item.example_word}</small>
+     {item.teaching_note&&<small>{item.teaching_note}</small>}
+    </div>)}
+   </div>
+  </div>}
+ </div>;
 }
 export default function PhonicsSoundPicker({items=[],value={},onChange,disabled=false,personLabel="learner"}){
  const [chosen,setChosen]=useState("");
