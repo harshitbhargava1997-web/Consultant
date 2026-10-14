@@ -54,10 +54,6 @@ export default function Home(){
  const [classForm,setClassForm]=useState({grade:"Nursery",section:"A",academic_year:"2026-27"});
  const [activeClass,setActiveClass]=useState(""),[studentName,setStudentName]=useState("");
  const [assessmentSubject,setAssessmentSubject]=useState("student"),[assessmentTarget,setAssessmentTarget]=useState(""),[ratingForm,setRatingForm]=useState({}),[ratingNotes,setRatingNotes]=useState("");
- const [teacherSoundRatings,setTeacherSoundRatings]=useState({});
- const [teacherSoundHistory,setTeacherSoundHistory]=useState([]);
- const [teacherReviewHistory,setTeacherReviewHistory]=useState([]);
- const {byCompetency:phonicsByCompetency,byId:phonicsById,error:phonicsError}=usePhonicsCatalog(client);
  const [reportStudent,setReportStudent]=useState(""),[reportData,setReportData]=useState(null);
  const [newPassword,setNewPassword]=useState("");
  const school=identity.schools.find(s=>s.id===schoolId);
@@ -289,21 +285,6 @@ export default function Home(){
    setBusy(true);for(let i=0;i<incoming.length;i+=100){const {error}=await client.from("literacy_students").upsert(incoming.slice(i,i+100),{onConflict:"class_id,admission_number"});if(error)throw error;}
    setMessage("Student roster imported. Export and retain independent IDs for future updates.");await refresh();
   }catch(err){setMessage(err.message);}finally{setBusy(false);e.target.value="";}
- }
- async function submitAssessment(e){
-  e.preventDefault();if(!can("teacher_reviews.create")||!assessmentTarget||!classObj)return;
-  const rows=Object.entries(ratingForm).filter(([,r])=>r!=="Not Assessed").map(([competency_id,rating])=>({
-   competency_id,rating,evidence_notes:"",sound_items:soundDetailPayload(teacherSoundRatings[competency_id])
-  }));
-  if(!rows.length){setMessage("Rate at least one competency.");return;}
-  const missing=rows.filter(x=>(phonicsByCompetency[x.competency_id]||[]).length>0&&!x.sound_items.length);
-  if(missing.length){setMessage("Select and rate specific sounds for: "+missing.map(x=>competencies.find(c=>c.id===x.competency_id)?.title||"Skill").join(", "));return;}
-  setBusy(true);setMessage("");
-  const {error}=await client.rpc("literacy_submit_detailed_assessment",{
-   p_school_id:schoolId,p_class_id:classObj.id,p_subject_type:assessmentSubject,p_subject_id:assessmentTarget,
-   p_assessment_date:new Date().toISOString().slice(0,10),p_stage:"periodic",p_notes:ratingNotes,p_next_action:"",p_results:rows
-  });
-  setBusy(false);if(error)setMessage(error.message);else{setMessage("Teacher assessment saved with individual sound details.");setRatingForm({});setTeacherSoundRatings({});setRatingNotes("");await refresh();}
  }
  async function loadReport(studentId){
   setReportStudent(studentId);setReportData(null);
