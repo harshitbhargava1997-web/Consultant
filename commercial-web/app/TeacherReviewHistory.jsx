@@ -2,7 +2,8 @@
 import {useEffect,useState} from "react";
 import {BookOpen,Clock3} from "lucide-react";
 import {soundLabel} from "./PhonicsSoundPicker";
-export default function TeacherReviewHistory({client,schoolId,classId,teacherId,itemById={},version=0}){
+import SoundProgressPanel from "./SoundProgressPanel";
+export default function TeacherReviewHistory({client,schoolId,classId,teacherId,itemById={},competencies=[],version=0}){
  const [history,setHistory]=useState([]),[soundRows,setSoundRows]=useState([]);
  const [error,setError]=useState(""),[loading,setLoading]=useState(false);
  useEffect(()=>{
@@ -31,6 +32,9 @@ export default function TeacherReviewHistory({client,schoolId,classId,teacherId,
   {loading&&<p className="helper">Loading previous teacher evaluations…</p>}
   {error&&<p className="notice" role="status">Teacher history unavailable: {error}</p>}
   {!loading&&!history.length&&<p className="helper">No previous teacher reviews for this class.</p>}
+  {!loading&&!error&&<SoundProgressPanel sessions={history} soundRows={soundRows}
+   itemById={itemById} competencies={competencies} subjectLabel="teacher"
+   title="Teacher phonics progression"/>}
   {history.map(record=>{
    const details=soundRows.filter(row=>row.assessment_id===record.id);
    return <div className="teacher-history-entry" key={record.id}>
