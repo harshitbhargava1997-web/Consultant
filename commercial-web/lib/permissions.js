@@ -21,7 +21,7 @@ export const PERMISSION_GROUPS=[
   {key:"assessments.evidence.upload",label:"Upload individual student competency photos/videos",description:"Attach media to saved student assessment sessions only within assigned schools and classes"},
   {key:"assessments.evidence.view",label:"View individual student competency media",description:"See photos and videos attached to permitted assessment sessions"},
   {key:"teacher_reviews.create",label:"Assess teacher competencies",description:"Within authorized school classes"},
-  {key:"reports.view",label:"View progress reports",description:"Individual student learning trends"},
+  {key:"reports.view",label:"View consolidated progress reports",description:"Students in assigned classes; authorized school leaders and Consultants additionally see teacher and school progress reports"},
   {key:"competencies.view",label:"View published competency library",description:"Read-only competency visibility"},
   {key:"competencies.edit",label:"Edit shared competencies",description:"High impact: changes the shared curriculum across all schools"}
  ]},
