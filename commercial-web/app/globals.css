@@ -465,3 +465,48 @@
  .sound-progress-record{align-items:flex-start}
  .sound-progress-rating{min-width:95px}
 }
+
+
+/* Consolidated Student, Teacher and School Progress Reports */
+.progress-reports-navigation{margin-bottom:16px}
+.progress-reports-navigation .panel-head h2,.progress-report-combined .panel-head h2{display:flex;align-items:center;gap:8px}
+.progress-report-combined{display:flex;flex-direction:column;gap:16px}
+.progress-report-combined .panel{margin-bottom:0}
+.progress-report-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.progress-report-toolbar>p{max-width:720px}
+.progress-report-toolbar .btn{flex-shrink:0}
+.progress-unified-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0}
+.progress-unified-stats>div{background:#f5faf9;border:1px solid #dfebe8;border-radius:10px;padding:13px;display:flex;flex-direction:column;gap:8px}
+.progress-unified-stats small{font-size:11px;color:#57737b;line-height:1.45}
+.progress-unified-stats strong{font-size:23px;color:#1e655f}
+.progress-unified-table{min-width:660px;width:100%}
+.progress-unified-table th,.progress-unified-table td{text-align:left;vertical-align:top;padding:9px 11px;font-size:11px;line-height:1.5}
+.progress-unified-table th{color:#415965;font-weight:700;background:#f5f9f8}
+.progress-unified-table td{border-top:1px solid #e8eeec}
+.progress-report-combined .table-wrap{width:100%;overflow:auto}
+.progress-teacher-directory{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px;max-height:420px;overflow:auto}
+.progress-teacher-choice{text-align:left;background:#fff;border:1px solid #dbe8e4;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:7px;cursor:pointer}
+.progress-teacher-choice:hover{background:#f0f9f6;border-color:#91b9ae}
+.progress-teacher-choice strong{font-size:12px;color:#245458}
+.progress-teacher-choice small{font-size:11px;line-height:1.5;color:#657980}
+.progress-teacher-detail{display:flex;flex-direction:column;gap:14px}
+.progress-course-list,.progress-implementation-list{display:flex;flex-direction:column;gap:10px}
+.progress-course-row,.progress-implementation-list>div{border:1px solid #e0eae7;border-radius:9px;padding:12px;background:#fff}
+.progress-course-row{display:flex;justify-content:space-between;gap:14px}
+.progress-course-row>div{display:flex;flex-direction:column;gap:6px}
+.progress-course-row strong,.progress-report-line strong{font-size:12px;color:#2a525e}
+.progress-course-row small,.progress-report-line small{font-size:11px;color:#627b83}
+.progress-course-row>span{font-size:11px;color:#216d61;text-align:right}
+.progress-small-stats{display:flex;flex-wrap:wrap;gap:9px;margin:12px 0}
+.progress-small-stats>span{font-size:11px;color:#49646c;padding:8px 10px;background:#edf7f4;border-radius:7px}
+.progress-report-line{display:flex;flex-direction:column;gap:5px;margin-bottom:8px}
+.progress-implementation-list>div>small{font-size:10px;color:#60757e}
+.progress-teacher-ratings>p{font-size:12px;color:#45616b}
+@media(max-width:740px){
+ .progress-unified-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .progress-unified-stats>div{padding:10px}
+ .progress-unified-stats strong{font-size:19px}
+ .progress-report-toolbar{flex-direction:column}
+ .progress-course-row{flex-direction:column}
+ .progress-course-row>span{text-align:left}
+}
