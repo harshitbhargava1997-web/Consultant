@@ -2,7 +2,7 @@
 import {useMemo,useState} from "react";
 import {BookOpen,Filter,Search,Volume2,GraduationCap} from "lucide-react";
 import {LEVELS} from "../lib/supabase";
-import {usePhonicsCatalog,soundLabel} from "./PhonicsSoundPicker";
+import {usePhonicsCatalog} from "./PhonicsSoundPicker";
 const familyNames={
  letter:"A–Z letter sounds",vc:"VC blending",cvc:"CVC blending",
  "consonant-digraph":"Consonant digraphs","vowel-digraph":"Vowel digraphs",
@@ -13,7 +13,7 @@ const familyNames={
  "closed-syllable":"Closed syllables","word-pattern":"Word patterns"
 };
 function cap(s){return familyNames[s]||s?.replace(/-/g," ")||"Phonics";}
-export default function AssessmentStructure({client,competencies=[],onNavigate}){
+export default function AssessmentStructure({client,competencies=[],onNavigate,canStudentAssess=false,canTeacherReview=false}){
  const {byCompetency,byId,error}=usePhonicsCatalog(client);
  const [grade,setGrade]=useState("all"),[family,setFamily]=useState("all"),[search,setSearch]=useState("");
  const [showAll,setShowAll]=useState(false);
@@ -39,12 +39,12 @@ export default function AssessmentStructure({client,competencies=[],onNavigate})
     <div><small>Phonics families</small><strong>{families.length}</strong></div>
    </div>
    <div className="assessment-structure-actions">
-    <button type="button" className="btn primary" onClick={()=>onNavigate("assess")}>
+    {canStudentAssess&&<button type="button" className="btn primary" onClick={()=>onNavigate("assess")}>
      <GraduationCap size={16}/> Assess a student
-    </button>
-    <button type="button" className="btn outline" onClick={()=>onNavigate("teacher-review")}>
+    </button>}
+    {canTeacherReview&&<button type="button" className="btn outline" onClick={()=>onNavigate("teacher-review")}>
      <BookOpen size={16}/> Review a teacher's skills
-    </button>
+    </button>}
    </div>
    <p className="helper">To rate an individual sound: choose a class and student or teacher, rate a linked overall competency, then use <strong>Specific sounds and patterns observed → Choose a sound → Add</strong>. This keeps unobserved sounds unrated.</p>
   </section>
