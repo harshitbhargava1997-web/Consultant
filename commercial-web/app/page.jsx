@@ -10,6 +10,7 @@ import SchoolManagementWorkspace from "./SchoolManagementWorkspace";
 import TrainingWorkspace from "./TrainingWorkspace";
 import TrainingImpactPanel from "./TrainingImpactPanel";
 import StudentSoundReport from "./StudentSoundReport";
+import TeacherSchoolReports from "./TeacherSchoolReports";
 import ImplementationWorkspace from "./ImplementationWorkspace";
 import CurriculumEditor from "./CurriculumEditor";
 import ConsultantWorkspace,{ConsultantManagement} from "./ConsultantWorkspace";
@@ -58,6 +59,7 @@ export default function Home(){
  const [activeClass,setActiveClass]=useState(""),[studentName,setStudentName]=useState("");
  const [assessmentSubject,setAssessmentSubject]=useState("student"),[assessmentTarget,setAssessmentTarget]=useState(""),[ratingForm,setRatingForm]=useState({}),[ratingNotes,setRatingNotes]=useState("");
  const [reportStudent,setReportStudent]=useState(""),[reportData,setReportData]=useState(null);
+ const [reportsTab,setReportsTab]=useState("student");
  const [newPassword,setNewPassword]=useState("");
  const school=identity.schools.find(s=>s.id===schoolId);
  const membership=identity.memberships.find(m=>m.school_id===schoolId);
@@ -385,11 +387,28 @@ export default function Home(){
    competencies={competencies} onSaved={refresh}/>}
  {page==="competencies"&&schoolId&&can("competencies.edit")&&<CurriculumEditor competencies={competencies} session={session} onSaved={refresh}/>}
  {page==="competencies"&&schoolId&&(can("competencies.view")||can("competencies.edit"))&&<Box title="Published literacy progression"><div className="level-grid">{LEVELS.map(l=><div key={l} className="level"><strong>{l}</strong><span>{competencies.filter(c=>c.active&&c.grade===l).length} competencies</span></div>)}</div><div className="rows">{competencies.filter(c=>c.active).sort((a,b)=>formatGrade(a.grade)-formatGrade(b.grade)||a.sequence-b.sequence).map(c=><div key={c.id} className="record"><BookOpen size={16}/><strong>{c.title}</strong><small>{c.grade}</small></div>)}</div><div className="helper">Only the Platform Super Admin can create, edit or publish competencies. Consultants and school stakeholders can view published learning progressions.</div></Box>}
- {page==="reports"&&schoolId&&can("reports.view")&&<Box title="Individual literacy progression"><label>Student<select value={reportStudent} onChange={e=>loadReport(e.target.value)}><option value="">Select student</option>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).map(s=><option key={s.id} value={s.id}>{s.student_name}</option>)}</select></label>{reportData&&<><div className="stats report-stats"><div className="stat"><span>Enrolled grade</span><strong>{reportData.cls?.grade}</strong></div><div className="stat"><span>Demonstrated level</span><strong>{reportData.progress.highest||"Not established"}</strong></div></div><div className="rows">{reportData.progress.byLevel.map(l=><div key={l.level} className="progress-row"><strong>{l.level}</strong><div className="progress-bar"><span style={{width:l.independence+"%"}}/></div><small>{l.assessed}/{l.count} assessed · {l.independence}% independent</small></div>)}</div><p className="helper">Provisional threshold: 80% assessed and 80% independent at each consecutive level. This is a screening indicator, not a diagnosis.</p><StudentSoundReport client={client} schoolId={schoolId}
+ {page==="reports"&&schoolId&&can("reports.view")&&<section className="panel progress-reports-navigation">
+  <div className="panel-head"><h2><ChartNoAxesCombined size={19}/> Consolidated Progress Reports</h2>
+   <span className="eyebrow">STUDENT · TEACHER · SCHOOL</span></div>
+  <p className="helper">Review learner competencies, teacher development and school implementation using the records already captured in Vision. Only permitted sections are available for your role and assigned school.</p>
+  <div className="management-tabs" role="group" aria-label="Progress report type">
+   <button type="button" className={"management-tab "+(reportsTab==="student"?"active":"")}
+    aria-pressed={reportsTab==="student"} onClick={()=>setReportsTab("student")}>Student Progress</button>
+   {(identity.admin||isManager)&&<button type="button" className={"management-tab "+(reportsTab==="teacher"?"active":"")}
+    aria-pressed={reportsTab==="teacher"} onClick={()=>setReportsTab("teacher")}>Teacher Progress</button>}
+   {(identity.admin||isManager)&&<button type="button" className={"management-tab "+(reportsTab==="school"?"active":"")}
+    aria-pressed={reportsTab==="school"} onClick={()=>setReportsTab("school")}>School Progress</button>}
+  </div>
+ </section>}
+ {page==="reports"&&schoolId&&can("reports.view")&&reportsTab==="student"&&<Box title="Individual literacy progression"><label>Student<select value={reportStudent} onChange={e=>loadReport(e.target.value)}><option value="">Select student</option>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).map(s=><option key={s.id} value={s.id}>{s.student_name}</option>)}</select></label>{reportData&&<><div className="stats report-stats"><div className="stat"><span>Enrolled grade</span><strong>{reportData.cls?.grade}</strong></div><div className="stat"><span>Demonstrated level</span><strong>{reportData.progress.highest||"Not established"}</strong></div></div><div className="rows">{reportData.progress.byLevel.map(l=><div key={l.level} className="progress-row"><strong>{l.level}</strong><div className="progress-bar"><span style={{width:l.independence+"%"}}/></div><small>{l.assessed}/{l.count} assessed · {l.independence}% independent</small></div>)}</div><p className="helper">Provisional threshold: 80% assessed and 80% independent at each consecutive level. This is a screening indicator, not a diagnosis.</p><StudentSoundReport client={client} schoolId={schoolId}
    student={students.find(row=>row.id===reportStudent)} competencies={competencies}
    enabled={can("assessments.view")}/>
    <TrainingImpactPanel session={session} schoolId={schoolId}
    studentId={reportStudent} enabled={!!reportStudent}/></>}</Box>}
+ {page==="reports"&&schoolId&&can("reports.view")&&(identity.admin||isManager)&&
+  (reportsTab==="teacher"||reportsTab==="school")&&
+  <TeacherSchoolReports client={client} session={session} schoolId={schoolId}
+   mode={reportsTab} competencies={competencies}/>}
  {page==="implementation"&&schoolId&&
    (can("implementation.view")||can("implementation.submit")||can("implementation.review"))&&
    <ImplementationWorkspace client={client} session={session} schoolId={schoolId}
