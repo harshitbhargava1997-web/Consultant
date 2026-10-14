@@ -3,7 +3,7 @@
 import {useEffect,useMemo,useState} from "react";
 import {BookOpen,CalendarDays,CheckCircle2,ClipboardCheck,Clock3,GraduationCap,RotateCcw,Search,TrendingUp} from "lucide-react";
 import {LEVELS,RATINGS,skillProgress} from "../lib/supabase";
-import PhonicsSoundPicker,{usePhonicsCatalog,soundDetailPayload,soundLabel} from "./PhonicsSoundPicker";
+import PhonicsSoundPicker,{PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload,soundLabel} from "./PhonicsSoundPicker";
 
 const STAGES=[
  {value:"baseline",name:"Baseline",detail:"Starting-point evidence"},
@@ -298,6 +298,8 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
           aria-pressed={current===r} className={"assessor-rate "+(current===r?"assessor-selected":"")}>
           {r==="Not Assessed"?"Not assessed":RATE_LABELS[r]}</button>)}
         </div>
+        {current==="Not Assessed"&&(phonicsByCompetency[c.id]||[]).length>0&&
+         <PhonicsStructurePreview items={phonicsByCompetency[c.id]} personLabel="student"/>}
         {current!=="Not Assessed"&&(phonicsByCompetency[c.id]||[]).length>0&&<PhonicsSoundPicker
          items={phonicsByCompetency[c.id]} value={soundRatings[c.id]||{}}
          onChange={next=>setSoundRatings(prev=>({...prev,[c.id]:next}))}
