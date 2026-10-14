@@ -431,3 +431,37 @@
 .assessment-structure-action{font-size:11px;line-height:1.6;white-space:normal;color:#2f605b;margin:7px 0!important;padding:9px 11px;border-left:3px solid #6fb6a6;background:#f2faf7;border-radius:6px}
 .assessment-structure-action strong{font-size:11px;color:#1d5d58}
 @media(max-width:780px){.assessment-structure-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+
+/* Detailed phonics rating history and comparison */
+.sound-progress-panel{display:flex;flex-direction:column;gap:13px;padding:14px 0}
+.sound-progress-panel .panel-head{margin-bottom:0}
+.sound-progress-panel .panel-head h2{display:flex;align-items:center;gap:8px;font-size:16px}
+.sound-progress-totals{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.sound-progress-totals>div{border:1px solid #dbeae7;background:#f5faf8;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:7px}
+.sound-progress-totals small{font-size:10px;color:#667c80;line-height:1.5}
+.sound-progress-totals strong{font-size:21px;color:#1a5855}
+.sound-progress-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}
+.sound-progress-filters label{font-size:11px}
+.sound-progress-search{display:flex;align-items:center;gap:6px;border:1px solid #dbe6e4;background:#fff;border-radius:8px;padding-left:9px}
+.sound-progress-search input{border:0!important;min-width:0}
+.sound-progress-list{display:flex;flex-direction:column;gap:8px;max-height:550px;overflow:auto}
+.sound-progress-record{display:flex;gap:12px;align-items:center;justify-content:space-between;border:1px solid #e1ece9;background:#fff;border-radius:10px;padding:10px 12px}
+.sound-progress-name,.sound-progress-rating{display:flex;flex-direction:column;gap:5px}
+.sound-progress-name{flex:1;min-width:0}
+.sound-progress-name strong{font-size:13px;color:#244e54}
+.sound-progress-name strong span{font-weight:500;color:#16766f}
+.sound-progress-record small{font-size:10px;color:#658088;overflow-wrap:anywhere}
+.sound-progress-rating{align-items:flex-end;min-width:135px;text-align:right}
+.sound-progress-state{display:inline-flex;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:700}
+.sound-progress-state.emerging{background:#fff2eb;color:#a35732}
+.sound-progress-state.developing{background:#fff7e4;color:#976a25}
+.sound-progress-state.independent{background:#e5f5eb;color:#1c7657}
+.student-sound-report{margin:18px 0;border-top:1px solid #e4eeea;padding-top:16px}
+.teacher-sound-review-history .sound-progress-panel{margin:12px 0;border-bottom:1px solid #e6eeeb;padding-bottom:16px}
+@media(max-width:710px){
+ .sound-progress-totals{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .sound-progress-filters{grid-template-columns:1fr}
+ .sound-progress-record{align-items:flex-start}
+ .sound-progress-rating{min-width:95px}
+}
