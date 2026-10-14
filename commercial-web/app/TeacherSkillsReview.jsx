@@ -98,7 +98,7 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
    {message&&<p role="status" className="notice">{message}</p>}
    {catalogError&&<p role="status" className="notice">{catalogError}</p>}
    <TeacherReviewHistory client={client} schoolId={schoolId}
-    classId={activeClass?.id} teacherId={teacherId} itemById={byId} version={historyVersion}/>
+    classId={activeClass?.id} teacherId={teacherId} itemById={byId} competencies={competencies} version={historyVersion}/>
   </>}
  </section>;
 }
