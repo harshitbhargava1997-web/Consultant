@@ -4,7 +4,7 @@ import {Plus,Trash2,Eye,ChevronDown} from "lucide-react";
 
 const SOUND_RATINGS=["Not Assessed","Emerging","Developing","Independent"];
 export function soundLabel(item){
- return item.grapheme+" · "+item.phoneme+" · "+item.example_word;
+ return item.grapheme+" · "+item.phoneme+" · "+item.example_word+(item.action_name?" · "+item.action_name:"");
 }
 export function usePhonicsCatalog(client){
  const [data,setData]=useState({items:[],links:[]});
@@ -14,13 +14,16 @@ export function usePhonicsCatalog(client){
   let active=true;
   (async()=>{
    try{
-    const [items,mapping]=await Promise.all([
+    const [items,mapping,actions]=await Promise.all([
      client.from("literacy_phonics_items").select("id,code,family,grapheme,phoneme,example_word,teaching_note,sequence")
       .eq("active",true).order("sequence").limit(500),
-     client.from("literacy_competency_phonics_items").select("competency_id,item_id").limit(2000)
+     client.from("literacy_competency_phonics_items").select("competency_id,item_id").limit(2000),
+     client.from("literacy_phonics_actions").select("item_id,action_name,action_cue,age_band,origin_label,source_page").eq("active",true).limit(250)
     ]);
-    if(items.error||mapping.error)throw items.error||mapping.error;
-    if(active){setData({items:items.data||[],links:mapping.data||[]});setError("");}
+    if(items.error||mapping.error||actions.error)throw items.error||mapping.error||actions.error;
+    const actionById=Object.fromEntries((actions.data||[]).map(a=>[a.item_id,a]));
+    const enriched=(items.data||[]).map(item=>({...item,...(actionById[item.id]||{})}));
+    if(active){setData({items:enriched,links:mapping.data||[]});setError("");}
    }catch(e){if(active)setError("The detailed phonics library could not be loaded: "+e.message);}
   })();
   return()=>{active=false;};
@@ -58,6 +61,7 @@ export function PhonicsStructurePreview({items=[],personLabel="learner"}){
      <strong>{item.grapheme} <span>{item.phoneme}</span></strong>
      <small>Example: {item.example_word}</small>
      {item.teaching_note&&<small>{item.teaching_note}</small>}
+     {item.action_cue&&<small><strong>Action:</strong> {item.action_cue}</small>}
     </div>)}
    </div>
   </div>}
@@ -74,7 +78,7 @@ export default function PhonicsSoundPicker({items=[],value={},onChange,disabled=
    <strong>Specific sounds and patterns observed</strong>
    <small>{rated} sound item{rated===1?"":"s"} rated</small>
   </div>
-  <p className="helper">Select the exact sound, sound-action, blending example or letter pattern demonstrated by the {personLabel}. Different spellings and pronunciations are separate choices. Do not rate sounds that you have not observed.</p>
+  <p className="helper">Select only the sounds observed from the {personLabel}. For Nursery sound-action association, use the action cue below. Rate sound production and symbol recognition separately under their own competencies. Do not infer a skill that was not observed.</p>
   <div className="phonics-add-row">
    <select aria-label="Select sound or phonics pattern" disabled={disabled||!available.length}
     value={available.some(x=>x.id===chosen)?chosen:""}
@@ -91,6 +95,7 @@ export default function PhonicsSoundPicker({items=[],value={},onChange,disabled=
     <div className="phonics-item-label">
      <strong>{item.grapheme} <span>{item.phoneme}</span></strong>
      <small>Example: {item.example_word}{item.teaching_note?" · "+item.teaching_note:""}</small>
+     {item.action_cue&&<small className="phonics-action-cue"><strong>Action demonstration:</strong> {item.action_cue}</small>}
     </div>
     <select disabled={disabled} aria-label={"Sound observation rating for "+soundLabel(item)}
      value={value[item.id]||"Not Assessed"} onChange={e=>onChange({...value,[item.id]:e.target.value})}>
