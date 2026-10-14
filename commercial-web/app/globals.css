@@ -410,3 +410,17 @@
  .assessment-structure-items{grid-template-columns:1fr}
  .assessment-structure-actions>.btn{width:100%}
 }
+
+
+/* Preview individual phonics assessment structures before rating */
+.phonics-structure-preview{margin:10px 0 6px;border:1px solid #dbe9e7;border-radius:10px;background:#f7fbfa;overflow:hidden}
+.phonics-structure-toggle{width:100%;padding:12px 14px;display:flex;align-items:center;gap:9px;background:transparent;border:0;color:#196a66;font-size:12px;font-weight:700;text-align:left;cursor:pointer}
+.phonics-structure-toggle span{flex:1}
+.phonics-structure-toggle:hover{background:#edf7f5}
+.phonics-structure-toggle .rotated{transform:rotate(180deg)}
+.phonics-structure-content{padding:0 14px 14px}
+.phonics-structure-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;max-height:280px;overflow:auto}
+.phonics-structure-entry{display:flex;flex-direction:column;gap:5px;border:1px solid #e0ece8;background:#fff;border-radius:8px;padding:9px 11px}
+.phonics-structure-entry strong{font-size:12px;color:#253e4d;overflow-wrap:anywhere}
+.phonics-structure-entry strong span{font-weight:500;color:#0d7c76}
+.phonics-structure-entry small{font-size:10px;color:#617983;line-height:1.5}
