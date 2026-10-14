@@ -3,6 +3,7 @@
 import {useEffect,useMemo,useState} from "react";
 import {BookOpen,CalendarDays,CheckCircle2,ClipboardCheck,Clock3,GraduationCap,RotateCcw,Search,TrendingUp} from "lucide-react";
 import {LEVELS,RATINGS,skillProgress} from "../lib/supabase";
+import PhonicsSoundPicker,{usePhonicsCatalog,soundDetailPayload,soundLabel} from "./PhonicsSoundPicker";
 
 const STAGES=[
  {value:"baseline",name:"Baseline",detail:"Starting-point evidence"},
@@ -77,6 +78,9 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
  const [scope,setScope]=useState("cumulative"),[stage,setStage]=useState("baseline");
  const [assessmentDate,setAssessmentDate]=useState(localToday);
  const [ratings,setRatings]=useState({}),[evidence,setEvidence]=useState({});
+ const [soundRatings,setSoundRatings]=useState({});
+ const {byCompetency:phonicsByCompetency,byId:phonicsById,error:phonicsError}=usePhonicsCatalog(client);
+ const [soundHistory,setSoundHistory]=useState([]);
  const [observations,setObservations]=useState(""),[nextAction,setNextAction]=useState("");
  const [search,setSearch]=useState(""),[gradeFilter,setGradeFilter]=useState("all");
  const [saving,setSaving]=useState(false),[loadingHistory,setLoadingHistory]=useState(false);
@@ -106,13 +110,13 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
  const chosenGrade=chosenStudent?{...chosenStudent,grade:enrolledGrade}:null;
  const latest=sessions[0];
  useEffect(()=>{setClassId("");setStudentId("");setMessage("");setError("");setSearch("");setGradeFilter("all");},[schoolId]);
- useEffect(()=>{setStudentId("");setRatings({});setEvidence({});setObservations("");setNextAction("");
+ useEffect(()=>{setStudentId("");setRatings({});setEvidence({});setSoundRatings({});setObservations("");setNextAction("");
   setMessage("");setError("");setSearch("");setGradeFilter("all");},[activeClass?.id]);
- useEffect(()=>{setRatings({});setEvidence({});setObservations("");setNextAction("");setMessage("");setError("");
+ useEffect(()=>{setRatings({});setEvidence({});setSoundRatings({});setObservations("");setNextAction("");setMessage("");setError("");
   setExpanded("");},[studentId]);
  useEffect(()=>{
   if(!canViewHistory||!client||!activeClass?.id||!studentId||!eligibleStudents.some(s=>s.id===studentId)){
-   setSessions([]);setResults([]);setLoadingHistory(false);return;
+   setSessions([]);setResults([]);setSoundHistory([]);setLoadingHistory(false);return;
   }
   let alive=true;setLoadingHistory(true);setError("");
   (async()=>{
@@ -138,8 +142,12 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
       if(page===3)incomplete=true;
      }
     }
-    if(alive){setSessions(history);setResults(saved);setHistoryTruncated(incomplete);}
-   }catch(e){if(alive){setSessions([]);setResults([]);setError("Assessment history could not be loaded: "+e.message);}}
+    const {data:soundRows,error:soundError}=await client.rpc("literacy_get_assessment_phonics",{
+     p_school_id:schoolId,p_class_id:activeClass.id,p_subject_type:"student",p_subject_id:studentId
+    });
+    if(soundError)throw soundError;
+    if(alive){setSessions(history);setResults(saved);setSoundHistory(soundRows||[]);setHistoryTruncated(incomplete);}
+   }catch(e){if(alive){setSessions([]);setResults([]);setSoundHistory([]);setError("Assessment history could not be loaded: "+e.message);}}
    finally{if(alive)setLoadingHistory(false);}
   })();
   return()=>{alive=false;};
@@ -191,27 +199,35 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
  }
  function rate(id,rating){
   setRatings(previous=>({...previous,[id]:rating}));
-  if(rating==="Not Assessed")setEvidence(previous=>({...previous,[id]:""}));
+  if(rating==="Not Assessed"){setEvidence(previous=>({...previous,[id]:""}));setSoundRatings(previous=>({...previous,[id]:{}}));}
  }
  async function saveAssessment(e){
   e.preventDefault();setMessage("");setError("");
   if(!canCreate){setError("This role cannot submit assessments.");return;}
   if(!activeClass||!chosenStudent){setError("Select a class and student first.");return;}
   if(!selectedCount){setError("Rate at least one observed competency before saving.");return;}
+  const ratedSkills=Object.keys(ratings).filter(id=>ratings[id]!=="Not Assessed");
+  const withoutDetail=ratedSkills.filter(id=>(phonicsByCompetency[id]||[]).length>0&&
+   !soundDetailPayload(soundRatings[id]).length);
+  if(withoutDetail.length){
+   const names=withoutDetail.map(id=>competencies.find(c=>c.id===id)?.title||"Skill").slice(0,4);
+   setError("Select and rate at least one specific sound/pattern for: "+names.join(", "));return;
+  }
   if(assessmentDate>localToday()){setError("The assessment date cannot be in the future.");return;}
   if(!window.confirm("Save "+selectedCount+" competency ratings for "+chosenStudent.student_name+"? Recorded assessment sessions cannot be overwritten."))return;
   const payload=Object.entries(ratings).filter(([,v])=>v!=="Not Assessed"&&RATINGS.includes(v))
-   .map(([competency_id,rating])=>({competency_id,rating,evidence_notes:(evidence[competency_id]||"").trim()}));
+   .map(([competency_id,rating])=>({competency_id,rating,evidence_notes:(evidence[competency_id]||"").trim(),
+    sound_items:soundDetailPayload(soundRatings[competency_id])}));
   setSaving(true);
   try{
-   const {data,error:rpcError}=await client.rpc("literacy_submit_assessor_session",{
-    p_school_id:schoolId,p_class_id:activeClass.id,p_student_id:chosenStudent.id,
+   const {data,error:rpcError}=await client.rpc("literacy_submit_detailed_assessment",{
+    p_school_id:schoolId,p_class_id:activeClass.id,p_subject_type:"student",p_subject_id:chosenStudent.id,
     p_assessment_date:assessmentDate,p_stage:stage,p_notes:observations.trim(),
     p_next_action:nextAction.trim(),p_results:payload
    });
    if(rpcError)throw rpcError;
    if(!data)throw Error("The server returned no assessment ID.");
-   setRatings({});setEvidence({});setObservations("");setNextAction("");
+   setRatings({});setEvidence({});setSoundRatings({});setObservations("");setNextAction("");
    setExpanded(data);setHistoryVersion(v=>v+1);
    setStage("follow_up");setMessage("Assessment saved successfully. The completed session has been added to this student's history.");
    if(onSaved)await onSaved();
@@ -220,7 +236,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
  }
  function resetDraft(){
   if(selectedCount&&!window.confirm("Clear unsaved ratings and notes for this student?"))return;
-  setRatings({});setEvidence({});setObservations("");setNextAction("");setMessage("");setError("");
+  setRatings({});setEvidence({});setSoundRatings({});setObservations("");setNextAction("");setMessage("");setError("");
  }
  const missingGrade=availableGradeIndex>=0&&availableSkills.filter(c=>c.grade===enrolledGrade).length===0;
  return <div className="assessor-stack">
@@ -282,6 +298,10 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
           aria-pressed={current===r} className={"assessor-rate "+(current===r?"assessor-selected":"")}>
           {r==="Not Assessed"?"Not assessed":RATE_LABELS[r]}</button>)}
         </div>
+        {current!=="Not Assessed"&&(phonicsByCompetency[c.id]||[]).length>0&&<PhonicsSoundPicker
+         items={phonicsByCompetency[c.id]} value={soundRatings[c.id]||{}}
+         onChange={next=>setSoundRatings(prev=>({...prev,[c.id]:next}))}
+         disabled={saving} personLabel="student"/>}
         {current!=="Not Assessed"&&<label className="assessor-evidence">Observed evidence (optional)
           <input type="text" maxLength={500} value={evidence[c.id]||""} onChange={e=>setEvidence(old=>({...old,[c.id]:e.target.value}))}
            placeholder="e.g. independently blended 4 out of 5 words"/>
@@ -331,6 +351,12 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
               <small>{c?.grade||""}{r.evidence_notes?" · "+r.evidence_notes:""}</small></span>
              <em>{r.rating}</em>
             </div>
+            {soundHistory.some(s=>s.assessment_id===item.id&&s.competency_id===r.competency_id)&&
+             <div className="assessor-sound-history">
+              <strong>Specific sounds / patterns observed:</strong>
+              {soundHistory.filter(s=>s.assessment_id===item.id&&s.competency_id===r.competency_id)
+               .map(row=><span key={row.item_id}>{phonicsById[row.item_id]?soundLabel(phonicsById[row.item_id]):"Archived sound"} — {row.rating}</span>)}
+             </div>}
             {canViewEvidence&&attachments.length>0&&<div className="assessor-attached-media">
              {attachments.map(f=><div key={f.id}>
               {f.content_type.startsWith("image/")&&f.url&&<a href={f.url} target="_blank" rel="noopener noreferrer"><img loading="lazy" src={f.url} alt={f.file_name}/></a>}
@@ -356,6 +382,6 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
     {historyTruncated&&<p className="helper">Some older competency details exceed the recent-history limit. Use the student progress report for cumulative trends.</p>}
    </section>}
   </>}
-  {(error||message||mediaError)&&<div className={"notice assessor-feedback"} role="status">{mediaError||error||message}</div>}
+  {(error||message||mediaError||phonicsError)&&<div className={"notice assessor-feedback"} role="status">{mediaError||error||phonicsError||message}</div>}
  </div>;
 }
