@@ -2,7 +2,7 @@
 import {useEffect,useMemo,useState} from "react";
 import {ArrowRight,ClipboardCheck,GraduationCap} from "lucide-react";
 import {LEVELS,RATINGS} from "../lib/supabase";
-import PhonicsSoundPicker,{usePhonicsCatalog,soundDetailPayload} from "./PhonicsSoundPicker";
+import PhonicsSoundPicker,{PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload} from "./PhonicsSoundPicker";
 import TeacherReviewHistory from "./TeacherReviewHistory";
 
 export default function TeacherSkillsReview({client,schoolId,classes=[],members=[],teacherClasses=[],competencies=[],onSaved}){
@@ -80,6 +80,8 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
         setRatings(v=>({...v,[c.id]:e.target.value}));
         if(e.target.value==="Not Assessed")setSoundRatings(v=>({...v,[c.id]:{}}));
        }}>{RATINGS.map(r=><option key={r} value={r}>{r}</option>)}</select></div>
+     {(byCompetency[c.id]||[]).length>0&&(!ratings[c.id]||ratings[c.id]==="Not Assessed")&&
+      <PhonicsStructurePreview items={byCompetency[c.id]} personLabel="teacher"/>}
      {ratings[c.id]&&ratings[c.id]!=="Not Assessed"&&(byCompetency[c.id]||[]).length>0&&
       <PhonicsSoundPicker items={byCompetency[c.id]} value={soundRatings[c.id]||{}}
        onChange={value=>setSoundRatings(v=>({...v,[c.id]:value}))}
