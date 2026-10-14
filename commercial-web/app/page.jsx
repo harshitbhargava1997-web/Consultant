@@ -3,6 +3,7 @@ import {useEffect,useMemo,useState} from "react";
 import {browserClient,LEVELS,RATINGS,MANAGERS,skillProgress,parseCsv} from "../lib/supabase";
 import BulkWorkspace from "./BulkWorkspace";
 import AssessorWorkspace from "./AssessorWorkspace";
+import AssessmentStructure from "./AssessmentStructure";
 import TeacherSkillsReview from "./TeacherSkillsReview";
 import RolePermissions from "./RolePermissions";
 import SchoolManagementWorkspace from "./SchoolManagementWorkspace";
@@ -23,6 +24,7 @@ const navigation=[
  {id:"permissions",label:"Role permissions",icon:ShieldCheck,admin:true},
  {id:"consultant",label:"Consultant support",icon:GraduationCap,consultant:true,school:true},
  {id:"assess",label:"Literacy Assessor",icon:ClipboardCheck,school:true},
+ {id:"assessment-structure",label:"Assessment structures",icon:BookMarked,school:true},
  {id:"teacher-review",label:"Teacher skills review",icon:GraduationCap,manager:true,school:true},
  {id:"training",label:"Teacher training",icon:BookOpen,school:true},
  {id:"competencies",label:"Competency library",icon:BookOpen,school:true},
@@ -334,6 +336,7 @@ export default function Home(){
   if(!schoolId)return false;
   if(n.id==="bulk")return can("staff.import")||can("students.import")||can("data.export");
   if(n.id==="assess")return can("assessments.create")||can("assessments.view");
+  if(n.id==="assessment-structure")return can("competencies.view")||can("teacher_reviews.create")||can("assessments.create")||can("assessments.view");
   if(n.id==="consultant")return can("consultants.support")||can("consultants.log");
   if(n.id==="competencies")return can("competencies.view")||can("competencies.edit");
   if(n.id==="implementation")return can("implementation.view")||can("implementation.submit")||can("implementation.review");
@@ -366,6 +369,11 @@ export default function Home(){
   <TrainingWorkspace session={session} client={client} schoolId={schoolId}
    schoolName={school?.name||"Selected school"} schools={identity.schools}
    competencies={competencies} grants={roleGrants} isAdmin={identity.admin}/>}
+ {page==="assessment-structure"&&schoolId&&
+  (can("competencies.view")||can("teacher_reviews.create")||can("assessments.create")||can("assessments.view"))&&
+  <AssessmentStructure client={client} competencies={competencies} onNavigate={setPage}
+   canStudentAssess={can("assessments.create")||can("assessments.view")}
+   canTeacherReview={can("teacher_reviews.create")}/>}
  {page==="assess"&&schoolId&&(can("assessments.create")||can("assessments.view"))&&<AssessorWorkspace
   client={client} session={session} schoolId={schoolId} classes={visibleClasses}
   students={students} competencies={competencies} canCreate={can("assessments.create")} canViewHistory={can("assessments.view")}
