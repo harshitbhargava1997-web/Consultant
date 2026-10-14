@@ -1,0 +1,83 @@
+"use client";
+import {useEffect,useMemo,useState} from "react";
+import {Plus,Trash2} from "lucide-react";
+
+const SOUND_RATINGS=["Not Assessed","Emerging","Developing","Independent"];
+export function soundLabel(item){
+ return item.grapheme+" · "+item.phoneme+" · "+item.example_word;
+}
+export function usePhonicsCatalog(client){
+ const [data,setData]=useState({items:[],links:[]});
+ const [error,setError]=useState("");
+ useEffect(()=>{
+  if(!client)return;
+  let active=true;
+  (async()=>{
+   try{
+    const [items,mapping]=await Promise.all([
+     client.from("literacy_phonics_items").select("id,code,family,grapheme,phoneme,example_word,teaching_note,sequence")
+      .eq("active",true).order("sequence").limit(500),
+     client.from("literacy_competency_phonics_items").select("competency_id,item_id").limit(2000)
+    ]);
+    if(items.error||mapping.error)throw items.error||mapping.error;
+    if(active){setData({items:items.data||[],links:mapping.data||[]});setError("");}
+   }catch(e){if(active)setError("The detailed phonics library could not be loaded: "+e.message);}
+  })();
+  return()=>{active=false;};
+ },[client]);
+ const {byCompetency,byId}=useMemo(()=>{
+  const byId=Object.fromEntries(data.items.map(item=>[item.id,item]));
+  const byCompetency={};
+  for(const link of data.links){
+   if(!byId[link.item_id])continue;
+   (byCompetency[link.competency_id]??=[]).push(byId[link.item_id]);
+  }
+  for(const items of Object.values(byCompetency))items.sort((a,b)=>a.sequence-b.sequence);
+  return {byCompetency,byId};
+ },[data]);
+ return {byCompetency,byId,error};
+}
+export function soundDetailPayload(value){
+ return Object.entries(value||{}).filter(([,rating])=>rating!=="Not Assessed")
+  .map(([item_id,rating])=>({item_id,rating}));
+}
+export default function PhonicsSoundPicker({items=[],value={},onChange,disabled=false,personLabel="learner"}){
+ const [chosen,setChosen]=useState("");
+ if(!items.length)return null;
+ const available=items.filter(x=>!Object.prototype.hasOwnProperty.call(value,x.id));
+ const selected=items.filter(x=>Object.prototype.hasOwnProperty.call(value,x.id));
+ const rated=selected.filter(x=>value[x.id]!=="Not Assessed").length;
+ return <div className="phonics-sound-picker">
+  <div className="phonics-picker-title">
+   <strong>Specific sounds and patterns observed</strong>
+   <small>{rated} sound item{rated===1?"":"s"} rated</small>
+  </div>
+  <p className="helper">Select the exact sound, sound-action, blending example or letter pattern demonstrated by the {personLabel}. Different spellings and pronunciations are separate choices. Do not rate sounds that you have not observed.</p>
+  <div className="phonics-add-row">
+   <select aria-label="Select sound or phonics pattern" disabled={disabled||!available.length}
+    value={available.some(x=>x.id===chosen)?chosen:""}
+    onChange={e=>setChosen(e.target.value)}>
+    <option value="">Choose from {items.length} sounds/patterns</option>
+    {available.map(item=><option key={item.id} value={item.id}>{soundLabel(item)}</option>)}
+   </select>
+   <button className="btn outline" type="button" disabled={disabled||!chosen||!available.some(x=>x.id===chosen)}
+    onClick={()=>{onChange({...value,[chosen]:"Not Assessed"});setChosen("");}}>
+    <Plus size={15}/> Add</button>
+  </div>
+  {selected.length>0&&<div className="phonics-selected-items">
+   {selected.map(item=><div className="phonics-selected-item" key={item.id}>
+    <div className="phonics-item-label">
+     <strong>{item.grapheme} <span>{item.phoneme}</span></strong>
+     <small>Example: {item.example_word}{item.teaching_note?" · "+item.teaching_note:""}</small>
+    </div>
+    <select disabled={disabled} aria-label={"Sound observation rating for "+soundLabel(item)}
+     value={value[item.id]||"Not Assessed"} onChange={e=>onChange({...value,[item.id]:e.target.value})}>
+     {SOUND_RATINGS.map(r=><option key={r} value={r}>{r}</option>)}
+    </select>
+    <button className="btn outline" type="button" disabled={disabled} aria-label={"Remove "+soundLabel(item)}
+     onClick={()=>{const copy={...value};delete copy[item.id];onChange(copy);}}><Trash2 size={14}/></button>
+   </div>)}
+  </div>}
+  {!selected.length&&<p className="helper">No individual sounds selected yet. Add each demonstrated item and choose a rating.</p>}
+ </div>;
+}
