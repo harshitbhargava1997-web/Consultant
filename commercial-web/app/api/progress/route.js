@@ -188,16 +188,19 @@ async function schoolTraining(ctx,teachers){
 }
 async function implementation(ctx,teachers){
  if(!ctx.can("implementation.review"))return null;
- const [entriesResult,reviewResult]=await Promise.all([
-  allRows(()=>ctx.admin.from("literacy_implementation_entries")
+ const entriesResult=await allRows(()=>ctx.admin.from("literacy_implementation_entries")
    .select("id,class_id,teacher_user_id,implementation_date,subject,lesson_topic,submitted_at")
-   .eq("school_id",ctx.schoolId).order("id"),5000),
-  allRows(()=>ctx.admin.from("literacy_implementation_reviews")
-   .select("entry_id,status,feedback,reviewed_at").order("entry_id"),5000)
- ]);
+   .eq("school_id",ctx.schoolId).order("id"),5000);
  const schoolEntries=entriesResult.rows;
- const allEntryIds=new Set(schoolEntries.map(x=>x.id));
- const reviews=reviewResult.rows.filter(x=>allEntryIds.has(x.entry_id));
+ const reviews=[];
+ let reviewTruncated=false;
+ for(let i=0;i<schoolEntries.length;i+=400){
+  const entryIds=schoolEntries.slice(i,i+400).map(x=>x.id);
+  const found=await allRows(()=>ctx.admin.from("literacy_implementation_reviews")
+   .select("entry_id,status,feedback,reviewed_at").in("entry_id",entryIds).order("entry_id"),2000);
+  reviews.push(...found.rows);
+  reviewTruncated=reviewTruncated||found.truncated;
+ }
  const reviewById=indexBy(reviews,"entry_id");
  let fileCounts={};
  let filesTruncated=false;
@@ -227,7 +230,7 @@ async function implementation(ctx,teachers){
  return {teacherStats,submissions:schoolEntries.length,
   pending:schoolEntries.filter(e=>!reviewById.has(e.id)).length,
   needsFollowUp:schoolEntries.filter(e=>reviewById.get(e.id)?.status==="needs_follow_up").length,
-  truncated:entriesResult.truncated||reviewResult.truncated||filesTruncated};
+  truncated:entriesResult.truncated||reviewTruncated||filesTruncated};
 }
 async function teacherSkillReviews(ctx,teachers){
  if(!ctx.can("teacher_reviews.create"))return null;
