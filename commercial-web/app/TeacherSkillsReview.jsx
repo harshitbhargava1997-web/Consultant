@@ -4,6 +4,7 @@ import {ArrowRight,ClipboardCheck,GraduationCap} from "lucide-react";
 import {ASSESSMENT_MODES,LEVELS,RATINGS,RATING_LABELS} from "../lib/supabase";
 import PhonicsSoundPicker,{PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload} from "./PhonicsSoundPicker";
 import TeacherReviewHistory from "./TeacherReviewHistory";
+import NurseryLetterGrid from "./NurseryLetterGrid";
 
 export default function TeacherSkillsReview({client,schoolId,classes=[],members=[],teacherClasses=[],competencies=[],onSaved}){
  const {byCompetency,byId,error:catalogError}=usePhonicsCatalog(client);
@@ -11,6 +12,7 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
  const [ratings,setRatings]=useState({}),[soundRatings,setSoundRatings]=useState({});
  const [assessmentMode,setAssessmentMode]=useState("complete"),[randomSelection,setRandomSelection]=useState([]);
  const [previousRatings,setPreviousRatings]=useState({});
+ const [teacherSoundHistory,setTeacherSoundHistory]=useState([]);
  const [notes,setNotes]=useState(""),[busy,setBusy]=useState(false);
  const [message,setMessage]=useState(""),[historyVersion,setHistoryVersion]=useState(0);
  const activeClass=classes.find(c=>c.id===classId)||classes[0];
@@ -24,12 +26,13 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
  const skills=allSkills.filter(c=>assessmentMode==="complete"||
   assessmentMode==="random"&&randomSelection.includes(c.id)||
   assessmentMode==="targeted"&&previousRatings[c.id]&&previousRatings[c.id]!=="Independent");
+ const nurseryGridReady=activeClass?.grade==="Nursery"&&["NUR001","NUR002","NUR003"].every(code=>allSkills.some(c=>c.code===code));
  const count=Object.values(ratings).filter(r=>r!=="Not Assessed").length;
  useEffect(()=>{
-  setClassId("");setTeacherId("");setRatings({});setSoundRatings({});setNotes("");setAssessmentMode("complete");setRandomSelection([]);setPreviousRatings({});setMessage("");
+  setClassId("");setTeacherId("");setRatings({});setSoundRatings({});setNotes("");setAssessmentMode("complete");setRandomSelection([]);setPreviousRatings({});setTeacherSoundHistory([]);setMessage("");
  },[schoolId]);
  useEffect(()=>{
-  setTeacherId("");setRatings({});setSoundRatings({});setNotes("");setAssessmentMode("complete");setRandomSelection([]);setPreviousRatings({});setMessage("");
+  setTeacherId("");setRatings({});setSoundRatings({});setNotes("");setAssessmentMode("complete");setRandomSelection([]);setPreviousRatings({});setTeacherSoundHistory([]);setMessage("");
  },[activeClass?.id]);
  useEffect(()=>{
   if(assessmentMode!=="random"){setRandomSelection([]);return;}
@@ -38,13 +41,18 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
   setRandomSelection(pool.slice(0,Math.min(5,pool.length)).map(skill=>skill.id));
  },[assessmentMode,teacherId,activeClass?.id]);
  useEffect(()=>{
-  if(!client||!schoolId||!activeClass?.id||!teacherId){setPreviousRatings({});return;}
+  if(!client||!schoolId||!activeClass?.id||!teacherId){setPreviousRatings({});setTeacherSoundHistory([]);return;}
   let active=true;
   (async()=>{
-   const sessions=await client.from("literacy_assessments").select("id")
-    .eq("school_id",schoolId).eq("class_id",activeClass.id).eq("subject_type","teacher")
-    .eq("teacher_user_id",teacherId).order("assessment_date",{ascending:false}).order("created_at",{ascending:false}).limit(12);
-   if(sessions.error)throw sessions.error;
+   const [sessions,sounds]=await Promise.all([
+    client.from("literacy_assessments").select("id")
+     .eq("school_id",schoolId).eq("class_id",activeClass.id).eq("subject_type","teacher")
+     .eq("teacher_user_id",teacherId).order("assessment_date",{ascending:false}).order("created_at",{ascending:false}).limit(12),
+    client.rpc("literacy_get_assessment_phonics",{p_school_id:schoolId,p_class_id:activeClass.id,
+     p_subject_type:"teacher",p_subject_id:teacherId})
+   ]);
+   if(sessions.error||sounds.error)throw sessions.error||sounds.error;
+   if(active)setTeacherSoundHistory(sounds.data||[]);
    const ids=(sessions.data||[]).map(row=>row.id);
    if(!ids.length){if(active)setPreviousRatings({});return;}
    const saved=await client.from("literacy_assessment_results").select("assessment_id,competency_id,rating").in("assessment_id",ids);
@@ -56,7 +64,7 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
     if(!latest[row.competency_id])latest[row.competency_id]=row.rating;
    }
    if(active)setPreviousRatings(latest);
-  })().catch(error=>{if(active){setPreviousRatings({});setMessage("Previous teacher ratings could not be loaded: "+error.message);}});
+  })().catch(error=>{if(active){setPreviousRatings({});setTeacherSoundHistory([]);setMessage("Previous teacher ratings could not be loaded: "+error.message);}});
   return()=>{active=false;};
  },[client,schoolId,activeClass?.id,teacherId,historyVersion]);
  async function submit(event){
@@ -109,6 +117,11 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
     <div className="notice small">{ASSESSMENT_MODES.find(mode=>mode.value===assessmentMode)?.detail}. Choose what you directly observe from the teacher.</div>
     <div className="skills-head"><h3>Nursery through {activeClass?.grade} competencies</h3>
      <span>{skills.length} available · {count} rated</span></div>
+    {nurseryGridReady?<NurseryLetterGrid competencies={allSkills} itemsByCompetency={byCompetency}
+     value={soundRatings} mode={assessmentMode} historyRows={teacherSoundHistory} disabled={busy}
+     personType="teacher" resetKey={teacherId} onChange={(next,overall)=>{
+      setSoundRatings(next);setRatings(current=>({...current,...overall}));
+     }}/>:<>
     {!skills.length&&assessmentMode==="targeted"&&<p className="helper">No previously assessed teacher competencies currently need targeted support. Choose Complete or Random assessment.</p>}
     {skills.map(c=><div key={c.id} className="teacher-phonics-skill">
      <div className="skill"><div><small>{c.grade} · {c.code}</small><strong>{c.title}</strong>
@@ -124,7 +137,7 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
       <PhonicsSoundPicker items={byCompetency[c.id]} value={soundRatings[c.id]||{}}
        onChange={value=>setSoundRatings(v=>({...v,[c.id]:value}))}
        disabled={busy} personLabel="teacher"/>}
-    </div>)}
+    </div>)}</>}
     <label>Observed strengths, gaps and next steps<textarea rows={3} maxLength={4000}
      value={notes} onChange={e=>setNotes(e.target.value)}
      placeholder="e.g. teacher correctly models the /t/ sound with a physical action; revisit /θ/ blending"/></label>

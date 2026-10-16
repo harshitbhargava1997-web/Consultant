@@ -5,6 +5,7 @@ import {BookOpen,CalendarDays,CheckCircle2,ClipboardCheck,Clock3,GraduationCap,R
 import {ASSESSMENT_MODES,LEVELS,RATINGS,RATING_LABELS,skillProgress} from "../lib/supabase";
 import PhonicsSoundPicker,{PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload,soundLabel} from "./PhonicsSoundPicker";
 import SoundProgressPanel from "./SoundProgressPanel";
+import NurseryLetterGrid from "./NurseryLetterGrid";
 
 const STAGES=[
  {value:"baseline",name:"Baseline",detail:"Starting-point evidence"},
@@ -116,6 +117,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
   assessmentMode==="random"&&randomSelection.includes(c.id)||
   assessmentMode==="targeted"&&previous[c.id]&&previous[c.id].rating!=="Independent");
  const buckets=gradeBuckets(visibleSkills);
+ const nurseryGridReady=enrolledGrade==="Nursery"&&["NUR001","NUR002","NUR003"].every(code=>availableSkills.some(c=>c.code===code));
  const chosenGrade=chosenStudent?{...chosenStudent,grade:enrolledGrade}:null;
  const latest=sessions[0];
  useEffect(()=>{setClassId("");setStudentId("");setMessage("");setError("");setSearch("");setGradeFilter("all");},[schoolId]);
@@ -296,13 +298,18 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
      <label className="assessor-search"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)}
       placeholder="Find a sound, reading or writing competency…" aria-label="Search competencies"/></label>
      <button type="button" className="btn outline" onClick={resetDraft} disabled={saving}><RotateCcw size={15}/> Clear draft</button>
-     {assessmentMode==="random"&&<button type="button" className="btn outline" onClick={()=>setRandomSelection(randomIds(matchingSkills))} disabled={saving}>
+     {assessmentMode==="random"&&!nurseryGridReady&&<button type="button" className="btn outline" onClick={()=>setRandomSelection(randomIds(matchingSkills))} disabled={saving}>
       Select another sample</button>}
     </div>
     <div className="notice small">{ASSESSMENT_MODES.find(mode=>mode.value===assessmentMode)?.detail}. Record only what you observe; the report level is calculated automatically.</div>
     {missingGrade&&<div className="notice small">No competencies have been published specifically for {enrolledGrade}. You can assess earlier published levels cumulatively until the Super Admin publishes the {enrolledGrade} progression.</div>}
     {!availableSkills.length?<div className="empty"><BookOpen size={25}/><h3>Competencies not published</h3><p>Ask the Super Admin to publish literacy skills before starting assessment.</p></div>:
     <form onSubmit={saveAssessment} className="assessor-form">
+     {nurseryGridReady?<NurseryLetterGrid competencies={availableSkills} itemsByCompetency={phonicsByCompetency}
+      value={soundRatings} mode={assessmentMode} historyRows={soundHistory} disabled={saving}
+      personType="student" resetKey={studentId} onChange={(next,overall)=>{
+       setSoundRatings(next);setRatings(current=>({...current,...overall}));
+      }}/>:<>
      {buckets.length===0&&<p className="helper">{assessmentMode==="targeted"?"No previously assessed competencies currently need targeted support. Choose Complete or Random assessment to continue.":"No competencies match the selected filter."}</p>}
      {buckets.map(bucket=><div className="assessor-bucket" key={bucket.key}>
       <div className="assessor-bucket-heading"><span>{bucket.grade} · {bucket.strand}</span><small>{bucket.items.length} competencies</small></div>
@@ -331,7 +338,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
          </label>}
        </div>;
       })}
-     </div>)}
+     </div>)}</>}
      <div className="assessor-notes two-col">
       <label>Assessment observations<textarea rows={4} maxLength={4000} value={observations}
        onChange={e=>setObservations(e.target.value)} placeholder="What was demonstrated? Which specific difficulties appeared?"/></label>

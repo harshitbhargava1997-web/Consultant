@@ -109,6 +109,28 @@
 .assessor-history-ratings small{color:#6a7b87;display:block;margin-top:4px;font-size:11px}
 .assessor-history-ratings em{font-style:normal;white-space:nowrap;font-size:11px;color:#167b75}
 .assessor-feedback{margin:0}
+.nursery-letter-grid{border:1px solid #dce8e6;border-radius:13px;background:#fbfdfc;padding:17px;overflow:hidden}
+.nursery-grid-head{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;margin-bottom:13px}
+.nursery-grid-head h3{margin:0 0 5px;color:#183a40}
+.nursery-grid-head p{margin:0;color:#72818e;font-size:11px;line-height:1.5}
+.nursery-grid-head>span{background:#e5f4ef;color:#116d66;border-radius:20px;padding:7px 10px;font-size:10px;font-weight:800;white-space:nowrap}
+.nursery-letter-selector{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:10px 0 15px}
+.nursery-letter-selector button{width:34px;height:34px;border:1px solid #d7e2e3;border-radius:8px;background:#fff;color:#5a6875;font-size:11px;font-weight:800;padding:0}
+.nursery-letter-selector button.selected{background:#167b75;color:#fff;border-color:#167b75}
+.nursery-letter-selector button.new-sample{width:auto;padding:0 11px;display:inline-flex;align-items:center;gap:6px;color:#28645f}
+.nursery-grid-scroll{overflow-x:auto;border:1px solid #e3e9ea;border-radius:10px;background:#fff}
+.nursery-grid-table{min-width:720px;margin:0}
+.nursery-grid-table th,.nursery-grid-table td{vertical-align:top;padding:10px}
+.nursery-grid-table thead th{background:#f0f6f5;color:#355d5b;font-size:11px;position:sticky;top:0;z-index:1}
+.nursery-grid-table tbody th{width:120px;background:#fafcfc}
+.nursery-grid-table tbody th strong{font-size:19px;color:#164e4b;display:block}
+.nursery-grid-table tbody th small{font-size:9px;color:#7e8c96;display:block;margin-top:3px;font-weight:500}
+.nursery-grid-table td{min-width:185px}
+.nursery-grid-table select{font-size:11px;padding:8px 9px;border-radius:8px}
+.nursery-grid-table select.emerging{border-color:#e8b6ae;background:#fff5f3;color:#9b3f34}
+.nursery-grid-table select.developing{border-color:#ead09b;background:#fffaf0;color:#8a6119}
+.nursery-grid-table select.independent{border-color:#9fd3c6;background:#f0faf6;color:#126b5d}
+.nursery-action-help{display:block;color:#74848d;font-size:9px;line-height:1.45;margin-top:6px;font-weight:500}
 @media(max-width:760px){
  .assessor-kpis{grid-template-columns:1fr}
  .assessor-kpis>div{min-height:65px;padding:12px}
@@ -121,6 +143,8 @@
  .assessor-save-row .btn{width:100%}
  .assessor-session-head{flex-direction:column;align-items:flex-start}
  .assessor-setup-grid{grid-template-columns:1fr}
+ .nursery-letter-grid{padding:12px}
+ .nursery-grid-head{flex-direction:column}
 }
 
 
