@@ -265,14 +265,25 @@
 .training-module{display:flex;flex-direction:column;gap:18px}
 .training-module .panel{margin-bottom:0}
 .training-module .panel-head h2{display:flex;align-items:center;gap:9px}
-.demonstration-lab-card{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:26px;border:1px solid #b9ddd4;border-radius:15px;background:linear-gradient(135deg,#eaf8f3 0%,#f8fcfa 56%,#eef5ff 100%);box-shadow:0 10px 30px rgba(25,91,82,.08)}
-.demonstration-lab-copy{max-width:760px}
-.demonstration-lab-copy h2{display:flex;align-items:center;gap:10px;margin:7px 0 9px;color:#174d50;font-size:23px}
-.demonstration-lab-copy p{margin:0;color:#49666d;font-size:12px;line-height:1.7}
-.demonstration-lab-paths{display:flex;flex-wrap:wrap;gap:7px;margin:15px 0 11px}
-.demonstration-lab-paths span{padding:6px 10px;border:1px solid #c8dfda;border-radius:999px;background:rgba(255,255,255,.78);color:#23675f;font-size:10px;font-weight:800}
-.demonstration-lab-audience{font-size:10px!important;color:#698088!important}
-.demonstration-lab-launch{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-width:218px;min-height:46px;background:#176f68!important;color:#fff!important;border-color:#176f68!important;text-decoration:none;white-space:nowrap}
+.digital-content-library{display:flex;flex-direction:column;gap:18px}
+.digital-content-heading{background:linear-gradient(135deg,#edf8f4,#fbfdfc 65%,#eef5ff)}
+.digital-grade-tabs{display:flex;flex-wrap:wrap;gap:7px;margin-top:16px}
+.digital-grade-tabs button{border:1px solid #d3e1df;background:#fff;color:#536b72;border-radius:999px;padding:8px 13px;font-size:11px;font-weight:750;cursor:pointer}
+.digital-grade-tabs button.active{background:#176f68;color:#fff;border-color:#176f68}
+.digital-content-publisher .two-col{align-items:start}
+.digital-role-options{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.digital-publisher-actions{display:flex;gap:9px;flex-wrap:wrap}
+.digital-content-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:15px}
+.digital-content-card{border:1px solid #dce8e6;border-radius:13px;background:#fcfefd;padding:17px;display:flex;flex-direction:column;gap:11px}
+.digital-content-card-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.digital-content-card-head>span{font-size:9px;font-weight:850;letter-spacing:.9px;color:#16736c;text-transform:uppercase}
+.digital-content-card-head em{font-size:9px;font-style:normal;font-weight:800;text-transform:uppercase;border-radius:999px;padding:5px 8px;background:#eef2f2;color:#63777d}
+.digital-content-card-head em.published{background:#e4f5ee;color:#167060}.digital-content-card-head em.draft{background:#fff5db;color:#8b671c}
+.digital-content-card h3{font-size:16px;color:#234751;margin:0}.digital-content-card>p{font-size:11px;line-height:1.65;color:#60757c;margin:0}.digital-content-card>small{color:#2d716a;font-size:10px}
+.digital-content-sections{display:flex;flex-direction:column;border-top:1px solid #e5edeb}
+.digital-content-sections details{border-bottom:1px solid #e5edeb;padding:10px 0}.digital-content-sections summary{cursor:pointer;font-size:11px;font-weight:800;color:#315b5a}.digital-content-sections details div{white-space:pre-wrap;font-size:11px;line-height:1.7;color:#51676e;padding-top:9px}
+.digital-content-admin-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:auto}.digital-content-admin-actions .btn{padding:7px 9px;font-size:10px}
+.digital-content-card footer{display:flex;align-items:flex-start;gap:6px;color:#74858a;font-size:9px;line-height:1.45}
 .training-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:17px 0}
 .training-stats>div{background:#f1f8f6;border:1px solid #d8e8e2;border-radius:11px;display:flex;flex-direction:column;gap:6px;padding:14px}
 .training-stats strong{font-size:23px;color:#174d50;font-weight:750}
@@ -336,9 +347,8 @@
 .training-module .table-wrap th{white-space:nowrap}
 .training-module .table-wrap td{vertical-align:top;line-height:1.5}
 @media(max-width:700px){
- .demonstration-lab-card{align-items:stretch;flex-direction:column;padding:19px}
- .demonstration-lab-copy h2{font-size:19px}
- .demonstration-lab-launch{width:100%;min-width:0}
+ .digital-content-grid{grid-template-columns:1fr}
+ .digital-role-options{grid-template-columns:1fr 1fr}
  .training-stats{gap:6px}
  .training-stats>div{padding:9px}
  .training-stats strong{font-size:17px}

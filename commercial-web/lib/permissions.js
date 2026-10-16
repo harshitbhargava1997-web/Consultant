@@ -25,8 +25,11 @@ export const PERMISSION_GROUPS=[
   {key:"competencies.view",label:"View published competency library",description:"Read-only competency visibility"},
   {key:"competencies.edit",label:"Edit shared competencies",description:"High impact: changes the shared curriculum across all schools"}
  ]},
- {title:"Digital content & professional learning",items:[
-  {key:"training.access",label:"Access published learning modules",description:"View assigned courses, PDFs, videos, MOOCs and learning activities"},
+ {title:"Digital content",items:[
+  {key:"digital_content.access",label:"Access grade-wise digital content",description:"View published classroom preparation, demonstrations and practice resources for permitted grades"}
+ ]},
+ {title:"Professional learning",items:[
+  {key:"training.access",label:"Access professional-learning programmes",description:"View assigned courses, PDFs, videos, MOOCs and learning activities"},
   {key:"training.complete",label:"Complete courses and submit exercises",description:"Record own learning and quiz scores; cannot mark other users complete"},
   {key:"training.certificates",label:"Earn and view course certificates",description:"Certificates are issued only after the required units and exercises are completed"},
   {key:"training.deliver",label:"Deliver professional learning sessions",description:"Record school-based workshops, demonstrations, observations and follow-up actions"},

@@ -337,7 +337,8 @@ export default function Home(){
  };
  const availableNav=navigation.filter(n=>{
   if(n.id==="permissions")return identity.admin;
-  if(n.id==="training")return identity.admin||identity.isConsultant||!!schoolId;
+  if(n.id==="training")return identity.admin||!!schoolId&&
+   (can("digital_content.access")||can("training.access")||can("training.complete")||can("training.deliver")||can("training.review"));
   if(n.id==="overview")return true;
   if(n.id==="users")return identity.admin||!!schoolId&&
    (can("users.manage")||can("classes.view")||can("classes.manage")||can("classes.import")||

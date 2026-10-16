@@ -1,8 +1,8 @@
 "use client";
 import {useEffect,useMemo,useState} from "react";
-import {BookOpen,CheckCircle2,ChevronDown,ClipboardCheck,ExternalLink,FileText,GraduationCap,Medal,Play,Plus,RefreshCw,School,ShieldCheck,Trash2,Upload,Users,Video} from "lucide-react";
+import {BookOpen,CheckCircle2,ChevronDown,ClipboardCheck,FileText,GraduationCap,Medal,Play,Plus,RefreshCw,School,ShieldCheck,Trash2,Upload,Users,Video} from "lucide-react";
 import {LEVELS} from "../lib/supabase";
-const DEMONSTRATION_LAB_URL="https://phonics-demonstration-lab.harshitbhargava1997.chatgpt.site";
+import DigitalContentLibrary from "./DigitalContentLibrary";
 const KINDS=[
  {id:"reading",label:"Reading lesson"},
  {id:"pdf",label:"PDF / handbook"},
@@ -34,6 +34,7 @@ export default function TrainingWorkspace({
  session,client,schoolId,schoolName,schools=[],competencies=[],isAdmin=false,grants=[]
 }){
  const can=key=>isAdmin||grants.includes(key);
+ const hasDigitalContentAccess=can("digital_content.access");
  const hasProgrammeAccess=isAdmin||["training.access","training.complete","training.deliver","training.review"].some(key=>grants.includes(key));
  const [data,setData]=useState({courses:[],units:[],progress:[],certificates:[],review:[],sessions:[],trainingStaff:[]});
  const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
@@ -149,20 +150,7 @@ export default function TrainingWorkspace({
  const schoolParticipants=(data.review||[]).filter(p=>
   p.name.toLowerCase().includes(reviewFilter.toLowerCase())||p.role.includes(reviewFilter.toLowerCase()));
  return <div className="training-module">
-  <section className="demonstration-lab-card" aria-labelledby="demonstration-lab-title">
-   <div className="demonstration-lab-copy">
-    <span className="eyebrow">INTERACTIVE DIGITAL CONTENT</span>
-    <h2 id="demonstration-lab-title"><BookOpen size={22}/> Phonics Demonstration Lab</h2>
-    <p>Use the shared demonstration environment to model classroom literacy—from action–sound–symbol connections and blending grids to word, sentence, encoding and spelling practice.</p>
-    <div className="demonstration-lab-paths" aria-label="Available class pathways">
-     <span>Nursery</span><span>LKG</span><span>UKG</span><span>Grade 1–8</span>
-    </div>
-    <p className="demonstration-lab-audience">Available to Super Admin, Consultants, School Owners, Principals, Coordinators and Teachers.</p>
-   </div>
-   <a className="btn demonstration-lab-launch" href={DEMONSTRATION_LAB_URL} target="_blank" rel="noopener noreferrer">
-    Open Demonstration Lab <ExternalLink size={17}/>
-   </a>
-  </section>
+  {hasDigitalContentAccess&&<DigitalContentLibrary session={session} schoolId={schoolId} competencies={competencies} isAdmin={isAdmin}/>}
   {hasProgrammeAccess&&<section className="panel">
    <div className="panel-head"><h2><GraduationCap size={20}/> Digital Content & Professional Learning</h2>
     <span className="eyebrow">{isAdmin?"CONTENT DEPLOYMENT":"LEARNING WORKSPACE"}</span></div>
