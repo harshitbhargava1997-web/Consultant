@@ -13,6 +13,7 @@ const STAGES=[
  {value:"periodic",name:"Periodic",detail:"Regular competency check"},
  {value:"endline",name:"Endline",detail:"End-of-cycle review"}
 ];
+const NURSERY_GRID_CODES=["NUR001","NUR002","NUR003"];
 const ROLE_LABELS={super_admin:"Super Admin",consultant:"Consultant",owner:"School owner",
  principal:"Principal",coordinator:"Coordinator",teacher:"Teacher",legacy:"School assessor"};
 function localToday(){
@@ -113,11 +114,11 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
  const matchingSkills=scoped.filter(c=>!needle||[c.title,c.code,c.strand,c.description,c.grade].join(" ").toLowerCase().includes(needle));
  const selectedCount=Object.values(ratings).filter(r=>RATINGS.includes(r)&&r!=="Not Assessed").length;
  const {grouped,previous}=useMemo(()=>historyBySession(sessions,results),[sessions,results]);
- const visibleSkills=matchingSkills.filter(c=>assessmentMode==="complete"||
+ const nurseryGridReady=NURSERY_GRID_CODES.every(code=>scoped.some(c=>c.code===code));
+ const visibleSkills=matchingSkills.filter(c=>!nurseryGridReady||!NURSERY_GRID_CODES.includes(c.code)).filter(c=>assessmentMode==="complete"||
   assessmentMode==="random"&&randomSelection.includes(c.id)||
   assessmentMode==="targeted"&&previous[c.id]&&previous[c.id].rating!=="Independent");
  const buckets=gradeBuckets(visibleSkills);
- const nurseryGridReady=enrolledGrade==="Nursery"&&["NUR001","NUR002","NUR003"].every(code=>availableSkills.some(c=>c.code===code));
  const chosenGrade=chosenStudent?{...chosenStudent,grade:enrolledGrade}:null;
  const latest=sessions[0];
  useEffect(()=>{setClassId("");setStudentId("");setMessage("");setError("");setSearch("");setGradeFilter("all");},[schoolId]);
@@ -127,7 +128,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
   setAssessmentMode("complete");setRandomSelection([]);setExpanded("");},[studentId]);
  useEffect(()=>{
   if(assessmentMode!=="random"){setRandomSelection([]);return;}
-  setRandomSelection(randomIds(scoped));
+  setRandomSelection(randomIds(scoped.filter(c=>!NURSERY_GRID_CODES.includes(c.code))));
  },[assessmentMode,studentId,scope,gradeFilter]);
  useEffect(()=>{
   if(!canViewHistory||!client||!activeClass?.id||!studentId||!eligibleStudents.some(s=>s.id===studentId)){
@@ -298,19 +299,19 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
      <label className="assessor-search"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)}
       placeholder="Find a sound, reading or writing competency…" aria-label="Search competencies"/></label>
      <button type="button" className="btn outline" onClick={resetDraft} disabled={saving}><RotateCcw size={15}/> Clear draft</button>
-     {assessmentMode==="random"&&!nurseryGridReady&&<button type="button" className="btn outline" onClick={()=>setRandomSelection(randomIds(matchingSkills))} disabled={saving}>
+     {assessmentMode==="random"&&matchingSkills.some(c=>!NURSERY_GRID_CODES.includes(c.code))&&<button type="button" className="btn outline" onClick={()=>setRandomSelection(randomIds(matchingSkills.filter(c=>!NURSERY_GRID_CODES.includes(c.code))))} disabled={saving}>
       Select another sample</button>}
     </div>
     <div className="notice small">{ASSESSMENT_MODES.find(mode=>mode.value===assessmentMode)?.detail}. Record only what you observe; the report level is calculated automatically.</div>
     {missingGrade&&<div className="notice small">No competencies have been published specifically for {enrolledGrade}. You can assess earlier published levels cumulatively until the Super Admin publishes the {enrolledGrade} progression.</div>}
     {!availableSkills.length?<div className="empty"><BookOpen size={25}/><h3>Competencies not published</h3><p>Ask the Super Admin to publish literacy skills before starting assessment.</p></div>:
     <form onSubmit={saveAssessment} className="assessor-form">
-     {nurseryGridReady?<NurseryLetterGrid competencies={availableSkills} itemsByCompetency={phonicsByCompetency}
+     {nurseryGridReady&&<NurseryLetterGrid competencies={availableSkills} itemsByCompetency={phonicsByCompetency}
       value={soundRatings} mode={assessmentMode} historyRows={soundHistory} disabled={saving}
       personType="student" resetKey={studentId} onChange={(next,overall)=>{
        setSoundRatings(next);setRatings(current=>({...current,...overall}));
-      }}/>:<>
-     {buckets.length===0&&<p className="helper">{assessmentMode==="targeted"?"No previously assessed competencies currently need targeted support. Choose Complete or Random assessment to continue.":"No competencies match the selected filter."}</p>}
+      }}/>} {/* The A-Z grid follows competency scope, not the selected section. */}
+     {buckets.length===0&&!nurseryGridReady&&<p className="helper">{assessmentMode==="targeted"?"No previously assessed competencies currently need targeted support. Choose Complete or Random assessment to continue.":"No competencies match the selected filter."}</p>}
      {buckets.map(bucket=><div className="assessor-bucket" key={bucket.key}>
       <div className="assessor-bucket-heading"><span>{bucket.grade} · {bucket.strand}</span><small>{bucket.items.length} competencies</small></div>
       {bucket.items.map(c=>{
@@ -338,7 +339,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
          </label>}
        </div>;
       })}
-     </div>)}</>}
+     </div>)}
      <div className="assessor-notes two-col">
       <label>Assessment observations<textarea rows={4} maxLength={4000} value={observations}
        onChange={e=>setObservations(e.target.value)} placeholder="What was demonstrated? Which specific difficulties appeared?"/></label>

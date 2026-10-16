@@ -6,6 +6,8 @@ import PhonicsSoundPicker,{PhonicsStructurePreview,usePhonicsCatalog,soundDetail
 import TeacherReviewHistory from "./TeacherReviewHistory";
 import NurseryLetterGrid from "./NurseryLetterGrid";
 
+const NURSERY_GRID_CODES=["NUR001","NUR002","NUR003"];
+
 export default function TeacherSkillsReview({client,schoolId,classes=[],members=[],teacherClasses=[],competencies=[],onSaved}){
  const {byCompetency,byId,error:catalogError}=usePhonicsCatalog(client);
  const [classId,setClassId]=useState(""),[teacherId,setTeacherId]=useState("");
@@ -23,10 +25,10 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
  const allSkills=competencies.filter(c=>c.active&&
   LEVELS.indexOf(c.grade)>=0&&LEVELS.indexOf(c.grade)<=gradeIndex)
   .sort((a,b)=>LEVELS.indexOf(a.grade)-LEVELS.indexOf(b.grade)||a.sequence-b.sequence);
- const skills=allSkills.filter(c=>assessmentMode==="complete"||
+ const nurseryGridReady=NURSERY_GRID_CODES.every(code=>allSkills.some(c=>c.code===code));
+ const skills=allSkills.filter(c=>!nurseryGridReady||!NURSERY_GRID_CODES.includes(c.code)).filter(c=>assessmentMode==="complete"||
   assessmentMode==="random"&&randomSelection.includes(c.id)||
   assessmentMode==="targeted"&&previousRatings[c.id]&&previousRatings[c.id]!=="Independent");
- const nurseryGridReady=activeClass?.grade==="Nursery"&&["NUR001","NUR002","NUR003"].every(code=>allSkills.some(c=>c.code===code));
  const count=Object.values(ratings).filter(r=>r!=="Not Assessed").length;
  useEffect(()=>{
   setClassId("");setTeacherId("");setRatings({});setSoundRatings({});setNotes("");setAssessmentMode("complete");setRandomSelection([]);setPreviousRatings({});setTeacherSoundHistory([]);setMessage("");
@@ -36,7 +38,7 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
  },[activeClass?.id]);
  useEffect(()=>{
   if(assessmentMode!=="random"){setRandomSelection([]);return;}
-  const pool=[...allSkills];
+  const pool=allSkills.filter(c=>!NURSERY_GRID_CODES.includes(c.code));
   for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
   setRandomSelection(pool.slice(0,Math.min(5,pool.length)).map(skill=>skill.id));
  },[assessmentMode,teacherId,activeClass?.id]);
@@ -116,13 +118,13 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
    <form onSubmit={submit} className="stack">
     <div className="notice small">{ASSESSMENT_MODES.find(mode=>mode.value===assessmentMode)?.detail}. Choose what you directly observe from the teacher.</div>
     <div className="skills-head"><h3>Nursery through {activeClass?.grade} competencies</h3>
-     <span>{skills.length} available · {count} rated</span></div>
-    {nurseryGridReady?<NurseryLetterGrid competencies={allSkills} itemsByCompetency={byCompetency}
+     <span>{allSkills.length} available · {count} rated</span></div>
+    {nurseryGridReady&&<NurseryLetterGrid competencies={allSkills} itemsByCompetency={byCompetency}
      value={soundRatings} mode={assessmentMode} historyRows={teacherSoundHistory} disabled={busy}
      personType="teacher" resetKey={teacherId} onChange={(next,overall)=>{
       setSoundRatings(next);setRatings(current=>({...current,...overall}));
-     }}/>:<>
-    {!skills.length&&assessmentMode==="targeted"&&<p className="helper">No previously assessed teacher competencies currently need targeted support. Choose Complete or Random assessment.</p>}
+     }}/>} {/* The A-Z grid follows competency availability across sections. */}
+    {!skills.length&&!nurseryGridReady&&assessmentMode==="targeted"&&<p className="helper">No previously assessed teacher competencies currently need targeted support. Choose Complete or Random assessment.</p>}
     {skills.map(c=><div key={c.id} className="teacher-phonics-skill">
      <div className="skill"><div><small>{c.grade} · {c.code}</small><strong>{c.title}</strong>
       {c.description&&<p>{c.description}</p>}</div>
@@ -137,7 +139,7 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
       <PhonicsSoundPicker items={byCompetency[c.id]} value={soundRatings[c.id]||{}}
        onChange={value=>setSoundRatings(v=>({...v,[c.id]:value}))}
        disabled={busy} personLabel="teacher"/>}
-    </div>)}</>}
+    </div>)}
     <label>Observed strengths, gaps and next steps<textarea rows={3} maxLength={4000}
      value={notes} onChange={e=>setNotes(e.target.value)}
      placeholder="e.g. teacher correctly models the /t/ sound with a physical action; revisit /θ/ blending"/></label>
