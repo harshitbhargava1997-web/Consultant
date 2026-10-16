@@ -47,7 +47,7 @@ function vowelFor(item,family){
 
 function PatternSelector({family,items,selectedSet,toggle,disabled,mode}){
  if(family==="vc"){
-  const consonants=[...new Set(items.map(item=>(item.grapheme||"")[1]).filter(Boolean))];
+  const consonants=[...new Set(items.map(item=>(item.grapheme||"")[1]).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
   const byPattern=Object.fromEntries(items.map(item=>[item.grapheme.toLowerCase(),item]));
   return <div className="lkg-pattern-scroll"><table className="lkg-pattern-matrix">
    <thead><tr><th>Vowel ↓ / Consonant →</th>{consonants.map(c=><th key={c}>{c}</th>)}</tr></thead>
