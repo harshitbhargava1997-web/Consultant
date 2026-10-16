@@ -1,6 +1,6 @@
 // Spreadsheet helpers are loaded on demand; no spreadsheet parser ships in the initial dashboard bundle.
 const XLSX_MIME="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-export const STAKEHOLDER_FIELDS=["full_name","email","role","initial_password"];
+export const STAKEHOLDER_FIELDS=["full_name","email","mobile_number","role","initial_password"];
 export const STUDENT_FIELDS=["grade","section","academic_year","admission_number","student_name"];
 export const CLASS_FIELDS=["grade","section","academic_year"];
 
@@ -39,13 +39,15 @@ function addGuide(book,kind,allowRoles){
  sheet.mergeCells("A2:B2");sheet.getCell("A2").font={size:12,bold:true};
  const lines=kind==="classes"?[
   ["Required columns","grade, section, academic_year"],
-  ["Valid grades","Nursery, LKG, UKG, Grade 1, Grade 2, Grade 3, Grade 4"],
+  ["Valid grades","Nursery, LKG, UKG, Grade 1, Grade 2, Grade 3, Grade 4, Grade 5"],
   ["Class matching","One unique grade / section / academic year per school"],
   ["Re-upload","Existing matching classes are preserved"],
   ["School selection","Select your school in Vision before uploading"],
   ["Limit","Maximum 500 rows per workbook"]
  ]:kind==="stakeholders"?[
-  ["Required columns","full_name, email, role, initial_password (only for new users)"],
+  ["Required columns","full_name, role, initial_password (only for new users)"],
+  ["Teacher login","For teachers, provide email, mobile_number, or both. Enter Indian mobile numbers as 10 digits or +91 format"],
+  ["Leadership login","School owners, principals and coordinators must use email; mobile login is teacher-only"],
   ["Allowed roles",allowRoles?"owner, principal, coordinator, teacher":"teacher only for your school"],
   ["New accounts","Provide a distinct strong initial password; 12–128 characters with uppercase, lowercase, number and symbol"],
   ["Existing accounts","Leave initial_password blank; existing password is never replaced"],
@@ -56,7 +58,7 @@ function addGuide(book,kind,allowRoles){
   ["Limit","Maximum 500 data rows per uploaded workbook; sent in 100-row batches"]
  ]:[
   ["Required columns","grade, section, academic_year, admission_number, student_name"],
-  ["Valid grades","Nursery, LKG, UKG, Grade 1, Grade 2, Grade 3, Grade 4"],
+  ["Valid grades","Nursery, LKG, UKG, Grade 1, Grade 2, Grade 3, Grade 4, Grade 5"],
   ["Class match","Classes must already exist in the selected school with exactly matching grade, section and academic year"],
   ["Admission number","Stable unique ID within each class. Strongly recommended; blank values generate a new ID"],
   ["Re-upload","Matching (class, admission_number) updates the student name without creating a duplicate"],
@@ -99,11 +101,11 @@ export async function downloadTemplate(kind,admin){
  styleSheet(sheet,headers);
  if(kind==="stakeholders"){
   for(let r=2;r<=501;r++){
-   sheet.getCell("C"+r).dataValidation={type:"list",allowBlank:false,formulae:[admin?'"owner,principal,coordinator,teacher"':'"teacher"']};
+   sheet.getCell("D"+r).dataValidation={type:"list",allowBlank:false,formulae:[admin?'"owner,principal,coordinator,teacher"':'"teacher"']};
   }
  }else{
   for(let r=2;r<=501;r++){
-   sheet.getCell("A"+r).dataValidation={type:"list",allowBlank:false,formulae:['"Nursery,LKG,UKG,Grade 1,Grade 2,Grade 3,Grade 4"']};
+   sheet.getCell("A"+r).dataValidation={type:"list",allowBlank:false,formulae:['"Nursery,LKG,UKG,Grade 1,Grade 2,Grade 3,Grade 4,Grade 5"']};
   }
  }
  return trigger(book,kind+"_upload_template.xlsx");
@@ -158,7 +160,8 @@ export async function readWorkbook(file,kind){
   const label=String(cell.text||"").trim().toLowerCase();
   available.set(label,column);
  });
- const missing=headers.filter(name=>!available.has(name));
+ const optional=kind==="stakeholders"?new Set(["email","mobile_number"]):new Set();
+ const missing=headers.filter(name=>!optional.has(name)&&!available.has(name));
  if(missing.length)throw Error("Required columns missing: "+missing.join(", "));
  const rows=[];
  sheet.eachRow({includeEmpty:false},(row,rowNumber)=>{
@@ -167,6 +170,7 @@ export async function readWorkbook(file,kind){
   const record={row_number:rowNumber};
   let hasData=false;
   for(const header of headers){
+   if(!available.has(header)){record[header]="";continue;}
    const cell=row.getCell(available.get(header));
    if(cell.formula||cell.sharedFormula)throw Error("Formula cells are not supported (row "+rowNumber+").");
    let value=cell.value;
@@ -182,8 +186,12 @@ export async function readWorkbook(file,kind){
  if(rows.length>500)throw Error("Upload at most 500 records per spreadsheet.");
  if(kind==="stakeholders"){
   const duplicates=new Set(),unique=new Set();
-  rows.forEach(r=>{const email=r.email.toLowerCase();if(unique.has(email))duplicates.add(email);unique.add(email);});
-  if(duplicates.size)throw Error("The sheet contains duplicate email addresses. Remove duplicates before uploading.");
+  rows.forEach(r=>{
+   for(const value of [r.email?.toLowerCase(),r.mobile_number?.replace(/\D/g,"")]){
+    if(!value)continue;if(unique.has(value))duplicates.add(value);unique.add(value);
+   }
+  });
+  if(duplicates.size)throw Error("The sheet contains duplicate email addresses or mobile numbers. Remove duplicates before uploading.");
  }else{
   const unique=new Set();
   for(const row of rows){

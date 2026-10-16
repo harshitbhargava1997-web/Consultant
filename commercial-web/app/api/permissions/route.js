@@ -1,6 +1,7 @@
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
 import {PERMISSION_ROLES,PERMISSION_KEYS} from "../../../lib/permissions";
+import {isConfirmedUser} from "../../../lib/auth";
 
 export const runtime="nodejs";
 function respond(data,status=200){return NextResponse.json(data,{status,headers:{"Cache-Control":"no-store"}});}
@@ -12,7 +13,7 @@ async function context(request){
  if(!url||!anon||!secret)return {error:"Permission service not configured.",status:503};
  const signed=createClient(url,anon,{auth:{persistSession:false,autoRefreshToken:false},global:{headers:{Authorization:"Bearer "+token}}});
  const {data:{user},error}=await signed.auth.getUser(token);
- if(error||!user||!user.email_confirmed_at)return {error:"Invalid or expired session.",status:401};
+ if(error||!isConfirmedUser(user))return {error:"Invalid or expired session.",status:401};
  const admin=createClient(url,secret,{auth:{persistSession:false,autoRefreshToken:false}});
  const {data:superRow,error:superError}=await admin.from("literacy_platform_admins").select("user_id").eq("user_id",user.id).maybeSingle();
  if(superError)return {error:"Unable to check administrator role.",status:503};

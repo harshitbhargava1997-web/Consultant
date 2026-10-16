@@ -8,7 +8,7 @@ export function browserClient() {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
   });
 }
-export const LEVELS = ["Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4"];
+export const LEVELS = ["Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5"];
 export const RATINGS = ["Not Assessed","Emerging","Developing","Independent"];
 export const MANAGERS = ["owner","principal","coordinator"];
 export function skillProgress(competencies, results, enrolledGrade) {

@@ -1,8 +1,9 @@
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
+import {isConfirmedUser} from "../../../lib/auth";
 
 export const runtime="nodejs";
-const GRADES=["Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4"];
+const GRADES=["Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5"];
 function send(data,status=200){return NextResponse.json(data,{status,headers:{"Cache-Control":"no-store"}});}
 export async function POST(request){
  try{
@@ -14,7 +15,7 @@ export async function POST(request){
   if(!url||!secret||!key)return send({error:"Admin service not configured."},503);
   const userClient=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
   const {data:{user},error:userError}=await userClient.auth.getUser(token);
-  if(userError||!user||!user.email_confirmed_at)return send({error:"Invalid account."},401);
+  if(userError||!isConfirmedUser(user))return send({error:"Invalid account."},401);
   const admin=createClient(url,secret,{auth:{persistSession:false,autoRefreshToken:false}});
   const {data:adminRow,error:adminError}=await admin.from("literacy_platform_admins")
     .select("user_id").eq("user_id",user.id).maybeSingle();
@@ -30,7 +31,18 @@ export async function POST(request){
   if(raw.length>20000)return send({error:"Request too large."},413);
   const body=JSON.parse(raw);
   const action=String(body.action||"");
-  if(action!=="create"&&action!=="update")return send({error:"Unknown action."},400);
+  if(!["create","update","delete"].includes(action))return send({error:"Unknown action."},400);
+  if(action==="delete"){
+   if(!adminRow)return send({error:"Only the Platform Super Admin may delete a competency."},403);
+   const id=String(body.id||"");
+   if(!/^[a-f0-9-]{36}$/i.test(id))return send({error:"Select a valid competency."},400);
+   const {data:deleted,error:deleteError}=await admin.rpc("literacy_delete_unused_competency",{
+    p_competency_id:id
+   });
+   if(deleteError)return send({error:deleteError.message},409);
+   if(deleted!==true)return send({error:"Competency not found."},404);
+   return send({deleted:true,message:"Competency permanently deleted."});
+  }
   const title=String(body.title||"").trim();
   const strand=String(body.strand||"").trim();
   const description=String(body.description||"").trim();

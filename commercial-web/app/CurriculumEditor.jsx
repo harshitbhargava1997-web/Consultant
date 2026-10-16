@@ -1,6 +1,6 @@
 "use client";
 import {useEffect,useState} from "react";
-import {Plus,Save,AlertTriangle} from "lucide-react";
+import {Plus,Save,AlertTriangle,Trash2} from "lucide-react";
 import {LEVELS} from "../lib/supabase";
 const empty={code:"",grade:"Nursery",strand:"Phonics",title:"",description:"",sequence:1,active:false,version:0};
 export default function CurriculumEditor({competencies,session,onSaved}){
@@ -32,9 +32,26 @@ export default function CurriculumEditor({competencies,session,onSaved}){
   }catch(err){setMessage(err.message);}
   finally{setBusy(false);}
  }
+ async function remove(){
+  const original=competencies.find(c=>c.id===selected);
+  if(!original||busy)return;
+  if(!window.confirm("Permanently delete competency “"+original.title+"”? This is allowed only when it has no assessment, training or implementation records."))return;
+  setBusy(true);setMessage("");
+  try{
+   const res=await fetch("/api/curriculum",{
+    method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},
+    body:JSON.stringify({action:"delete",id:original.id})
+   });
+   const data=await res.json();
+   if(!res.ok)throw Error(data.error||"Unable to delete competency.");
+   setSelected("new");setForm({...empty});setMessage(data.message);
+   if(onSaved)await onSaved();
+  }catch(err){setMessage(err.message+" Archive it by unchecking Publish if historical records must be preserved.");}
+  finally{setBusy(false);}
+ }
  return <section className="panel">
   <div className="panel-head"><h2>Super Admin · Curriculum editor</h2><span className="eyebrow">VERSIONED COMPETENCIES</span></div>
-  <p className="helper">Add English literacy competencies from Nursery through Grade 4, or update published criteria. Editing a competency preserves earlier assessment records. To change its code or grade, create a new competency and archive the old one.</p>
+  <p className="helper">Add English literacy competencies from Nursery through Grade 5, update published criteria, or delete an unused competency. Editing preserves earlier assessment records. To change its code or grade, create a new competency and archive the old one.</p>
   <form className="stack" onSubmit={save}>
    <label>Choose a competency to edit
     <select value={selected} onChange={e=>{setSelected(e.target.value);setMessage("");}}>
@@ -56,7 +73,10 @@ export default function CurriculumEditor({competencies,session,onSaved}){
    <label>Description / observable evidence<textarea rows={3} maxLength={2000} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
    <label className="curriculum-status"><input type="checkbox" checked={!!form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Publish this competency to assessments</label>
    <div className="notice small"><AlertTriangle size={17}/><span>Unchecking publish hides it from new assessments but does not delete any earlier assessment results. New competencies start as drafts unless you publish them.</span></div>
-   <button className="btn primary" type="submit" disabled={busy}>{selected==="new"?<Plus size={16}/>:<Save size={16}/>} {busy?"Saving…":selected==="new"?"Add competency":"Save competency · Version "+form.version}</button>
+   <div className="curriculum-actions">
+    <button className="btn primary" type="submit" disabled={busy}>{selected==="new"?<Plus size={16}/>:<Save size={16}/>} {busy?"Saving…":selected==="new"?"Add competency":"Save competency · Version "+form.version}</button>
+    {selected!=="new"&&<button className="btn danger" type="button" disabled={busy} onClick={remove}><Trash2 size={16}/> Delete competency</button>}
+   </div>
   </form>
   {message&&<p className="helper" role="status">{message}</p>}
  </section>;

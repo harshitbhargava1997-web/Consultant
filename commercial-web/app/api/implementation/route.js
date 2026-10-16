@@ -1,5 +1,6 @@
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
+import {isConfirmedUser} from "../../../lib/auth";
 import {randomUUID} from "node:crypto";
 
 export const runtime="nodejs";
@@ -34,7 +35,7 @@ async function authorize(request,schoolId){
  if(!token)return {error:"Sign in to access evidence.",status:401};
  const signed=dbClient(anon);
  const {data:{user},error:userError}=await signed.auth.getUser(token);
- if(userError||!user||!user.email_confirmed_at)return {error:"Invalid or expired session.",status:401};
+ if(userError||!isConfirmedUser(user))return {error:"Invalid or expired session.",status:401};
  if(user.app_metadata?.must_change_password)return {error:"Change your initial password first.",status:403};
  const admin=dbClient(secret);
  const {data:superUser,error:superError}=await admin.from("literacy_platform_admins")

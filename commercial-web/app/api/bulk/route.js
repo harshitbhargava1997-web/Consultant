@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
+import {isConfirmedUser,isEmail,normalizePhone} from "../../../lib/auth";
 
 export const runtime="nodejs";
 const ROLES=["owner","principal","coordinator","teacher"];
-const GRADES=["Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4"];
+const GRADES=["Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5"];
 const MANAGERS=["owner","principal","coordinator"];
 
 function response(data,status=200){
@@ -22,7 +23,7 @@ async function authorized(request,schoolId){
  if(!token)return {error:"Sign in required.",status:401};
  const userClient=client(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
  const {data:{user},error:authError}=await userClient.auth.getUser(token);
- if(authError||!user||!user.email_confirmed_at)return {error:"Sign in again.",status:401};
+ if(authError||!isConfirmedUser(user))return {error:"Sign in again.",status:401};
  if(user.app_metadata?.must_change_password)return {error:"Change your initial password first.",status:403};
  const admin=client(process.env.SUPABASE_SERVICE_ROLE_KEY);
  const {data:administrator,error:adminError}=await admin.from("literacy_platform_admins")
@@ -52,16 +53,20 @@ async function authorized(request,schoolId){
  return {admin,user,isAdmin,isAssignedConsultant,role,granted,school};
 }
 async function authUsers(admin){
- const byEmail=new Map(),byId=new Map();
+ const byEmail=new Map(),byPhone=new Map(),byId=new Map();
  for(let page=1;page<=50;page++){
   const {data,error}=await admin.auth.admin.listUsers({page,perPage:200});
   if(error)throw error;
   const users=data.users||[];
-  for(const user of users){if(user.email)byEmail.set(user.email.toLowerCase(),user);byId.set(user.id,user);}
+  for(const user of users){
+   if(user.email)byEmail.set(user.email.toLowerCase(),user);
+   if(user.phone)byPhone.set(user.phone,user);
+   byId.set(user.id,user);
+  }
   if(users.length<200)break;
   if(page===50)throw Error("The authentication directory is too large for bulk onboarding.");
  }
- return {byEmail,byId};
+ return {byEmail,byPhone,byId};
 }
 async function allRows(queryBuilder){
  const data=[];
@@ -92,17 +97,26 @@ async function importPeople(ctx,rows){
  const assigned=new Map((members||[]).map(m=>[m.user_id,m.role]));
  const seen=new Set();
  for(const row of rows){
-  const name=clean(row.full_name),email=clean(row.email).toLowerCase(),
+  const name=clean(row.full_name),email=clean(row.email).toLowerCase(),rawMobile=clean(row.mobile_number),
+   phone=normalizePhone(rawMobile),
    role=clean(row.role).toLowerCase(),password=typeof row.initial_password==="string"?row.initial_password:"";
-  if(name.length<2||name.length>160||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!ROLES.includes(role)){
-   results.push(rowResult(row,"error","A valid full_name, email and role are required."));continue;
+  if(name.length<2||name.length>160||(email&&!isEmail(email))||(rawMobile&&!phone)||(!email&&!phone)||
+    (role!=="teacher"&&(!email||phone))||!ROLES.includes(role)){
+   results.push(rowResult(row,"error",role==="teacher"?
+    "A valid full_name, role and either email or mobile_number are required.":
+    "Leadership roles require full_name, email and role; mobile login is teacher-only."));continue;
   }
   if(!ctx.isAdmin&&!ctx.isAssignedConsultant&&role!=="teacher"){
    results.push(rowResult(row,"error","Only Platform Super Admins can add non-teacher roles."));continue;
   }
-  if(seen.has(email)){results.push(rowResult(row,"error","Duplicate email in this upload batch."));continue;}
-  seen.add(email);
-  let user=directory.byEmail.get(email);
+  const identityKeys=[email&&"email:"+email,phone&&"phone:"+phone].filter(Boolean);
+  if(identityKeys.some(key=>seen.has(key))){results.push(rowResult(row,"error","Duplicate email or mobile number in this upload batch."));continue;}
+  identityKeys.forEach(key=>seen.add(key));
+  const emailUser=email?directory.byEmail.get(email):null,phoneUser=phone?directory.byPhone.get(phone):null;
+  if(emailUser&&phoneUser&&emailUser.id!==phoneUser.id){
+   results.push(rowResult(row,"error","Email and mobile number belong to different accounts."));continue;
+  }
+  let user=emailUser||phoneUser;
   if(user&&!ctx.isAdmin&&!ctx.isAssignedConsultant&&assigned.has(user.id)&&assigned.get(user.id)!=="teacher"){
    results.push(rowResult(row,"error","This user already has a higher school role."));continue;
   }
@@ -111,14 +125,29 @@ async function importPeople(ctx,rows){
   }
   let wasCreated=false;
   try{
+   if(user&&phone){
+    const {data:higherRoles,error:higherError}=await ctx.admin.from("literacy_memberships")
+     .select("role").eq("user_id",user.id).neq("role","teacher").limit(1);
+    if(higherError)throw higherError;
+    if(higherRoles?.length)throw Error("Mobile login is available only for teacher-only accounts.");
+   }
    if(!user){
-    const {data,error}=await ctx.admin.auth.admin.createUser({
-     email,password,email_confirm:true,user_metadata:{full_name:name},
-     app_metadata:{must_change_password:false}
-    });
+    const identity={password,user_metadata:{full_name:name},app_metadata:{must_change_password:false}};
+    if(email){identity.email=email;identity.email_confirm=true;}
+    if(phone){identity.phone=phone;identity.phone_confirm=true;}
+    const {data,error}=await ctx.admin.auth.admin.createUser(identity);
     if(error)throw error;
     user=data.user;wasCreated=true;
-    directory.byEmail.set(email,user);directory.byId.set(user.id,user);
+    if(email)directory.byEmail.set(email,user);
+    if(phone)directory.byPhone.set(phone,user);
+    directory.byId.set(user.id,user);
+   }else if(role==="teacher"&&((email&&!user.email)||(phone&&!user.phone))){
+    const identityUpdate={};
+    if(email&&!user.email){identityUpdate.email=email;identityUpdate.email_confirm=true;}
+    if(phone&&!user.phone){identityUpdate.phone=phone;identityUpdate.phone_confirm=true;}
+    const {data,error}=await ctx.admin.auth.admin.updateUserById(user.id,identityUpdate);
+    if(error)throw error;
+    user=data.user;
    }
    const {error}=await ctx.admin.from("literacy_memberships").upsert({
      user_id:user.id,school_id:ctx.school.id,role,display_name:name
@@ -130,7 +159,9 @@ async function importPeople(ctx,rows){
   }catch(e){
    if(wasCreated){
     await ctx.admin.auth.admin.deleteUser(user.id).catch(()=>{});
-    directory.byEmail.delete(email);directory.byId.delete(user.id);
+    if(email)directory.byEmail.delete(email);
+    if(phone)directory.byPhone.delete(phone);
+    directory.byId.delete(user.id);
    }
    results.push(rowResult(row,"error",e.message||"Account provisioning failed."));
   }
@@ -214,7 +245,8 @@ async function exportPeople(ctx){
   .select("user_id,display_name,role").eq("school_id",ctx.school.id).order("display_name").range(from,to));
  const {byId}=await authUsers(ctx.admin);
  return memberships.map(m=>({
-   full_name:m.display_name||"",email:byId.get(m.user_id)?.email||"",role:m.role||""
+   full_name:m.display_name||"",email:byId.get(m.user_id)?.email||"",
+   mobile_number:byId.get(m.user_id)?.phone||"",role:m.role||""
  }));
 }
 async function exportStudents(ctx){

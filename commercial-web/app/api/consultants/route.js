@@ -1,5 +1,6 @@
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
+import {isConfirmedUser} from "../../../lib/auth";
 export const runtime="nodejs";
 function send(data,status=200){return NextResponse.json(data,{status,headers:{"Cache-Control":"no-store"}});}
 function text(x){return typeof x==="string"?x.trim():String(x??"").trim();}
@@ -13,7 +14,7 @@ async function context(request){
   return {error:"Admin service not configured.",status:503};
  const auth=connect(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
  const {data:{user},error}=await auth.auth.getUser(token);
- if(error||!user||!user.email_confirmed_at)return {error:"Sign in with a confirmed account.",status:401};
+ if(error||!isConfirmedUser(user))return {error:"Sign in with a confirmed account.",status:401};
  const admin=connect(process.env.SUPABASE_SERVICE_ROLE_KEY);
  const [superRes,profileRes]=await Promise.all([
   admin.from("literacy_platform_admins").select("user_id").eq("user_id",user.id).maybeSingle(),

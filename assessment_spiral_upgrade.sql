@@ -1,6 +1,6 @@
--- Enable Grade 4 on existing deployments without touching existing classes.
+-- Enable Grade 5 on existing deployments without touching existing classes.
 alter table public.literacy_classes drop constraint if exists literacy_classes_grade_check;
-alter table public.literacy_classes add constraint literacy_classes_grade_check check (grade in ('Nursery','LKG','UKG','Grade 1','Grade 2','Grade 3','Grade 4'));
+alter table public.literacy_classes add constraint literacy_classes_grade_check check (grade in ('Nursery','LKG','UKG','Grade 1','Grade 2','Grade 3','Grade 4','Grade 5'));
 -- Run ONLY after the prior assessment_migration.sql has already been installed.
 create or replace function public.literacy_submit_assessment(p_school_id uuid,p_class_id uuid,p_subject_type text,p_subject_id uuid,p_assessment_date date,p_notes text,p_results jsonb)
 returns uuid language plpgsql security definer set search_path='' as $$
@@ -22,7 +22,7 @@ begin
  for entry in select * from jsonb_array_elements(p_results) loop
    competency := (entry->>'competency_id')::uuid; rating_name := entry->>'rating';
    if rating_name not in ('Not Assessed','Emerging','Developing','Independent') then raise exception 'Invalid rating'; end if;
-   if not exists(select 1 from public.literacy_competencies where id=competency and grade in ('Nursery','LKG','UKG','Grade 1','Grade 2','Grade 3','Grade 4') and active=true and array_position(array['Nursery','LKG','UKG','Grade 1','Grade 2','Grade 3','Grade 4'], grade) <= array_position(array['Nursery','LKG','UKG','Grade 1','Grade 2','Grade 3','Grade 4'], grade_name)) then raise exception 'Competency is above enrolled grade or inactive'; end if;
+   if not exists(select 1 from public.literacy_competencies where id=competency and grade in ('Nursery','LKG','UKG','Grade 1','Grade 2','Grade 3','Grade 4','Grade 5') and active=true and array_position(array['Nursery','LKG','UKG','Grade 1','Grade 2','Grade 3','Grade 4','Grade 5'], grade) <= array_position(array['Nursery','LKG','UKG','Grade 1','Grade 2','Grade 3','Grade 4','Grade 5'], grade_name)) then raise exception 'Competency is above enrolled grade or inactive'; end if;
  end loop;
  insert into public.literacy_assessments(school_id,class_id,subject_type,student_id,teacher_user_id,assessor_user_id,assessment_date,notes)
  values(p_school_id,p_class_id,p_subject_type,case when p_subject_type='student' then p_subject_id end,case when p_subject_type='teacher' then p_subject_id end,uid,p_assessment_date,coalesce(p_notes,'')) returning id into aid;

@@ -1,11 +1,12 @@
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
+import {isConfirmedUser} from "../../../lib/auth";
 import {randomUUID} from "node:crypto";
 export const runtime="nodejs";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TYPES=["pdf","video","mooc","reading","exercise","interactive"];
 const ROLES=["consultant","owner","principal","coordinator","teacher"];
-const GRADES=["All Grades","Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4"];
+const GRADES=["All Grades","Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5"];
 const BUCKET="vision-training";
 const send=(data,status=200)=>NextResponse.json(data,{status,headers:{"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
 const clean=(value,max=200)=>String(value??"").trim().slice(0,max+1);
@@ -22,7 +23,7 @@ async function access(request,schoolId){
  if(!token)return {error:"Sign in first.",status:401};
  const signed=supabase(publicKey);
  const {data:{user},error:authError}=await signed.auth.getUser(token);
- if(authError||!user||!user.email_confirmed_at)return {error:"Session expired. Sign in again.",status:401};
+ if(authError||!isConfirmedUser(user))return {error:"Session expired. Sign in again.",status:401};
  if(user.app_metadata?.must_change_password)return {error:"Change initial password first.",status:403};
  const admin=supabase(secret);
  const {data:administrator,error:adminError}=await admin.from("literacy_platform_admins")
@@ -297,7 +298,7 @@ export async function GET(request){
   const {data:consultantName}=ctx.role==="consultant"?await ctx.admin.from("literacy_consultants")
    .select("display_name").eq("user_id",ctx.user.id).maybeSingle():{data:null};
   const learnerName=memberName?.display_name||consultantName?.display_name||
-   ctx.user.user_metadata?.full_name||ctx.user.email||"Learner";
+   ctx.user.user_metadata?.full_name||ctx.user.email||ctx.user.phone||"Learner";
   const [own,people,sessions]=await Promise.all([
    ownLearning(ctx,units,courses),reviewSchool(ctx,courses,units),trainingSessions(ctx,courses)
   ]);

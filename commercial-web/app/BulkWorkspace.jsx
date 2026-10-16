@@ -119,7 +119,7 @@ export default function BulkWorkspace({session,schoolId,schoolName,canExport,can
    </section>
    {canExport&&<section className="panel">
     <div className="panel-head"><h2><Download size={19}/> Download school data</h2></div>
-    <p className="helper">Export current {kind==="stakeholders"?"stakeholder names, login emails and roles":"student names, admission numbers, grades, sections and academic years"} for the selected school. No passwords are exported.</p>
+    <p className="helper">Export current {kind==="stakeholders"?"stakeholder names, login emails, teacher mobile numbers and roles":"student names, admission numbers, grades, sections and academic years"} for the selected school. No passwords are exported.</p>
     <button className="btn outline" disabled={busy||!schoolId} onClick={exportData}><Download size={16}/> Export {kind==="stakeholders"?"stakeholders":"student roster"} (.xlsx)</button>
    </section>}
    <section className="panel">

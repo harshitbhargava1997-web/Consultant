@@ -1,5 +1,6 @@
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
+import {isConfirmedUser} from "../../../lib/auth";
 
 export const runtime="nodejs";
 const UUID=/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
@@ -19,7 +20,7 @@ async function authorize(request,schoolId){
  if(!token)return {error:"Sign in to view reports.",status:401};
  const auth=db(anon),admin=db(secret);
  const {data:{user},error:userError}=await auth.auth.getUser(token);
- if(userError||!user?.email_confirmed_at)return {error:"Session expired. Sign in again.",status:401};
+ if(userError||!isConfirmedUser(user))return {error:"Session expired. Sign in again.",status:401};
  if(user.app_metadata?.must_change_password)return {error:"Change the initial password first.",status:403};
  const [a,c,m]=await Promise.all([
   admin.from("literacy_platform_admins").select("user_id").eq("user_id",user.id).maybeSingle(),
@@ -124,7 +125,7 @@ async function studentStats(ctx,base){
   }
  }
  const rows=[...grades.values()].sort((a,b)=>{
-  const order=["Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4"];
+  const order=["Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5"];
   return order.indexOf(a.grade)-order.indexOf(b.grade);
  });
  return {students:base.students.length,assessedStudents:observedByStudent.size,

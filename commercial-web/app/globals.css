@@ -409,6 +409,7 @@
  .assessment-structure-filters{grid-template-columns:1fr}
  .assessment-structure-items{grid-template-columns:1fr}
  .assessment-structure-actions>.btn{width:100%}
+.curriculum-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.curriculum-actions .btn{align-self:auto}.btn.danger{background:#fff4f3;border-color:#efc4c0;color:#a9342c}.btn.danger:hover:not(:disabled){background:#fde8e5}
 }
 
 

@@ -1,5 +1,6 @@
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
+import {isConfirmedUser} from "../../../lib/auth";
 import {randomUUID} from "node:crypto";
 export const runtime="nodejs";
 const BUCKET="vision-assessment-evidence";
@@ -15,7 +16,7 @@ async function session(request,schoolId){
  if(!token)return {error:"Sign in to access student evidence.",status:401};
  const signed=client(anon),admin=client(secret);
  const {data:{user},error}=await signed.auth.getUser(token);
- if(error||!user?.email_confirmed_at)return {error:"Session expired.",status:401};
+ if(error||!isConfirmedUser(user))return {error:"Session expired.",status:401};
  if(user.app_metadata?.must_change_password)return {error:"Change your initial password first.",status:403};
  if(!UUID.test(schoolId))return {error:"Select a valid school.",status:400};
  const [superUser,assigned,member]=await Promise.all([

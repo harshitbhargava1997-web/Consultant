@@ -21,12 +21,12 @@ This is a **separate Next.js application** located in commercial-web/, intention
 
 ## What works in source
 
-- Supabase Auth email/password login, reset via Supabase recovery email, first-login password change UI.
+- Supabase Auth email/password login for school leaders and email-or-mobile/password login for teachers. Email accounts reset through recovery email; mobile-only teachers require an administrator-assisted password reset.
 - One browser app with accessible-school selector and role-aware sidebar navigation.
 - Platform Super Admin APIs verify bearer JWT against Supabase Auth and the private literacy_platform_admins registry before elevated actions.
 - School creation, owner/principal/coordinator/teacher account assignment (new account temporary credential displayed once).
 - School-scoped classes, independent student assessment IDs, CSV student roster import.
-- Cumulative competencies Nursery–Grade 4, student and leadership teacher assessment RPC, basic literacy level reports (provisional 80%/80% rule).
+- Cumulative competencies Nursery–Grade 5, student and leadership teacher assessment RPC, basic literacy level reports (provisional 80%/80% rule).
 - Historical implementation and observation tabs intentionally present as pending rather than fabricated data.
 
 ## Limitations to resolve for commercial production

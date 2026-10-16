@@ -31,7 +31,7 @@ export default function SchoolManagementWorkspace({
  const [tab,setTab]=useState(isAdmin?"leaders":"classes"),[expandedBulk,setExpandedBulk]=useState("");
  const [busy,setBusy]=useState(false),[notice,setNotice]=useState("");
  const [classForm,setClassForm]=useState({grade:"Nursery",section:"A",academic_year:"2026-27"});
- const [staff,setStaff]=useState({name:"",email:"",role:"teacher",initialPassword:"",confirmPassword:""});
+ const [staff,setStaff]=useState({name:"",email:"",mobile:"",role:"teacher",initialPassword:"",confirmPassword:""});
  const [selectedTeacher,setSelectedTeacher]=useState(""),[chosenClasses,setChosenClasses]=useState([]);
  const [studentClass,setStudentClass]=useState(""),[studentName,setStudentName]=useState(""),[admission,setAdmission]=useState("");
  const [teacherSearch,setTeacherSearch]=useState(""),[studentSearch,setStudentSearch]=useState("");
@@ -79,12 +79,12 @@ export default function SchoolManagementWorkspace({
    const response=await fetch("/api/admin",{
     method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},
     body:JSON.stringify({action:"createUser",schoolId,fullName:staff.name.trim(),
-     email:staff.email.trim(),role:isAdmin?"teacher":canManageAllRoles?staff.role:"teacher",
+     email:staff.email.trim(),mobile:staff.mobile.trim(),role:isAdmin?"teacher":canManageAllRoles?staff.role:"teacher",
      initialPassword:staff.initialPassword})
    });
    const data=await response.json().catch(()=>({}));
    if(!response.ok)throw Error(data.error||"Unable to add user.");
-   setStaff({name:"",email:"",role:"teacher",initialPassword:"",confirmPassword:""});
+   setStaff({name:"",email:"",mobile:"",role:"teacher",initialPassword:"",confirmPassword:""});
    await reload();setNotice(data.message||"Account added. Select the teacher below to assign classes.");
   }catch(error){setNotice("Account was not saved: "+error.message);}
   finally{setBusy(false);}
@@ -202,12 +202,13 @@ export default function SchoolManagementWorkspace({
      <div className="panel-head"><h2><Plus size={18}/> Add teacher or school staff</h2></div>
      <form className="stack" onSubmit={createStaff}>
       <label>Name<input required minLength={2} maxLength={160} value={staff.name} onChange={e=>setStaff({...staff,name:e.target.value})}/></label>
-      <label>Login email<input required type="email" value={staff.email} onChange={e=>setStaff({...staff,email:e.target.value})}/></label>
+      <label>Login email (optional for teachers)<input type="email" value={staff.email} onChange={e=>setStaff({...staff,email:e.target.value})}/></label>
+      <label>Teacher mobile login (optional)<input type="tel" inputMode="tel" value={staff.mobile} onChange={e=>setStaff({...staff,mobile:e.target.value})} placeholder="9876543210"/></label>
       {canManageAllRoles&&!isAdmin&&<label>Stakeholder role<select value={staff.role} onChange={e=>setStaff({...staff,role:e.target.value})}>
        {["teacher","owner","principal","coordinator"].map(r=><option value={r} key={r}>{r}</option>)}</select></label>}
       <label>Initial password (new accounts)<input type="password" minLength={12} maxLength={128} autoComplete="new-password" value={staff.initialPassword} onChange={e=>setStaff({...staff,initialPassword:e.target.value})}/></label>
       <label>Confirm password<input type="password" minLength={12} maxLength={128} autoComplete="new-password" value={staff.confirmPassword} onChange={e=>setStaff({...staff,confirmPassword:e.target.value})}/></label>
-      <p className="helper">New accounts require a strong password. Leave passwords blank to assign an existing user without changing their login. Share initial credentials privately.</p>
+      <p className="helper">Provide an email, mobile number, or both for a teacher. Indian 10-digit numbers are stored with +91. New accounts require a strong password. Leave passwords blank to assign an existing user without changing their login.</p>
       <button className="btn primary" type="submit" disabled={busy}>Save staff member</button>
      </form>
     </section>}
