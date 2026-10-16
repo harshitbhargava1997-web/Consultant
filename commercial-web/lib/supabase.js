@@ -10,6 +10,17 @@ export function browserClient() {
 }
 export const LEVELS = ["Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5"];
 export const RATINGS = ["Not Assessed","Emerging","Developing","Independent"];
+export const RATING_LABELS = {
+  "Not Assessed": "Not checked",
+  "Emerging": "Cannot do yet",
+  "Developing": "Can do with help",
+  "Independent": "Can do independently"
+};
+export const ASSESSMENT_MODES = [
+  {value:"complete",label:"Complete assessment",detail:"Check all applicable competencies"},
+  {value:"random",label:"Random assessment",detail:"Software selects a balanced sample"},
+  {value:"targeted",label:"Targeted assessment",detail:"Recheck competencies needing support"}
+];
 export const MANAGERS = ["owner","principal","coordinator"];
 export function skillProgress(competencies, results, enrolledGrade) {
   const levels = LEVELS.slice(0, LEVELS.indexOf(enrolledGrade) + 1);

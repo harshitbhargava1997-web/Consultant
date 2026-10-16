@@ -1,8 +1,8 @@
 "use client";
 import {useEffect,useMemo,useState} from "react";
 import {Plus,Trash2,Eye,ChevronDown} from "lucide-react";
+import {RATINGS,RATING_LABELS} from "../lib/supabase";
 
-const SOUND_RATINGS=["Not Assessed","Emerging","Developing","Independent"];
 export function soundLabel(item){
  return item.grapheme+" · "+item.phoneme+" · "+item.example_word+(item.action_name?" · "+item.action_name:"");
 }
@@ -99,7 +99,7 @@ export default function PhonicsSoundPicker({items=[],value={},onChange,disabled=
     </div>
     <select disabled={disabled} aria-label={"Sound observation rating for "+soundLabel(item)}
      value={value[item.id]||"Not Assessed"} onChange={e=>onChange({...value,[item.id]:e.target.value})}>
-     {SOUND_RATINGS.map(r=><option key={r} value={r}>{r}</option>)}
+     {RATINGS.map(r=><option key={r} value={r}>{RATING_LABELS[r]}</option>)}
     </select>
     <button className="btn outline" type="button" disabled={disabled} aria-label={"Remove "+soundLabel(item)}
      onClick={()=>{const copy={...value};delete copy[item.id];onChange(copy);}}><Trash2 size={14}/></button>

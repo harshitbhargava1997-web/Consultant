@@ -2,7 +2,7 @@
 
 import {useEffect,useMemo,useState} from "react";
 import {BookOpen,CalendarDays,CheckCircle2,ClipboardCheck,Clock3,GraduationCap,RotateCcw,Search,TrendingUp} from "lucide-react";
-import {LEVELS,RATINGS,skillProgress} from "../lib/supabase";
+import {ASSESSMENT_MODES,LEVELS,RATINGS,RATING_LABELS,skillProgress} from "../lib/supabase";
 import PhonicsSoundPicker,{PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload,soundLabel} from "./PhonicsSoundPicker";
 import SoundProgressPanel from "./SoundProgressPanel";
 
@@ -12,7 +12,6 @@ const STAGES=[
  {value:"periodic",name:"Periodic",detail:"Regular competency check"},
  {value:"endline",name:"Endline",detail:"End-of-cycle review"}
 ];
-const RATE_LABELS={"Emerging":"Emerging","Developing":"Developing","Independent":"Independent"};
 const ROLE_LABELS={super_admin:"Super Admin",consultant:"Consultant",owner:"School owner",
  principal:"Principal",coordinator:"Coordinator",teacher:"Teacher",legacy:"School assessor"};
 function localToday(){
@@ -54,6 +53,11 @@ function gradeBuckets(skills){
  }
  return [...map.values()];
 }
+function randomIds(skills,count=5){
+ const pool=[...skills];
+ for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
+ return pool.slice(0,Math.min(count,pool.length)).map(skill=>skill.id);
+}
 function ProgressSummary({skills,previous,student}){
  const completed=skills.filter(c=>!!previous[c.id]),independent=completed.filter(c=>previous[c.id]?.rating==="Independent");
  const ratings=Object.fromEntries(Object.entries(previous).map(([key,val])=>[key,val.rating]));
@@ -77,6 +81,7 @@ function ProgressSummary({skills,previous,student}){
 export default function AssessorWorkspace({client,session,schoolId,classes,students,competencies,canCreate=true,canViewHistory=true,canUploadEvidence=true,canViewEvidence=true,onSaved}){
  const [classId,setClassId]=useState(""),[studentId,setStudentId]=useState("");
  const [scope,setScope]=useState("cumulative"),[stage,setStage]=useState("baseline");
+ const [assessmentMode,setAssessmentMode]=useState("complete"),[randomSelection,setRandomSelection]=useState([]);
  const [assessmentDate,setAssessmentDate]=useState(localToday);
  const [ratings,setRatings]=useState({}),[evidence,setEvidence]=useState({});
  const [soundRatings,setSoundRatings]=useState({});
@@ -104,17 +109,24 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
  const scoped=availableSkills.filter(c=>(scope==="cumulative"||c.grade===enrolledGrade)&&
    (gradeFilter==="all"||c.grade===gradeFilter));
  const needle=search.trim().toLowerCase();
- const visibleSkills=scoped.filter(c=>!needle||[c.title,c.code,c.strand,c.description,c.grade].join(" ").toLowerCase().includes(needle));
+ const matchingSkills=scoped.filter(c=>!needle||[c.title,c.code,c.strand,c.description,c.grade].join(" ").toLowerCase().includes(needle));
  const selectedCount=Object.values(ratings).filter(r=>RATINGS.includes(r)&&r!=="Not Assessed").length;
- const buckets=gradeBuckets(visibleSkills);
  const {grouped,previous}=useMemo(()=>historyBySession(sessions,results),[sessions,results]);
+ const visibleSkills=matchingSkills.filter(c=>assessmentMode==="complete"||
+  assessmentMode==="random"&&randomSelection.includes(c.id)||
+  assessmentMode==="targeted"&&previous[c.id]&&previous[c.id].rating!=="Independent");
+ const buckets=gradeBuckets(visibleSkills);
  const chosenGrade=chosenStudent?{...chosenStudent,grade:enrolledGrade}:null;
  const latest=sessions[0];
  useEffect(()=>{setClassId("");setStudentId("");setMessage("");setError("");setSearch("");setGradeFilter("all");},[schoolId]);
  useEffect(()=>{setStudentId("");setRatings({});setEvidence({});setSoundRatings({});setObservations("");setNextAction("");
-  setMessage("");setError("");setSearch("");setGradeFilter("all");},[activeClass?.id]);
+  setAssessmentMode("complete");setRandomSelection([]);setMessage("");setError("");setSearch("");setGradeFilter("all");},[activeClass?.id]);
  useEffect(()=>{setRatings({});setEvidence({});setSoundRatings({});setObservations("");setNextAction("");setMessage("");setError("");
-  setExpanded("");},[studentId]);
+  setAssessmentMode("complete");setRandomSelection([]);setExpanded("");},[studentId]);
+ useEffect(()=>{
+  if(assessmentMode!=="random"){setRandomSelection([]);return;}
+  setRandomSelection(randomIds(scoped));
+ },[assessmentMode,studentId,scope,gradeFilter]);
  useEffect(()=>{
   if(!canViewHistory||!client||!activeClass?.id||!studentId||!eligibleStudents.some(s=>s.id===studentId)){
    setSessions([]);setResults([]);setSoundHistory([]);setLoadingHistory(false);return;
@@ -123,7 +135,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
   (async()=>{
    try{
     const {data:list,error:listError}=await client.from("literacy_assessments")
-     .select("id,assessment_date,assessment_stage,next_action,notes,assessor_role,created_at")
+     .select("id,assessment_date,assessment_stage,assessment_mode,next_action,notes,assessor_role,created_at")
      .eq("school_id",schoolId).eq("class_id",activeClass.id).eq("student_id",studentId)
      .eq("subject_type","student")
      .order("assessment_date",{ascending:false}).order("created_at",{ascending:false})
@@ -224,13 +236,13 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
    const {data,error:rpcError}=await client.rpc("literacy_submit_detailed_assessment",{
     p_school_id:schoolId,p_class_id:activeClass.id,p_subject_type:"student",p_subject_id:chosenStudent.id,
     p_assessment_date:assessmentDate,p_stage:stage,p_notes:observations.trim(),
-    p_next_action:nextAction.trim(),p_results:payload
+    p_next_action:nextAction.trim(),p_results:payload,p_mode:assessmentMode
    });
    if(rpcError)throw rpcError;
    if(!data)throw Error("The server returned no assessment ID.");
    setRatings({});setEvidence({});setSoundRatings({});setObservations("");setNextAction("");
    setExpanded(data);setHistoryVersion(v=>v+1);
-   setStage("follow_up");setMessage("Assessment saved successfully. The completed session has been added to this student's history.");
+   setStage("follow_up");setMessage("Assessment saved successfully. The "+assessmentMode+" session has been added to this student's history.");
    if(onSaved)await onSaved();
   }catch(e){setError("Assessment was not saved: "+e.message);}
   finally{setSaving(false);}
@@ -266,7 +278,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
    {canCreate&&<section className="panel assessor-panel">
     <div className="panel-head"><h2><ClipboardCheck size={18}/> Assess observable learning</h2>
      <span className="eyebrow">{selectedCount} NEW RATINGS</span></div>
-    <div className="three-col">
+    <div className="three-col assessor-setup-grid">
      <label>Assessment date<input type="date" required max={localToday()} value={assessmentDate}
       onChange={e=>setAssessmentDate(e.target.value)}/></label>
      <label>Competency scope<select value={scope} onChange={e=>{setScope(e.target.value);setGradeFilter("all");}}>
@@ -276,17 +288,22 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
      <label>Grade filter<select value={gradeFilter} onChange={e=>setGradeFilter(e.target.value)}>
       <option value="all">All included grades</option>{selectableGrades.filter(g=>scope==="cumulative"||g===enrolledGrade).map(g=><option key={g} value={g}>{g}</option>)}
      </select></label>
+     <label>Assessment type<select value={assessmentMode} onChange={e=>{
+      setAssessmentMode(e.target.value);setRatings({});setEvidence({});setSoundRatings({});
+     }}>{ASSESSMENT_MODES.map(mode=><option key={mode.value} value={mode.value}>{mode.label}</option>)}</select></label>
     </div>
     <div className="assessor-toolbar">
      <label className="assessor-search"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)}
       placeholder="Find a sound, reading or writing competency…" aria-label="Search competencies"/></label>
      <button type="button" className="btn outline" onClick={resetDraft} disabled={saving}><RotateCcw size={15}/> Clear draft</button>
+     {assessmentMode==="random"&&<button type="button" className="btn outline" onClick={()=>setRandomSelection(randomIds(matchingSkills))} disabled={saving}>
+      Select another sample</button>}
     </div>
-    <div className="notice small">Choose a rating only after observing the skill. Leave unobserved skills as Not Assessed. Previous ratings are reference evidence and are not prefilled as new results.</div>
+    <div className="notice small">{ASSESSMENT_MODES.find(mode=>mode.value===assessmentMode)?.detail}. Record only what you observe; the report level is calculated automatically.</div>
     {missingGrade&&<div className="notice small">No competencies have been published specifically for {enrolledGrade}. You can assess earlier published levels cumulatively until the Super Admin publishes the {enrolledGrade} progression.</div>}
     {!availableSkills.length?<div className="empty"><BookOpen size={25}/><h3>Competencies not published</h3><p>Ask the Super Admin to publish literacy skills before starting assessment.</p></div>:
     <form onSubmit={saveAssessment} className="assessor-form">
-     {buckets.length===0&&<p className="helper">No competencies match the selected filter.</p>}
+     {buckets.length===0&&<p className="helper">{assessmentMode==="targeted"?"No previously assessed competencies currently need targeted support. Choose Complete or Random assessment to continue.":"No competencies match the selected filter."}</p>}
      {buckets.map(bucket=><div className="assessor-bucket" key={bucket.key}>
       <div className="assessor-bucket-heading"><span>{bucket.grade} · {bucket.strand}</span><small>{bucket.items.length} competencies</small></div>
       {bucket.items.map(c=>{
@@ -300,7 +317,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
         <div className="assessor-rate-group" role="group" aria-label={"Rating for "+c.title}>
          {RATINGS.map(r=><button type="button" key={r} onClick={()=>rate(c.id,r)} disabled={saving}
           aria-pressed={current===r} className={"assessor-rate "+(current===r?"assessor-selected":"")}>
-          {r==="Not Assessed"?"Not assessed":RATE_LABELS[r]}</button>)}
+          {RATING_LABELS[r]}</button>)}
         </div>
         {current==="Not Assessed"&&(phonicsByCompetency[c.id]||[]).length>0&&
          <PhonicsStructurePreview items={phonicsByCompetency[c.id]} personLabel="student"/>}
@@ -322,7 +339,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
        onChange={e=>setNextAction(e.target.value)} placeholder="e.g. three phoneme-blending sessions, then reassess in two weeks"/></label>
      </div>
      <div className="assessor-save-row">
-      <p><strong>{selectedCount}</strong> new skills rated · <strong>{STAGES.find(s=>s.value===stage)?.name}</strong> session
+      <p><strong>{selectedCount}</strong> new skills rated · <strong>{ASSESSMENT_MODES.find(mode=>mode.value===assessmentMode)?.label}</strong>
        <small>Saving creates an immutable dated assessment record.</small></p>
       <button className="btn primary" type="submit" disabled={saving||selectedCount===0||!assessmentDate}>
        <CheckCircle2 size={16}/>{saving?"Saving assessment…":"Save assessment"}
@@ -341,7 +358,8 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
        return <div className="assessor-session" key={item.id}>
         <button type="button" aria-expanded={isOpen} className="assessor-session-head" onClick={()=>setExpanded(isOpen?"":item.id)}>
          <span><CalendarDays size={15}/><strong>{formatDay(item.assessment_date)}</strong>
-          <span>{STAGES.find(s=>s.value===item.assessment_stage)?.name||"Periodic"}</span></span>
+          <span>{STAGES.find(s=>s.value===item.assessment_stage)?.name||"Periodic"}</span>
+          <span>{ASSESSMENT_MODES.find(mode=>mode.value===item.assessment_mode)?.label||"Assessment"}</span></span>
          <small>{ROLE_LABELS[item.assessor_role]||"School assessor"} · {details.length} rated · {independence} independent</small>
         </button>
         {isOpen&&<div className="assessor-session-body">
@@ -355,13 +373,13 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
             <div className="assessor-history-skill-title">
              <span><strong>{c?.title||"Archived competency"}</strong>
               <small>{c?.grade||""}{r.evidence_notes?" · "+r.evidence_notes:""}</small></span>
-             <em>{r.rating}</em>
+             <em>{RATING_LABELS[r.rating]||r.rating}</em>
             </div>
             {soundHistory.some(s=>s.assessment_id===item.id&&s.competency_id===r.competency_id)&&
              <div className="assessor-sound-history">
               <strong>Specific sounds / patterns observed:</strong>
               {soundHistory.filter(s=>s.assessment_id===item.id&&s.competency_id===r.competency_id)
-               .map(row=><span key={row.item_id}>{phonicsById[row.item_id]?soundLabel(phonicsById[row.item_id]):"Archived sound"} — {row.rating}</span>)}
+               .map(row=><span key={row.item_id}>{phonicsById[row.item_id]?soundLabel(phonicsById[row.item_id]):"Archived sound"} — {RATING_LABELS[row.rating]||row.rating}</span>)}
              </div>}
             {canViewEvidence&&attachments.length>0&&<div className="assessor-attached-media">
              {attachments.map(f=><div key={f.id}>

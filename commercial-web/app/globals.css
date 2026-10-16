@@ -55,6 +55,7 @@
 .assessor-panel .panel-head h2{display:flex;align-items:center;gap:8px}
 .assessor-stack .panel .helper{line-height:1.6}
 .assessor-stack .three-col{margin:15px 0 4px}
+.assessor-setup-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
 .assessor-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:12px 0 14px}
 .assessor-kpis>div{padding:15px;border-radius:11px;background:#f3f8f7;border:1px solid #e2efeb;min-height:95px;display:flex;flex-direction:column;justify-content:center;gap:10px}
 .assessor-kpis small{font-size:11px;color:#577274;line-height:1.4}
@@ -119,6 +120,7 @@
  .assessor-save-row{align-items:stretch;flex-direction:column}
  .assessor-save-row .btn{width:100%}
  .assessor-session-head{flex-direction:column;align-items:flex-start}
+ .assessor-setup-grid{grid-template-columns:1fr}
 }
 
 

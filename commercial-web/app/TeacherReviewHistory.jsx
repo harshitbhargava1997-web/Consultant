@@ -3,6 +3,7 @@ import {useEffect,useState} from "react";
 import {BookOpen,Clock3} from "lucide-react";
 import {soundLabel} from "./PhonicsSoundPicker";
 import SoundProgressPanel from "./SoundProgressPanel";
+import {ASSESSMENT_MODES,RATING_LABELS} from "../lib/supabase";
 export default function TeacherReviewHistory({client,schoolId,classId,teacherId,itemById={},competencies=[],version=0}){
  const [history,setHistory]=useState([]),[soundRows,setSoundRows]=useState([]);
  const [error,setError]=useState(""),[loading,setLoading]=useState(false);
@@ -12,7 +13,7 @@ export default function TeacherReviewHistory({client,schoolId,classId,teacherId,
   (async()=>{
    try{
     const [assessments,sounds]=await Promise.all([
-     client.from("literacy_assessments").select("id,assessment_date,notes,created_at")
+     client.from("literacy_assessments").select("id,assessment_date,assessment_mode,notes,created_at")
       .eq("school_id",schoolId).eq("class_id",classId).eq("subject_type","teacher").eq("teacher_user_id",teacherId)
       .order("assessment_date",{ascending:false}).order("created_at",{ascending:false}).limit(10),
      client.rpc("literacy_get_assessment_phonics",{p_school_id:schoolId,p_class_id:classId,
@@ -38,11 +39,11 @@ export default function TeacherReviewHistory({client,schoolId,classId,teacherId,
   {history.map(record=>{
    const details=soundRows.filter(row=>row.assessment_id===record.id);
    return <div className="teacher-history-entry" key={record.id}>
-    <strong><BookOpen size={15}/> {new Date(record.assessment_date+"T00:00:00").toLocaleDateString("en-IN")}</strong>
+    <strong><BookOpen size={15}/> {new Date(record.assessment_date+"T00:00:00").toLocaleDateString("en-IN")} · {ASSESSMENT_MODES.find(mode=>mode.value===record.assessment_mode)?.label||"Assessment"}</strong>
     {record.notes&&<p>{record.notes}</p>}
     {details.length?<div className="teacher-history-sounds">
      {details.map(row=><span key={row.competency_id+"-"+row.item_id}>
-      {itemById[row.item_id]?soundLabel(itemById[row.item_id]):"Archived sound"} — <b>{row.rating}</b>
+      {itemById[row.item_id]?soundLabel(itemById[row.item_id]):"Archived sound"} — <b>{RATING_LABELS[row.rating]||row.rating}</b>
      </span>)}</div>:<small>Broad competency rating only; individual sounds were not captured.</small>}
    </div>;
   })}
