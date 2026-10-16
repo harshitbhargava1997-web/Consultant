@@ -1,7 +1,7 @@
 "use client";
 import {useEffect,useState} from "react";
 import {BookOpen,Clock3} from "lucide-react";
-import {soundLabel} from "./PhonicsSoundPicker";
+import {observationDimensionLabel,soundLabel} from "./PhonicsSoundPicker";
 import SoundProgressPanel from "./SoundProgressPanel";
 import {ASSESSMENT_MODES,RATING_LABELS} from "../lib/supabase";
 export default function TeacherReviewHistory({client,schoolId,classId,teacherId,itemById={},competencies=[],version=0}){
@@ -42,8 +42,8 @@ export default function TeacherReviewHistory({client,schoolId,classId,teacherId,
     <strong><BookOpen size={15}/> {new Date(record.assessment_date+"T00:00:00").toLocaleDateString("en-IN")} · {ASSESSMENT_MODES.find(mode=>mode.value===record.assessment_mode)?.label||"Assessment"}</strong>
     {record.notes&&<p>{record.notes}</p>}
     {details.length?<div className="teacher-history-sounds">
-     {details.map(row=><span key={row.competency_id+"-"+row.item_id}>
-      {itemById[row.item_id]?soundLabel(itemById[row.item_id]):"Archived sound"} — <b>{RATING_LABELS[row.rating]||row.rating}</b>
+     {details.map(row=><span key={row.competency_id+"-"+row.item_id+"-"+(row.observation_dimension||"overall")}>
+      {itemById[row.item_id]?soundLabel(itemById[row.item_id]):"Archived sound"} · {observationDimensionLabel(row.observation_dimension)} — <b>{RATING_LABELS[row.rating]||row.rating}</b>
      </span>)}</div>:<small>Broad competency rating only; individual sounds were not captured.</small>}
    </div>;
   })}

@@ -247,7 +247,7 @@ async function teacherSkillReviews(ctx,teachers){
    const [r,s]=await Promise.all([
     allRows(()=>ctx.admin.from("literacy_assessment_results").select("assessment_id,competency_id,rating")
      .in("assessment_id",chunk).order("id"),5000),
-    allRows(()=>ctx.admin.from("literacy_assessment_phonics_results").select("assessment_id,competency_id,item_id,rating")
+    allRows(()=>ctx.admin.from("literacy_assessment_phonics_results").select("assessment_id,competency_id,item_id,rating,observation_dimension")
      .in("assessment_id",chunk).order("assessment_id"),5000)
    ]);
    results.push(...r.rows);sounds.push(...s.rows);

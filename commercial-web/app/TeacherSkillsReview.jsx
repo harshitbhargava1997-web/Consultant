@@ -5,8 +5,11 @@ import {ASSESSMENT_MODES,LEVELS,RATINGS,RATING_LABELS} from "../lib/supabase";
 import PhonicsSoundPicker,{PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload} from "./PhonicsSoundPicker";
 import TeacherReviewHistory from "./TeacherReviewHistory";
 import NurseryLetterGrid from "./NurseryLetterGrid";
+import LkgBlendingGrid from "./LkgBlendingGrid";
 
 const NURSERY_GRID_CODES=["NUR001","NUR002","NUR003"];
+const LKG_GRID_CODES=["LKG001","LKG002"];
+const GRID_CODES=[...NURSERY_GRID_CODES,...LKG_GRID_CODES];
 
 export default function TeacherSkillsReview({client,schoolId,classes=[],members=[],teacherClasses=[],competencies=[],onSaved}){
  const {byCompetency,byId,error:catalogError}=usePhonicsCatalog(client);
@@ -26,7 +29,8 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
   LEVELS.indexOf(c.grade)>=0&&LEVELS.indexOf(c.grade)<=gradeIndex)
   .sort((a,b)=>LEVELS.indexOf(a.grade)-LEVELS.indexOf(b.grade)||a.sequence-b.sequence);
  const nurseryGridReady=NURSERY_GRID_CODES.every(code=>allSkills.some(c=>c.code===code));
- const skills=allSkills.filter(c=>!nurseryGridReady||!NURSERY_GRID_CODES.includes(c.code)).filter(c=>assessmentMode==="complete"||
+ const lkgGridReady=LKG_GRID_CODES.every(code=>allSkills.some(c=>c.code===code));
+ const skills=allSkills.filter(c=>!(nurseryGridReady&&NURSERY_GRID_CODES.includes(c.code)||lkgGridReady&&LKG_GRID_CODES.includes(c.code))).filter(c=>assessmentMode==="complete"||
   assessmentMode==="random"&&randomSelection.includes(c.id)||
   assessmentMode==="targeted"&&previousRatings[c.id]&&previousRatings[c.id]!=="Independent");
  const count=Object.values(ratings).filter(r=>r!=="Not Assessed").length;
@@ -38,7 +42,7 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
  },[activeClass?.id]);
  useEffect(()=>{
   if(assessmentMode!=="random"){setRandomSelection([]);return;}
-  const pool=allSkills.filter(c=>!NURSERY_GRID_CODES.includes(c.code));
+  const pool=allSkills.filter(c=>!GRID_CODES.includes(c.code));
   for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
   setRandomSelection(pool.slice(0,Math.min(5,pool.length)).map(skill=>skill.id));
  },[assessmentMode,teacherId,activeClass?.id]);
@@ -124,7 +128,12 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
      personType="teacher" resetKey={teacherId} onChange={(next,overall)=>{
       setSoundRatings(next);setRatings(current=>({...current,...overall}));
      }}/>} {/* The A-Z grid follows competency availability across sections. */}
-    {!skills.length&&!nurseryGridReady&&assessmentMode==="targeted"&&<p className="helper">No previously assessed teacher competencies currently need targeted support. Choose Complete or Random assessment.</p>}
+    {lkgGridReady&&<LkgBlendingGrid competencies={allSkills} itemsByCompetency={byCompetency}
+     value={soundRatings} mode={assessmentMode} historyRows={teacherSoundHistory} disabled={busy}
+     personType="teacher" resetKey={teacherId} onChange={(next,overall)=>{
+      setSoundRatings(next);setRatings(current=>({...current,...overall}));
+     }}/>} {/* LKG blending grids are available across assigned sections. */}
+    {!skills.length&&!nurseryGridReady&&!lkgGridReady&&assessmentMode==="targeted"&&<p className="helper">No previously assessed teacher competencies currently need targeted support. Choose Complete or Random assessment.</p>}
     {skills.map(c=><div key={c.id} className="teacher-phonics-skill">
      <div className="skill"><div><small>{c.grade} · {c.code}</small><strong>{c.title}</strong>
       {c.description&&<p>{c.description}</p>}</div>

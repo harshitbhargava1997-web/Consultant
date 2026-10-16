@@ -6,6 +6,9 @@ import {RATINGS,RATING_LABELS} from "../lib/supabase";
 export function soundLabel(item){
  return item.grapheme+" · "+item.phoneme+" · "+item.example_word+(item.action_name?" · "+item.action_name:"");
 }
+export function observationDimensionLabel(value){
+ return {sound:"Sound",action:"Blending action",reading:"Reading",overall:"Overall"}[value||"overall"]||"Overall";
+}
 export function usePhonicsCatalog(client){
  const [data,setData]=useState({items:[],links:[]});
  const [error,setError]=useState("");
@@ -42,7 +45,10 @@ export function usePhonicsCatalog(client){
 }
 export function soundDetailPayload(value){
  return Object.entries(value||{}).filter(([,rating])=>rating!=="Not Assessed")
-  .map(([item_id,rating])=>({item_id,rating}));
+  .map(([key,rating])=>{
+   const [item_id,observation_dimension]=key.split("::");
+   return {item_id,rating,...(observation_dimension?{observation_dimension}:{})};
+  });
 }
 export function PhonicsStructurePreview({items=[],personLabel="learner"}){
  const [open,setOpen]=useState(false);

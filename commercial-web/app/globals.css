@@ -131,6 +131,23 @@
 .nursery-grid-table select.developing{border-color:#ead09b;background:#fffaf0;color:#8a6119}
 .nursery-grid-table select.independent{border-color:#9fd3c6;background:#f0faf6;color:#126b5d}
 .nursery-action-help{display:block;color:#74848d;font-size:9px;line-height:1.45;margin-top:6px;font-weight:500}
+.lkg-blending-grids{display:grid;gap:18px}
+.lkg-pattern-grid{border:1px solid #dce8e6;border-radius:13px;background:#fbfdfc;padding:17px;overflow:hidden}
+.lkg-pattern-scroll{overflow-x:auto;border:1px solid #e3e9ea;border-radius:10px;background:#fff}
+.lkg-pattern-matrix{min-width:620px;margin:0;text-align:center}
+.lkg-pattern-matrix th,.lkg-pattern-matrix td{padding:8px;border-bottom:1px solid #edf1f1}
+.lkg-pattern-matrix thead th,.lkg-pattern-matrix tbody th{background:#f0f6f5;color:#355d5b;font-size:11px}
+.lkg-pattern-matrix tbody th{font-size:18px;text-transform:lowercase}
+.lkg-pattern-matrix button,.lkg-cvc-row button{min-width:42px;height:36px;border:1px solid #d7e2e3;border-radius:8px;background:#fff;color:#5a6875;font-size:12px;font-weight:800;padding:0 9px}
+.lkg-pattern-matrix button.selected,.lkg-cvc-row button.selected{background:#167b75;color:#fff;border-color:#167b75}
+.lkg-pattern-matrix span{color:#c1cbce}
+.lkg-cvc-families{display:grid;gap:8px;border:1px solid #e3e9ea;border-radius:10px;background:#fff;padding:10px}
+.lkg-cvc-row{display:grid;grid-template-columns:42px 1fr;gap:9px;align-items:center}
+.lkg-cvc-row>strong{display:grid;place-items:center;min-height:38px;border-radius:8px;background:#f0f6f5;color:#355d5b;font-size:18px}
+.lkg-cvc-row>div{display:flex;gap:7px;flex-wrap:wrap}
+.lkg-another-sample{margin-top:10px}
+.lkg-observation-scroll{margin-top:14px}
+.lkg-observation-table tbody th strong{text-transform:lowercase}
 @media(max-width:760px){
  .assessor-kpis{grid-template-columns:1fr}
  .assessor-kpis>div{min-height:65px;padding:12px}
@@ -144,6 +161,7 @@
  .assessor-session-head{flex-direction:column;align-items:flex-start}
  .assessor-setup-grid{grid-template-columns:1fr}
  .nursery-letter-grid{padding:12px}
+ .lkg-pattern-grid{padding:12px}
  .nursery-grid-head{flex-direction:column}
 }
 

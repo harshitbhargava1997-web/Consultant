@@ -3,9 +3,10 @@
 import {useEffect,useMemo,useState} from "react";
 import {BookOpen,CalendarDays,CheckCircle2,ClipboardCheck,Clock3,GraduationCap,RotateCcw,Search,TrendingUp} from "lucide-react";
 import {ASSESSMENT_MODES,LEVELS,RATINGS,RATING_LABELS,skillProgress} from "../lib/supabase";
-import PhonicsSoundPicker,{PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload,soundLabel} from "./PhonicsSoundPicker";
+import PhonicsSoundPicker,{observationDimensionLabel,PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload,soundLabel} from "./PhonicsSoundPicker";
 import SoundProgressPanel from "./SoundProgressPanel";
 import NurseryLetterGrid from "./NurseryLetterGrid";
+import LkgBlendingGrid from "./LkgBlendingGrid";
 
 const STAGES=[
  {value:"baseline",name:"Baseline",detail:"Starting-point evidence"},
@@ -14,6 +15,8 @@ const STAGES=[
  {value:"endline",name:"Endline",detail:"End-of-cycle review"}
 ];
 const NURSERY_GRID_CODES=["NUR001","NUR002","NUR003"];
+const LKG_GRID_CODES=["LKG001","LKG002"];
+const GRID_CODES=[...NURSERY_GRID_CODES,...LKG_GRID_CODES];
 const ROLE_LABELS={super_admin:"Super Admin",consultant:"Consultant",owner:"School owner",
  principal:"Principal",coordinator:"Coordinator",teacher:"Teacher",legacy:"School assessor"};
 function localToday(){
@@ -115,7 +118,8 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
  const selectedCount=Object.values(ratings).filter(r=>RATINGS.includes(r)&&r!=="Not Assessed").length;
  const {grouped,previous}=useMemo(()=>historyBySession(sessions,results),[sessions,results]);
  const nurseryGridReady=NURSERY_GRID_CODES.every(code=>scoped.some(c=>c.code===code));
- const visibleSkills=matchingSkills.filter(c=>!nurseryGridReady||!NURSERY_GRID_CODES.includes(c.code)).filter(c=>assessmentMode==="complete"||
+ const lkgGridReady=LKG_GRID_CODES.every(code=>scoped.some(c=>c.code===code));
+ const visibleSkills=matchingSkills.filter(c=>!(nurseryGridReady&&NURSERY_GRID_CODES.includes(c.code)||lkgGridReady&&LKG_GRID_CODES.includes(c.code))).filter(c=>assessmentMode==="complete"||
   assessmentMode==="random"&&randomSelection.includes(c.id)||
   assessmentMode==="targeted"&&previous[c.id]&&previous[c.id].rating!=="Independent");
  const buckets=gradeBuckets(visibleSkills);
@@ -128,7 +132,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
   setAssessmentMode("complete");setRandomSelection([]);setExpanded("");},[studentId]);
  useEffect(()=>{
   if(assessmentMode!=="random"){setRandomSelection([]);return;}
-  setRandomSelection(randomIds(scoped.filter(c=>!NURSERY_GRID_CODES.includes(c.code))));
+  setRandomSelection(randomIds(scoped.filter(c=>!GRID_CODES.includes(c.code))));
  },[assessmentMode,studentId,scope,gradeFilter]);
  useEffect(()=>{
   if(!canViewHistory||!client||!activeClass?.id||!studentId||!eligibleStudents.some(s=>s.id===studentId)){
@@ -299,7 +303,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
      <label className="assessor-search"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)}
       placeholder="Find a sound, reading or writing competency…" aria-label="Search competencies"/></label>
      <button type="button" className="btn outline" onClick={resetDraft} disabled={saving}><RotateCcw size={15}/> Clear draft</button>
-     {assessmentMode==="random"&&matchingSkills.some(c=>!NURSERY_GRID_CODES.includes(c.code))&&<button type="button" className="btn outline" onClick={()=>setRandomSelection(randomIds(matchingSkills.filter(c=>!NURSERY_GRID_CODES.includes(c.code))))} disabled={saving}>
+     {assessmentMode==="random"&&matchingSkills.some(c=>!GRID_CODES.includes(c.code))&&<button type="button" className="btn outline" onClick={()=>setRandomSelection(randomIds(matchingSkills.filter(c=>!GRID_CODES.includes(c.code))))} disabled={saving}>
       Select another sample</button>}
     </div>
     <div className="notice small">{ASSESSMENT_MODES.find(mode=>mode.value===assessmentMode)?.detail}. Record only what you observe; the report level is calculated automatically.</div>
@@ -311,7 +315,12 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
       personType="student" resetKey={studentId} onChange={(next,overall)=>{
        setSoundRatings(next);setRatings(current=>({...current,...overall}));
       }}/>} {/* The A-Z grid follows competency scope, not the selected section. */}
-     {buckets.length===0&&!nurseryGridReady&&<p className="helper">{assessmentMode==="targeted"?"No previously assessed competencies currently need targeted support. Choose Complete or Random assessment to continue.":"No competencies match the selected filter."}</p>}
+     {lkgGridReady&&<LkgBlendingGrid competencies={availableSkills} itemsByCompetency={phonicsByCompetency}
+      value={soundRatings} mode={assessmentMode} historyRows={soundHistory} disabled={saving}
+      personType="student" resetKey={studentId} onChange={(next,overall)=>{
+       setSoundRatings(next);setRatings(current=>({...current,...overall}));
+      }}/>} {/* LKG blending grids follow the selected competency scope. */}
+     {buckets.length===0&&!nurseryGridReady&&!lkgGridReady&&<p className="helper">{assessmentMode==="targeted"?"No previously assessed competencies currently need targeted support. Choose Complete or Random assessment to continue.":"No competencies match the selected filter."}</p>}
      {buckets.map(bucket=><div className="assessor-bucket" key={bucket.key}>
       <div className="assessor-bucket-heading"><span>{bucket.grade} · {bucket.strand}</span><small>{bucket.items.length} competencies</small></div>
       {bucket.items.map(c=>{
@@ -387,7 +396,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
              <div className="assessor-sound-history">
               <strong>Specific sounds / patterns observed:</strong>
               {soundHistory.filter(s=>s.assessment_id===item.id&&s.competency_id===r.competency_id)
-               .map(row=><span key={row.item_id}>{phonicsById[row.item_id]?soundLabel(phonicsById[row.item_id]):"Archived sound"} — {RATING_LABELS[row.rating]||row.rating}</span>)}
+               .map(row=><span key={row.item_id+"-"+(row.observation_dimension||"overall")}>{phonicsById[row.item_id]?soundLabel(phonicsById[row.item_id]):"Archived sound"} · {observationDimensionLabel(row.observation_dimension)} — {RATING_LABELS[row.rating]||row.rating}</span>)}
              </div>}
             {canViewEvidence&&attachments.length>0&&<div className="assessor-attached-media">
              {attachments.map(f=><div key={f.id}>

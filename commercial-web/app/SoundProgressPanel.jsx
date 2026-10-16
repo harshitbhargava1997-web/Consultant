@@ -4,6 +4,7 @@ import {BarChart3,Search,Volume2} from "lucide-react";
 import {LEVELS} from "../lib/supabase";
 
 const RATINGS=["Emerging","Developing","Independent"];
+const DIMENSION_LABELS={sound:"Sound",action:"Blending action",reading:"Reading",overall:"Overall"};
 function niceDate(value){
  if(!value)return "—";
  const date=new Date(value+"T00:00:00");
@@ -23,21 +24,21 @@ export default function SoundProgressPanel({
   for(const item of soundRows){
    const session=sessionById.get(item.assessment_id);
    if(!session||!RATINGS.includes(item.rating))continue;
-   const key=item.competency_id+":"+item.item_id;
+   const dimension=item.observation_dimension||"overall";
+   const key=item.competency_id+":"+item.item_id+":"+dimension;
    if(!grouped.has(key))grouped.set(key,[]);
    grouped.get(key).push({rating:item.rating,date:session.assessment_date,order:session.order});
   }
   const competencyIndex=new Map(competencies.map(c=>[c.id,c]));
   return [...grouped].map(([key,entries])=>{
-   const split=key.indexOf(":");
-   const competencyId=key.slice(0,split),itemId=key.slice(split+1);
+   const [competencyId,itemId,dimension]=key.split(":");
    const skill=competencyIndex.get(competencyId),sound=itemById[itemId];
    const sorted=entries.sort((a,b)=>a.order-b.order);
    return {key,competency:skill?.title||"Archived competency",
     grade:skill?.grade||"Other",code:skill?.code||"",
     grapheme:sound?.grapheme||"Archived sound",
     phoneme:sound?.phoneme||"",example:sound?.example_word||"",
-    family:sound?.family||"",latest:sorted[0],previous:sorted[1]||null,
+    family:sound?.family||"",dimension,latest:sorted[0],previous:sorted[1]||null,
     observations:sorted.length};
   }).sort((a,b)=>{
    const gradeA=LEVELS.indexOf(a.grade),gradeB=LEVELS.indexOf(b.grade);
@@ -48,7 +49,7 @@ export default function SoundProgressPanel({
  const grades=[...new Set(rows.map(x=>x.grade))].sort((a,b)=>LEVELS.indexOf(a)-LEVELS.indexOf(b));
  const matching=rows.filter(row=>(grade==="all"||row.grade===grade)&&
   (rating==="all"||row.latest.rating===rating)&&
-  [row.grapheme,row.phoneme,row.example,row.competency,row.family].join(" ").toLowerCase().includes(search.trim().toLowerCase()));
+  [row.grapheme,row.phoneme,row.example,row.competency,row.family,DIMENSION_LABELS[row.dimension]].join(" ").toLowerCase().includes(search.trim().toLowerCase()));
  const shown=showAll?matching:matching.slice(0,Math.max(1,limit));
  const counts=Object.fromEntries(RATINGS.map(r=>[r,rows.filter(x=>x.latest.rating===r).length]));
  return <section className="sound-progress-panel" aria-label={title}>
@@ -74,7 +75,7 @@ export default function SoundProgressPanel({
    <div className="sound-progress-list">
     {shown.map(row=><div key={row.key} className="sound-progress-record">
      <div className="sound-progress-name"><strong>{row.grapheme} <span>{row.phoneme}</span></strong>
-      <small>{row.example}</small><small>{row.grade} · {row.competency}</small></div>
+      <small>{row.example}</small><small>{row.grade} · {row.competency} · {DIMENSION_LABELS[row.dimension]||"Overall"}</small></div>
      <div className="sound-progress-rating">
       <span className={"sound-progress-state "+row.latest.rating.toLowerCase()}>{row.latest.rating}</span>
       <small>Observed {niceDate(row.latest.date)}</small>
