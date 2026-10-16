@@ -1,7 +1,8 @@
 "use client";
 import {useEffect,useMemo,useState} from "react";
-import {BookOpen,CheckCircle2,ChevronDown,ClipboardCheck,FileText,GraduationCap,Medal,Play,Plus,RefreshCw,School,ShieldCheck,Trash2,Upload,Users,Video} from "lucide-react";
+import {BookOpen,CheckCircle2,ChevronDown,ClipboardCheck,ExternalLink,FileText,GraduationCap,Medal,Play,Plus,RefreshCw,School,ShieldCheck,Trash2,Upload,Users,Video} from "lucide-react";
 import {LEVELS} from "../lib/supabase";
+const DEMONSTRATION_LAB_URL="https://phonics-demonstration-lab.harshitbhargava1997.chatgpt.site";
 const KINDS=[
  {id:"reading",label:"Reading lesson"},
  {id:"pdf",label:"PDF / handbook"},
@@ -33,6 +34,7 @@ export default function TrainingWorkspace({
  session,client,schoolId,schoolName,schools=[],competencies=[],isAdmin=false,grants=[]
 }){
  const can=key=>isAdmin||grants.includes(key);
+ const hasProgrammeAccess=isAdmin||["training.access","training.complete","training.deliver","training.review"].some(key=>grants.includes(key));
  const [data,setData]=useState({courses:[],units:[],progress:[],certificates:[],review:[],sessions:[],trainingStaff:[]});
  const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
  const [tab,setTab]=useState(isAdmin?"publish":"learn");
@@ -56,6 +58,7 @@ export default function TrainingWorkspace({
   ...(can("training.review")&&schoolId?[{id:"review",name:"School training report"}]:[])
  ];
  async function load(){
+  if(!hasProgrammeAccess)return;
   setLoading(true);setMessage("");
   try{
    const res=await fetch("/api/training?schoolId="+encodeURIComponent(schoolId||""),{
@@ -69,7 +72,9 @@ export default function TrainingWorkspace({
    setEditCourseId(old=>json.courses.some(c=>c.id===old)?old:json.courses.find(c=>c.status==="draft")?.id||"");
   }catch(e){setMessage(e.message);}finally{setLoading(false);}
  }
- useEffect(()=>{let active=true;setLoading(true);
+ useEffect(()=>{let active=true;
+  if(!hasProgrammeAccess){setLoading(false);setMessage("");return()=>{active=false;};}
+  setLoading(true);
   fetch("/api/training?schoolId="+encodeURIComponent(schoolId||""),{
    headers:{Authorization:"Bearer "+session.access_token},cache:"no-store"
   }).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||"Unable to load training.");return j;})
@@ -78,8 +83,11 @@ export default function TrainingWorkspace({
     setEditCourseId(old=>j.courses.some(c=>c.id===old)?old:j.courses.find(c=>c.status==="draft")?.id||"");setLoading(false);}})
    .catch(e=>{if(active){setMessage(e.message);setLoading(false);}});
   return()=>{active=false;};
- },[session?.access_token,schoolId]);
- useEffect(()=>{setTab(isAdmin?"publish":"learn");setAnswers({});},[schoolId,isAdmin]);
+ },[session?.access_token,schoolId,hasProgrammeAccess]);
+ useEffect(()=>{
+  setTab(isAdmin?"publish":can("training.access")?"learn":can("training.deliver")&&schoolId?"sessions":can("training.review")&&schoolId?"review":"");
+  setAnswers({});
+ },[schoolId,isAdmin,grants]);
  async function execute(action,payload={},after){
   setBusy(true);setMessage("");
   try{
@@ -141,23 +149,37 @@ export default function TrainingWorkspace({
  const schoolParticipants=(data.review||[]).filter(p=>
   p.name.toLowerCase().includes(reviewFilter.toLowerCase())||p.role.includes(reviewFilter.toLowerCase()));
  return <div className="training-module">
-  <section className="panel">
-   <div className="panel-head"><h2><GraduationCap size={20}/> Teacher Training & Certification</h2>
-    <span className="eyebrow">{isAdmin?"COURSE DEPLOYMENT":"PROFESSIONAL DEVELOPMENT"}</span></div>
-   <p className="helper">Competency-based learning for teachers and school stakeholders. Study course material, practise with exercises, earn certificates and connect training evidence with students' literacy assessment progress.</p>
+  <section className="demonstration-lab-card" aria-labelledby="demonstration-lab-title">
+   <div className="demonstration-lab-copy">
+    <span className="eyebrow">INTERACTIVE DIGITAL CONTENT</span>
+    <h2 id="demonstration-lab-title"><BookOpen size={22}/> Phonics Demonstration Lab</h2>
+    <p>Use the shared demonstration environment to model classroom literacy—from action–sound–symbol connections and blending grids to word, sentence, encoding and spelling practice.</p>
+    <div className="demonstration-lab-paths" aria-label="Available class pathways">
+     <span>Nursery</span><span>LKG</span><span>UKG</span><span>Grade 1–8</span>
+    </div>
+    <p className="demonstration-lab-audience">Available to Super Admin, Consultants, School Owners, Principals, Coordinators and Teachers.</p>
+   </div>
+   <a className="btn demonstration-lab-launch" href={DEMONSTRATION_LAB_URL} target="_blank" rel="noopener noreferrer">
+    Open Demonstration Lab <ExternalLink size={17}/>
+   </a>
+  </section>
+  {hasProgrammeAccess&&<section className="panel">
+   <div className="panel-head"><h2><GraduationCap size={20}/> Digital Content & Professional Learning</h2>
+    <span className="eyebrow">{isAdmin?"CONTENT DEPLOYMENT":"LEARNING WORKSPACE"}</span></div>
+   <p className="helper">Access assigned learning material, practise with exercises, earn certificates and connect professional-learning evidence with students' literacy assessment progress.</p>
    <div className="training-stats">
     <div><small>Published courses</small><strong>{data.courses.filter(c=>c.status==="published").length}</strong></div>
     <div><small>My completed units</small><strong>{data.progress.length}</strong></div>
     <div><small>Certificates earned</small><strong>{data.certificates.length}</strong></div>
    </div>
-   <div className="management-tabs" role="group" aria-label="Training sections">
+   <div className="management-tabs" role="group" aria-label="Digital content and professional learning sections">
     {sections.map(item=><button type="button" key={item.id} aria-pressed={tab===item.id}
      className={"management-tab "+(tab===item.id?"active":"")}
      onClick={()=>{setTab(item.id);setMessage("");}}>{item.name}</button>)}
    </div>
-  </section>
+  </section>}
   {message&&<div className="notice" role="status">{message}</div>}
-  {loading&&<p className="helper">Loading training content…</p>}
+  {loading&&<p className="helper">Loading digital content…</p>}
   {tab==="publish"&&isAdmin&&<>
    <section className="panel">
     <div className="panel-head"><h2><Plus size={18}/> Publish a new training programme</h2></div>

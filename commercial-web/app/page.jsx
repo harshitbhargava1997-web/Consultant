@@ -28,7 +28,7 @@ const navigation=[
  {id:"permissions",label:"Role permissions",icon:ShieldCheck,admin:true},
  {id:"consultant",label:"Consultant support",icon:GraduationCap,consultant:true,school:true},
  {id:"assessment-structure",label:"Assessment Structure",icon:BookMarked,school:true},
- {id:"training",label:"Teacher training",icon:BookOpen,school:true},
+ {id:"training",label:"Digital Content",icon:BookOpen,school:true},
  {id:"competencies",label:"Competency library",icon:BookOpen,school:true},
  {id:"reports",label:"Progress reports",icon:ChartNoAxesCombined,school:true},
  {id:"implementation",label:"Teacher implementation",icon:FileUp,school:true},
@@ -337,8 +337,7 @@ export default function Home(){
  };
  const availableNav=navigation.filter(n=>{
   if(n.id==="permissions")return identity.admin;
-  if(n.id==="training")return identity.admin||!!schoolId&&
-   (can("training.access")||can("training.complete")||can("training.deliver")||can("training.review"));
+  if(n.id==="training")return identity.admin||identity.isConsultant||!!schoolId;
   if(n.id==="overview")return true;
   if(n.id==="users")return identity.admin||!!schoolId&&
    (can("users.manage")||can("classes.view")||can("classes.manage")||can("classes.import")||
@@ -376,7 +375,7 @@ export default function Home(){
   <ConsultantWorkspace session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"}
    isConsultant={can("consultants.log")}/>}
 
- {page==="training"&&(identity.admin||schoolId)&&
+ {page==="training"&&(identity.admin||identity.isConsultant||schoolId)&&
   <TrainingWorkspace session={session} client={client} schoolId={schoolId}
    schoolName={school?.name||"Selected school"} schools={identity.schools}
    competencies={competencies} grants={roleGrants} isAdmin={identity.admin}/>}
