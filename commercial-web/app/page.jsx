@@ -26,9 +26,7 @@ const navigation=[
  {id:"consultants",label:"Consultant assignments",icon:Users,admin:true},
  {id:"permissions",label:"Role permissions",icon:ShieldCheck,admin:true},
  {id:"consultant",label:"Consultant support",icon:GraduationCap,consultant:true,school:true},
- {id:"assess",label:"Literacy Assessor",icon:ClipboardCheck,school:true},
- {id:"assessment-structure",label:"Assessment structures",icon:BookMarked,school:true},
- {id:"teacher-review",label:"Teacher skills review",icon:GraduationCap,manager:true,school:true},
+ {id:"assessment-structure",label:"Assessment Structure",icon:BookMarked,school:true},
  {id:"training",label:"Teacher training",icon:BookOpen,school:true},
  {id:"competencies",label:"Competency library",icon:BookOpen,school:true},
  {id:"reports",label:"Progress reports",icon:ChartNoAxesCombined,school:true},
@@ -46,6 +44,7 @@ export default function Home(){
  const [session,setSession]=useState(null),[checked,setChecked]=useState(false);
  const [identity,setIdentity]=useState({admin:false,isConsultant:false,consultantSchools:[],memberships:[],schools:[]});
  const [schoolId,setSchoolId]=useState(""),[page,setPage]=useState("overview");
+ const [assessmentView,setAssessmentView]=useState("structure");
  const [roleGrants,setRoleGrants]=useState([]);
  const [isMobile,setIsMobile]=useState(false);
  const [mobileNavOpen,setMobileNavOpen]=useState(false);
@@ -324,7 +323,7 @@ export default function Home(){
  const navFeature={
   schools:"schools.view",users:"users.manage",consultants:"consultants.manage",
   consultant:"consultants.support",classes:"classes.view",
-  "teacher-review":"teacher_reviews.create",competencies:"competencies.view",
+  competencies:"competencies.view",
   reports:"reports.view",implementation:"implementation.view",observations:"observations.view"
  };
  const availableNav=navigation.filter(n=>{
@@ -339,7 +338,6 @@ export default function Home(){
   if(n.id==="schools")return can("schools.view");
   if(!schoolId)return false;
   if(n.id==="bulk")return can("staff.import")||can("students.import")||can("data.export");
-  if(n.id==="assess")return can("assessments.create")||can("assessments.view");
   if(n.id==="assessment-structure")return can("competencies.view")||can("teacher_reviews.create")||can("assessments.create")||can("assessments.view");
   if(n.id==="consultant")return can("consultants.support")||can("consultants.log");
   if(n.id==="competencies")return can("competencies.view")||can("competencies.edit");
@@ -349,8 +347,8 @@ export default function Home(){
  return <div className={"layout"+(desktopNavCollapsed?" sidebar-collapsed":"")}>
   {mobileNavOpen&&<button type="button" className="nav-backdrop" aria-label="Close navigation" onClick={()=>setMobileNavOpen(false)}/>}
   <aside id="vision-sidebar" className={"sidebar"+(mobileNavOpen?" mobile-open":"")}>
-   <div className="brand"><span className="brand-mark"><GraduationCap size={23}/></span><span>VISION <small>School Platform</small></span><button type="button" className="sidebar-close" aria-label="Close menu" onClick={()=>setMobileNavOpen(false)}><X size={20}/></button></div><div className="side-caption">WORKSPACE</div><nav>{availableNav.map(item=>{const Icon=item.icon;return <button key={item.id} onClick={()=>{setPage(item.id);if(item.id==="teacher-review")setAssessmentSubject("teacher");setMessage("");setMobileNavOpen(false);}} className={"nav-item "+(page===item.id?"active":"")}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={15}/>}</button>;})}</nav><div className="sidebar-bottom"><div className="profile-dot">{(session.user.email||"U").slice(0,1).toUpperCase()}</div><div className="profile-name"><strong>{session.user.email?.split("@")[0]}</strong><small>{identity.admin?"Platform Admin":role||"Member"}</small></div><button className="icon-btn" aria-label="Sign out" title="Sign out" onClick={logout}><LogOut size={18}/></button></div></aside>
- <main className="main"><header className="topbar"><div className="topbar-title"><button type="button" className="mobile-menu" aria-label={(isMobile?mobileNavOpen:!desktopNavCollapsed)?"Close navigation menu":"Open navigation menu"} aria-controls="vision-sidebar" aria-expanded={isMobile?mobileNavOpen:!desktopNavCollapsed} onClick={toggleNavigation}>{isMobile?mobileNavOpen?<X size={21}/>:<Menu size={21}/>:desktopNavCollapsed?<Menu size={21}/>:<X size={21}/>}</button><span>VISION / <b>{navigation.find(n=>n.id===page)?.label||"Overview"}</b></span></div><div className="topbar-right"><select aria-label="Active school" value={schoolId} onChange={e=>{setSchoolId(e.target.value);setPage("overview");}}><option value="">Select a school</option>{identity.schools.filter(s=>identity.admin||identity.memberships.some(m=>m.school_id===s.id)||identity.consultantSchools.includes(s.id)).map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select><span className="avatar">{(session.user.email||"U").slice(0,1).toUpperCase()}</span></div></header><div className="content"><div className="page-heading"><div><span className="eyebrow">{school?.name||"PLATFORM WORKSPACE"}</span><h1>{navigation.find(n=>n.id===page)?.label||"Overview"}</h1><p>{page==="overview"?"An integrated view of school operations and foundational learning.":"Secure workspace · "+(identity.admin?"Super Admin":role||"Assigned member")}</p></div>{schoolId&&<Btn kind="outline" disabled={busy} onClick={refresh}><RefreshCw size={15}/> Refresh</Btn>}</div><Notice message={message}/>
+   <div className="brand"><span className="brand-mark"><GraduationCap size={23}/></span><span>VISION <small>School Platform</small></span><button type="button" className="sidebar-close" aria-label="Close menu" onClick={()=>setMobileNavOpen(false)}><X size={20}/></button></div><div className="side-caption">WORKSPACE</div><nav>{availableNav.map(item=>{const Icon=item.icon;return <button key={item.id} onClick={()=>{setPage(item.id);if(item.id==="assessment-structure")setAssessmentView("structure");setMessage("");setMobileNavOpen(false);}} className={"nav-item "+(page===item.id?"active":"")}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={15}/>}</button>;})}</nav><div className="sidebar-bottom"><div className="profile-dot">{(session.user.email||"U").slice(0,1).toUpperCase()}</div><div className="profile-name"><strong>{session.user.email?.split("@")[0]}</strong><small>{identity.admin?"Platform Admin":role||"Member"}</small></div><button className="icon-btn" aria-label="Sign out" title="Sign out" onClick={logout}><LogOut size={18}/></button></div></aside>
+ <main className="main"><header className="topbar"><div className="topbar-title"><button type="button" className="mobile-menu" aria-label={(isMobile?mobileNavOpen:!desktopNavCollapsed)?"Close navigation menu":"Open navigation menu"} aria-controls="vision-sidebar" aria-expanded={isMobile?mobileNavOpen:!desktopNavCollapsed} onClick={toggleNavigation}>{isMobile?mobileNavOpen?<X size={21}/>:<Menu size={21}/>:desktopNavCollapsed?<Menu size={21}/>:<X size={21}/>}</button><span>VISION / <b>{navigation.find(n=>n.id===page)?.label||"Overview"}</b></span></div><div className="topbar-right"><select aria-label="Active school" value={schoolId} onChange={e=>{setSchoolId(e.target.value);setPage("overview");setAssessmentView("structure");}}><option value="">Select a school</option>{identity.schools.filter(s=>identity.admin||identity.memberships.some(m=>m.school_id===s.id)||identity.consultantSchools.includes(s.id)).map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select><span className="avatar">{(session.user.email||"U").slice(0,1).toUpperCase()}</span></div></header><div className="content"><div className="page-heading"><div><span className="eyebrow">{school?.name||"PLATFORM WORKSPACE"}</span><h1>{navigation.find(n=>n.id===page)?.label||"Overview"}</h1><p>{page==="overview"?"An integrated view of school operations and foundational learning.":"Secure workspace · "+(identity.admin?"Super Admin":role||"Assigned member")}</p></div>{schoolId&&<Btn kind="outline" disabled={busy} onClick={refresh}><RefreshCw size={15}/> Refresh</Btn>}</div><Notice message={message}/>
  {page==="overview"&&<><div className="stats"><div className="stat"><span>Schools assigned</span><strong>{new Set([...identity.memberships.map(m=>m.school_id),...identity.consultantSchools]).size}</strong><small>School access</small></div><div className="stat"><span>Classes</span><strong>{visibleClasses.length}</strong><small>Accessible classes</small></div><div className="stat"><span>Students</span><strong>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).length}</strong><small>Registered learners</small></div><div className="stat"><span>Assessment sessions</span><strong>{assessments.filter(a=>visibleClasses.some(c=>c.id===a.class_id)).length}</strong><small>Last 500 loaded</small></div></div><div className="two-col"><Box title="Your learning workflow"><div className="workflow">{["Set up school and staff","Create classes and student rosters","Assess cumulative competencies","Review literacy level and interventions"].map((t,i)=><div key={t} className="workflow-row"><span>{i+1}</span>{t}<CircleCheck size={16}/></div>)}</div></Box><Box title="Product readiness"><div className="readiness"><p><CircleCheck size={17}/> Unified authentication and role-aware interface</p><p><CircleCheck size={17}/> Cumulative student assessment and reports</p><p><AlertCircle size={17}/> Legacy evidence migration requires secure ID mapping</p><p><AlertCircle size={17}/> Production security review and end-to-end testing pending</p></div></Box></div></>}
  {page==="permissions"&&identity.admin&&<RolePermissions session={session}/>}
  {page==="schools"&&can("schools.view")&&<div className="two-col"><Box title="Registered schools">{identity.schools.length?<div className="rows">{identity.schools.map(s=><div className="record" key={s.id}><School size={17}/><strong>{s.name}</strong></div>)}</div>:<Empty title="No schools yet" detail="Create your first school to begin."/>}</Box>{identity.admin&&<Box title="Register a school"><form onSubmit={addSchool} className="stack"><label>School name<input required maxLength={180} value={newSchool} onChange={e=>setNewSchool(e.target.value)} placeholder="Full registered school name"/></label><Btn kind="primary" type="submit" disabled={busy}><Plus size={16}/> Create school</Btn></form></Box>}</div>}
@@ -374,18 +372,24 @@ export default function Home(){
    schoolName={school?.name||"Selected school"} schools={identity.schools}
    competencies={competencies} grants={roleGrants} isAdmin={identity.admin}/>}
  {page==="assessment-structure"&&schoolId&&
-  (can("competencies.view")||can("teacher_reviews.create")||can("assessments.create")||can("assessments.view"))&&
-  <AssessmentStructure client={client} competencies={competencies} onNavigate={setPage}
+  (can("competencies.view")||can("teacher_reviews.create")||can("assessments.create")||can("assessments.view"))&&<>
+  {assessmentView!=="structure"&&<section className="panel">
+   <button className="btn outline" type="button" onClick={()=>setAssessmentView("structure")}>← Back to Assessment Structure</button>
+   <p className="helper">{assessmentView==="student"?"Student competency assessment and assessment history.":"Teacher skills observation and review."} Both assessment workflows are accessible from Assessment Structure.</p>
+  </section>}
+  {assessmentView==="structure"&&<AssessmentStructure client={client} competencies={competencies}
+   onNavigate={view=>setAssessmentView(view==="assess"?"student":"teacher")}
    canStudentAssess={can("assessments.create")||can("assessments.view")}
    canTeacherReview={can("teacher_reviews.create")}/>}
- {page==="assess"&&schoolId&&(can("assessments.create")||can("assessments.view"))&&<AssessorWorkspace
-  client={client} session={session} schoolId={schoolId} classes={visibleClasses}
-  students={students} competencies={competencies} canCreate={can("assessments.create")} canViewHistory={can("assessments.view")}
-  canUploadEvidence={can("assessments.evidence.upload")} canViewEvidence={can("assessments.evidence.view")} onSaved={refresh}/>}
- {page==="teacher-review"&&schoolId&&can("teacher_reviews.create")&&
-  <TeacherSkillsReview client={client} schoolId={schoolId}
-   classes={visibleClasses} members={members} teacherClasses={teacherClasses}
-   competencies={competencies} onSaved={refresh}/>}
+  {assessmentView==="student"&&(can("assessments.create")||can("assessments.view"))&&<AssessorWorkspace
+   client={client} session={session} schoolId={schoolId} classes={visibleClasses}
+   students={students} competencies={competencies} canCreate={can("assessments.create")} canViewHistory={can("assessments.view")}
+   canUploadEvidence={can("assessments.evidence.upload")} canViewEvidence={can("assessments.evidence.view")} onSaved={refresh}/>}
+  {assessmentView==="teacher"&&can("teacher_reviews.create")&&
+   <TeacherSkillsReview client={client} schoolId={schoolId}
+    classes={visibleClasses} members={members} teacherClasses={teacherClasses}
+    competencies={competencies} onSaved={refresh}/>}
+ </>}
  {page==="competencies"&&schoolId&&can("competencies.edit")&&<CurriculumEditor competencies={competencies} session={session} onSaved={refresh}/>}
  {page==="competencies"&&schoolId&&(can("competencies.view")||can("competencies.edit"))&&<Box title="Published literacy progression"><div className="level-grid">{LEVELS.map(l=><div key={l} className="level"><strong>{l}</strong><span>{competencies.filter(c=>c.active&&c.grade===l).length} competencies</span></div>)}</div><div className="rows">{competencies.filter(c=>c.active).sort((a,b)=>formatGrade(a.grade)-formatGrade(b.grade)||a.sequence-b.sequence).map(c=><div key={c.id} className="record"><BookOpen size={16}/><strong>{c.title}</strong><small>{c.grade}</small></div>)}</div><div className="helper">Only the Platform Super Admin can create, edit or publish competencies. Consultants and school stakeholders can view published learning progressions.</div></Box>}
  {page==="reports"&&schoolId&&can("reports.view")&&<section className="panel progress-reports-navigation">
