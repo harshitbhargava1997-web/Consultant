@@ -48,6 +48,8 @@ function TeacherDetail({teacher,available,byId,competencies}){
   {available?.implementation&&<section className="panel">
    <div className="panel-head"><h2><ClipboardCheck size={17}/> Classroom implementation evidence</h2></div>
    <div className="progress-small-stats">
+    <span><strong>{implementation?.preparationSessions||0}</strong> lesson preparations</span>
+    <span><strong>{Number(implementation?.preparationMinutes||0).toFixed(1)}</strong> preparation minutes</span>
     <span><strong>{implementation?.submissions||0}</strong> submitted periods</span>
     <span><strong>{implementation?.reviewed||0}</strong> reviewed</span>
     <span><strong>{implementation?.pending||0}</strong> awaiting review</span>
@@ -61,7 +63,7 @@ function TeacherDetail({teacher,available,byId,competencies}){
       {" · "}{r.review?.status==="reviewed"?"Reviewed":r.review?.status==="needs_follow_up"?"Needs follow-up":"Awaiting review"}</small>
      {r.review?.feedback&&<p className="helper">Review feedback: {r.review.feedback}</p>}
     </div>)}</div>:<p className="helper">No classroom implementation submissions yet. Teachers can upload voice reflections and lesson evidence in Teacher Implementation.</p>}
-   <p className="helper">To inspect the original attachments or provide feedback, use Teacher Implementation → School evidence review.</p>
+   <p className="helper">Open Teacher Portal to review Vision literacy preparations, attachments and feedback. Earlier records remain in Implementation history. Preparation and evidence counts do not establish competency proficiency.</p>
   </section>}
  </div>;
 }

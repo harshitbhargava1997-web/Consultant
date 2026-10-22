@@ -1,5 +1,6 @@
 "use client";
 import {useEffect,useMemo,useState} from "react";
+import dynamic from "next/dynamic";
 import {browserClient,LEVELS,RATINGS,MANAGERS,skillProgress,parseCsv} from "../lib/supabase";
 import BulkWorkspace from "./BulkWorkspace";
 import AssessorWorkspace from "./AssessorWorkspace";
@@ -13,6 +14,7 @@ import StudentSoundReport from "./StudentSoundReport";
 import StudentAssessmentEvidence from "./StudentAssessmentEvidence";
 import TeacherSchoolReports from "./TeacherSchoolReports";
 import ImplementationWorkspace from "./ImplementationWorkspace";
+const TeacherPortalWorkspace=dynamic(()=>import("./TeacherPortalWorkspace"),{loading:()=> <section className="panel">Opening teacher portal…</section>});
 import CurriculumEditor from "./CurriculumEditor";
 import ConsultantWorkspace,{ConsultantManagement} from "./ConsultantWorkspace";
 import {isEmail,loginLabel,normalizePhone} from "../lib/auth";
@@ -31,8 +33,8 @@ const navigation=[
  {id:"training",label:"Digital Content",icon:BookOpen,school:true},
  {id:"competencies",label:"Competency library",icon:BookOpen,school:true},
  {id:"reports",label:"Progress reports",icon:ChartNoAxesCombined,school:true},
- {id:"implementation",label:"Teacher implementation",icon:FileUp,school:true},
- {id:"school-success",label:"School Success",icon:GraduationCap,school:true},
+ {id:"implementation",label:"Teacher Portal",icon:FileUp,school:true},
+ {id:"school-success",label:"School Success folder",icon:GraduationCap,admin:true},
  {id:"implementation-history",label:"Implementation history",icon:ChartNoAxesCombined,school:true},
  {id:"observations",label:"Classroom observations",icon:Eye,school:true}
 ];
@@ -120,11 +122,13 @@ export default function Home(){
     const permitted=adminRes.isAdmin===true?(sch||[]).map(s=>s.id):[...new Set([...memberships.map(x=>x.school_id),...consultantSchools])];
     setIdentity({admin:adminRes.isAdmin===true,isConsultant:consultantRes.isConsultant===true,
      consultantSchools,memberships,schools:sch||[]});
-    setSchoolId(old=>permitted.includes(old)?old:(permitted[0]||""));
+    const requestedSchool=new URLSearchParams(location.search).get('schoolId');
+    setSchoolId(old=>permitted.includes(old)?old:permitted.includes(requestedSchool)?requestedSchool:(permitted[0]||""));
    }catch(e){if(alive)setMessage("Unable to load school access: "+e.message);}
   })();
   return()=>{alive=false;};
  },[client,session?.user?.id,session?.access_token]);
+ useEffect(()=>{const requested=new URLSearchParams(location.search).get('workspace');if(['implementation','training'].includes(requested))setPage(requested);},[]);
  useEffect(()=>{
   if(!schoolId||!session||!client){setClasses([]);setStudents([]);return;}
   let alive=true;
@@ -338,9 +342,8 @@ export default function Home(){
   reports:"reports.view",implementation:"implementation.view",observations:"observations.view"
  };
  const availableNav=navigation.filter(n=>{
-  if(n.id==="school-success")return identity.admin||!!schoolId&&can("school_success.access");
-  if(n.id==="implementation"&&process.env.NEXT_PUBLIC_SCHOOL_SUCCESS_ACTIVE==="1")return false;
-  if(n.id==="implementation-history")return process.env.NEXT_PUBLIC_SCHOOL_SUCCESS_ACTIVE==="1"&&!!schoolId&&(can("implementation.view")||can("implementation.review"));
+  if(n.id==="school-success")return identity.admin;
+  if(n.id==="implementation-history")return !!schoolId&&(can("implementation.view")||can("implementation.review"));
   if(n.id==="permissions")return identity.admin;
   if(n.id==="training")return identity.admin||!!schoolId&&
    (can("digital_content.access")||can("training.access")||can("training.complete")||can("training.deliver")||can("training.review"));
@@ -431,13 +434,12 @@ export default function Home(){
   (reportsTab==="teacher"||reportsTab==="school")&&
   <TeacherSchoolReports client={client} session={session} schoolId={schoolId}
    mode={reportsTab} competencies={competencies}/>}
- {page==="school-success"&&<Box title="School Success"><p>School relationships, usage reports, teacher preparation and classroom evidence.</p><a className="btn primary" href={"/school-success"+(schoolId?"?schoolId="+encodeURIComponent(schoolId):"")}>Open School Success <ArrowRight size={16}/></a>{identity.admin&&<a className="btn" href="/school-success/migration">Imported database & school mappings</a>}</Box>}
+ {page==="school-success"&&identity.admin&&<Box title="School Success · Separate programme"><p>School Success supports its own curriculum programme. Its copied schools, CRM and reports are kept separately from Vision literacy.</p><a className="btn" href="/school-success">Open School Success folder <ArrowRight size={16}/></a><a className="btn" href="/school-success/migration">Imported database & backup</a><a className="btn" href="https://school-success-portal.harshitbhargava1997.chatgpt.site" target="_blank" rel="noopener noreferrer">Original School Success portal</a></Box>}
  {page==="implementation-history"&&schoolId&&(can("implementation.view")||can("implementation.review"))&&<ImplementationWorkspace client={client} session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"} competencies={competencies} isAdmin={identity.admin} grants={roleGrants} readOnly/>}
  {page==="implementation"&&schoolId&&
    (can("implementation.view")||can("implementation.submit")||can("implementation.review"))&&
-   <ImplementationWorkspace client={client} session={session} schoolId={schoolId}
-     schoolName={school?.name||"Selected school"} competencies={competencies}
-     isAdmin={identity.admin} grants={roleGrants}/>}
+   <TeacherPortalWorkspace key={schoolId} session={session} schoolId={schoolId}
+     onOpenContent={()=>window.open('/?workspace=training&schoolId='+encodeURIComponent(schoolId),'_blank','noopener,noreferrer')}/>}
  {page==="observations"&&can("observations.view")&&
    <Box title="Classroom observations"><Empty title="Historical observation integration is being prepared" detail="The existing Streamlit observation workflow remains operational. Observation rubric and legacy record migration are separate from Teacher Implementation evidence."/></Box>}
  {!schoolId&&!identity.admin&&<Empty title="No school membership found" detail="Ask your Platform Super Admin to assign your account to a school."/>}

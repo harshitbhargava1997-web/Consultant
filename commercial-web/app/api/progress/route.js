@@ -1,6 +1,7 @@
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
 import {isConfirmedUser} from "../../../lib/auth";
+import {visionImplementationSummary} from "../../../lib/teacher-portal/domain";
 
 export const runtime="nodejs";
 const UUID=/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
@@ -189,6 +190,9 @@ async function schoolTraining(ctx,teachers){
 }
 async function implementation(ctx,teachers){
  if(!ctx.can("implementation.review"))return null;
+ const native=await allRows(()=>ctx.admin.from("literacy_teacher_lessons")
+  .select("id,school_id,teacher_user_id,planned_on,periods,preparation_minutes,prepared_at,preparation_files,evidence_updates,reviews,version")
+  .eq("school_id",ctx.schoolId).order("id"),5000);
  const entriesResult=await allRows(()=>ctx.admin.from("literacy_implementation_entries")
    .select("id,class_id,teacher_user_id,implementation_date,subject,lesson_topic,submitted_at")
    .eq("school_id",ctx.schoolId).order("id"),5000);
@@ -220,18 +224,21 @@ async function implementation(ctx,teachers){
   }
  }
  const teacherStats=teachers.map(t=>{
-  const own=schoolEntries.filter(e=>e.teacher_user_id===t.user_id);
-  const reviewed=own.filter(e=>reviewById.get(e.id)?.status==="reviewed").length;
-  const needsFollowUp=own.filter(e=>reviewById.get(e.id)?.status==="needs_follow_up").length;
-  const files=own.reduce((sum,x)=>sum+Object.values(fileCounts[x.id]||{}).reduce((a,b)=>a+b,0),0);
-  return {user_id:t.user_id,submissions:own.length,files,reviewed,needsFollowUp,pending:own.length-reviewed-needsFollowUp,
-   records:[...own].sort((a,b)=>String(b.submitted_at).localeCompare(String(a.submitted_at))).slice(0,45)
-    .map(e=>({...e,files:fileCounts[e.id]||{},review:reviewById.get(e.id)||null}))};
+  const own=schoolEntries.filter(e=>e.teacher_user_id===t.user_id),fresh=visionImplementationSummary(native.rows,t.user_id);
+  const records=[...own.map(e=>({...e,files:fileCounts[e.id]||{},review:reviewById.get(e.id)||null})),...fresh.records];
+  const reviewed=records.filter(e=>e.review?.status==="reviewed").length;
+  const needsFollowUp=records.filter(e=>e.review?.status==="needs_follow_up").length;
+  const files=records.reduce((sum,x)=>sum+Object.values(x.files||{}).reduce((a,b)=>a+b,0),0);
+  return {user_id:t.user_id,submissions:records.length,files,reviewed,needsFollowUp,pending:records.length-reviewed-needsFollowUp,
+   preparationSessions:fresh.preparationSessions,preparedPeriods:fresh.preparedPeriods,preparationMinutes:fresh.preparationMinutes,
+   records:records.sort((a,b)=>String(b.submitted_at).localeCompare(String(a.submitted_at))).slice(0,45)};
  });
- return {teacherStats,submissions:schoolEntries.length,
-  pending:schoolEntries.filter(e=>!reviewById.has(e.id)).length,
-  needsFollowUp:schoolEntries.filter(e=>reviewById.get(e.id)?.status==="needs_follow_up").length,
-  truncated:entriesResult.truncated||reviewTruncated||filesTruncated};
+ return {teacherStats,submissions:teacherStats.reduce((n,t)=>n+t.submissions,0),
+  pending:teacherStats.reduce((n,t)=>n+t.pending,0),
+  needsFollowUp:teacherStats.reduce((n,t)=>n+t.needsFollowUp,0),
+  preparationSessions:teacherStats.reduce((n,t)=>n+t.preparationSessions,0),
+  preparationMinutes:teacherStats.reduce((n,t)=>n+t.preparationMinutes,0),
+  truncated:entriesResult.truncated||reviewTruncated||filesTruncated||native.truncated};
 }
 async function teacherSkillReviews(ctx,teachers){
  if(!ctx.can("teacher_reviews.create"))return null;
@@ -311,6 +318,8 @@ export async function GET(request){
    implementation:implementationData?{
     submissions:implementationData.submissions,pending:implementationData.pending,
     needsFollowUp:implementationData.needsFollowUp,
+    preparationSessions:implementationData.preparationSessions,
+    preparationMinutes:implementationData.preparationMinutes,
     truncated:implementationData.truncated
    }:null,
    teacherSkills:teacherData?{reviewed:teacherData.teachersReviewed,

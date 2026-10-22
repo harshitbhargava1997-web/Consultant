@@ -41,6 +41,7 @@ async function handlerPOST(req) {
         checkOrigin(req);
         const a = await actor(req), db = database();
         const b = await req.json();
+        if(b.action==='schoolLink')throw Error('403:School Success teacher links are managed in the independent original portal. Use Vision Teacher Portal for Vision schools.');
         const now = new Date().toISOString();
         if(a.allowedSchools&&b.kind==='school')throw Error('403:Only Super Admin may add schools');
         if(b.data?.school)assertSchool(a,b.data.school);if(b.school)assertSchool(a,b.school);
