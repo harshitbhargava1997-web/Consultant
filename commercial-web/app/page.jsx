@@ -32,6 +32,7 @@ const navigation=[
  {id:"competencies",label:"Competency library",icon:BookOpen,school:true},
  {id:"reports",label:"Progress reports",icon:ChartNoAxesCombined,school:true},
  {id:"implementation",label:"Teacher implementation",icon:FileUp,school:true},
+ {id:"school-success",label:"School Success",icon:GraduationCap,school:true},
  {id:"observations",label:"Classroom observations",icon:Eye,school:true}
 ];
 const formatGrade=(g)=>LEVELS.indexOf(g);
@@ -336,6 +337,8 @@ export default function Home(){
   reports:"reports.view",implementation:"implementation.view",observations:"observations.view"
  };
  const availableNav=navigation.filter(n=>{
+  if(n.id==="school-success")return identity.admin||!!schoolId&&can("school_success.access");
+  if(n.id==="implementation"&&process.env.NEXT_PUBLIC_SCHOOL_SUCCESS_ACTIVE==="1")return false;
   if(n.id==="permissions")return identity.admin;
   if(n.id==="training")return identity.admin||!!schoolId&&
    (can("digital_content.access")||can("training.access")||can("training.complete")||can("training.deliver")||can("training.review"));
@@ -426,6 +429,7 @@ export default function Home(){
   (reportsTab==="teacher"||reportsTab==="school")&&
   <TeacherSchoolReports client={client} session={session} schoolId={schoolId}
    mode={reportsTab} competencies={competencies}/>}
+ {page==="school-success"&&<Box title="School Success"><p>School relationships, usage reports, teacher preparation and classroom evidence.</p><a className="btn primary" href={"/school-success"+(schoolId?"?schoolId="+encodeURIComponent(schoolId):"")}>Open School Success <ArrowRight size={16}/></a>{identity.admin&&<a className="btn" href="/school-success/migration">Imported database & school mappings</a>}</Box>}
  {page==="implementation"&&schoolId&&
    (can("implementation.view")||can("implementation.submit")||can("implementation.review"))&&
    <ImplementationWorkspace client={client} session={session} schoolId={schoolId}

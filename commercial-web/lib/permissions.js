@@ -36,6 +36,7 @@ export const PERMISSION_GROUPS=[
   {key:"training.review",label:"Review staff learning progress",description:"View school-assigned teachers' course progress without exporting data"}
  ]},
  {title:"Implementation & school support",items:[
+  {key:"school_success.access",label:"Access School Success",description:"Consultants manage explicitly mapped schools; teachers use their mapped teaching identity"},
   {key:"consultants.support",label:"View school support and training history",description:"School-level monitoring"},
   {key:"consultants.log",label:"Log school support and training",description:"Consultant-role activity logging"},
   {key:"implementation.view",label:"View implementation submission history",description:"Teachers see their submissions; authorized school leaders and Consultants see school evidence"},

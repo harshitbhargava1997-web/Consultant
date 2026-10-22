@@ -1,0 +1,10 @@
+const base=Deno.env.get('SUPABASE_URL')!;const key=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;const expected='0088ff642cb13217205d4fa88d087c5e0793692e78c59b6671672ce4a0256dfc';const expires='2026-10-24T13:15:56.676Z';
+const tables=['portal_school_plans','classroom_observations','portal_actions','portal_action_history','portal_evidence_reviews','portal_import_runs','portal_contacts','portal_call_logs','portal_tickets','teacher_records'];
+Deno.serve(async req=>{const json=(data:unknown,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});try{
+if(req.method!=='POST'||Date.now()>Date.parse(expires))return json({error:'Export is disabled'},403);
+const token=(req.headers.get('Authorization')||'').replace(/^Bearer /,'');const actual=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token)))].map(x=>x.toString(16).padStart(2,'0')).join('');if(actual!==expected)return json({error:'Unauthorized'},403);
+const b=await req.json();let url;
+if(b.action==='legacy'&&['school_crm_data.json','school_call_logs_store.json'].includes(b.name))url=base+'/storage/v1/object/teacher_uploads/'+b.name;
+else {if(!tables.includes(b.table)||!Number.isInteger(b.offset)||b.offset<0||b.offset>1000000)return json({error:'Invalid export page'},400);const order=b.table==='portal_contacts'?'school,entity_type':b.table==='portal_school_plans'?'school':b.table==='portal_evidence_reviews'?'record_id':'id';url=base+'/rest/v1/'+b.table+'?select=*&order='+order+'&limit=500&offset='+b.offset;}
+const r=await fetch(url,{headers:{apikey:key,Authorization:'Bearer '+key,Prefer:'count=exact'}});if(r.status===404&&b.action==='legacy')return json({value:b.name==='school_crm_data.json'?{contacts:{}}:[]});if(!r.ok)return json({error:'Source export failed '+r.status},502);const rows=await r.json();return json(b.action==='legacy'?{value:rows}:{rows,total:Number(r.headers.get('content-range')?.split('/')[1]||rows.length)});
+}catch{return json({error:'Export failed'},500)}});

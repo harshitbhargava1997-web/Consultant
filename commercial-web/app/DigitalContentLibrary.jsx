@@ -2,6 +2,8 @@
 import {useEffect,useMemo,useState} from "react";
 import {BookOpen,Edit3,ExternalLink,Eye,FileText,Plus,Send,Users} from "lucide-react";
 import {LEVELS} from "../lib/supabase";
+import VcBlendingCourse from "./VcBlendingCourse";
+import {getVcItem} from "../lib/vcCourse";
 
 const GRADES=LEVELS.filter(grade=>grade==="Nursery"||grade==="LKG"||grade==="UKG"||/^Grade [1-5]$/.test(grade));
 const TYPES=[
@@ -20,6 +22,7 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
  const [items,setItems]=useState([]),[allowedGrades,setAllowedGrades]=useState(GRADES);
  const [grade,setGrade]=useState("Nursery"),[form,setForm]=useState(blank);
  const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
+ const [courseItem,setCourseItem]=useState(null);
  const grades=useMemo(()=>isAdmin?GRADES:GRADES.filter(value=>allowedGrades.includes(value)),[allowedGrades,isAdmin]);
  const gradeKey=grades.join("|");
  const gradeItems=items.filter(item=>item.grade===grade&&item.status!=="archived");
@@ -36,6 +39,7 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
   }catch(e){setMessage(e.message);}finally{setLoading(false);}
  }
  useEffect(()=>{load();},[session?.access_token,schoolId]);
+ useEffect(()=>{setCourseItem(null);},[schoolId,session?.access_token,grade]);
  useEffect(()=>{if(grades.length&&!grades.includes(grade))setGrade(grades[0]);},[gradeKey,grade]);
  async function execute(action,payload){
   setBusy(true);setMessage("");
@@ -69,6 +73,12 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
    </div>
   </section>
   {message&&<div className="notice" role="status">{message}</div>}
+  {!loading&&grade==="LKG"&&gradeItems.some(item=>getVcItem(item))&&<section className="panel vc-course-entry">
+   <h2>VC Blending Course · A → E → I → O → U</h2>
+   <p>Open the vowel units for preparation, interactive blending, printable worksheets and review inside Vision.</p>
+   <button type="button" className="btn primary" onClick={()=>setCourseItem(gradeItems.find(item=>getVcItem(item)))}>Open VC course</button>
+  </section>}
+  {!loading&&courseItem&&gradeItems.some(item=>item.id===courseItem.id)&&<VcBlendingCourse key={courseItem.id} items={gradeItems.filter(item=>getVcItem(item))} initialItem={courseItem} isAdmin={isAdmin} onClose={()=>setCourseItem(null)}/>}
   {isAdmin&&<section className="panel digital-content-publisher">
    <div className="panel-head"><h2><Plus size={18}/> {form.id?"Edit digital content":"Create digital content"}</h2><span className="eyebrow">SUPER ADMIN PUBLISHING</span></div>
    <p className="helper">Saving creates a draft. Review it in the library below, then publish it to the selected stakeholder roles.</p>
@@ -110,7 +120,7 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
       {item.practice&&<details><summary>Practise</summary><div>{item.practice}</div></details>}
       {item.check_understanding&&<details><summary>Check understanding</summary><div>{item.check_understanding}</div></details>}
      </div>
-     {item.resource_url&&<a className="btn outline" href={item.resource_url} target="_blank" rel="noopener noreferrer">Open resource <ExternalLink size={15}/></a>}
+     {getVcItem(item)?<button className="btn outline" type="button" onClick={()=>setCourseItem(item)}>Open in Vision <BookOpen size={15}/></button>:item.resource_url&&<a className="btn outline" href={item.resource_url} target="_blank" rel="noopener noreferrer">Open resource <ExternalLink size={15}/></a>}
      {isAdmin&&<div className="digital-content-admin-actions"><button className="btn outline" type="button" disabled={busy} onClick={()=>edit(item)}><Edit3 size={14}/> Edit</button>{item.status!=="published"?<button className="btn primary" type="button" disabled={busy} onClick={()=>execute("status",{id:item.id,status:"published"})}><Send size={14}/> Publish</button>:<button className="btn outline" type="button" disabled={busy} onClick={()=>execute("status",{id:item.id,status:"draft"})}>Unpublish</button>}<button className="btn outline" type="button" disabled={busy} onClick={()=>execute("status",{id:item.id,status:"archived"})}>Archive</button></div>}
      <footer><Users size={13}/>{(item.target_roles||[]).map(role=>ROLE_LABELS[role]).join(", ")}</footer>
     </article>;

@@ -8,12 +8,18 @@
     "start": "next start"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.57.0",
+    "aws4fetch": "1.0.20",
+    "exceljs": "^4.4.0",
+    "fflate": "0.8.3",
+    "jspdf": "4.2.1",
+    "jspdf-autotable": "5.0.8",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.468.0",
     "next": "^15.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "@supabase/supabase-js": "^2.57.0",
-    "lucide-react": "^0.468.0",
-    "exceljs": "^4.4.0",
-    "jszip": "^3.10.1"
+    "xlsx": "0.18.5",
+    "zod": "3.25.76"
   }
 }

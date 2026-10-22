@@ -1,0 +1,12 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {normalizeUsage,canonical,schemas,workingDays,csv} from '../lib/school-success/domain.js';
+test('duration and workbook mapping preserve exact minutes',()=>{const r=normalizeUsage({Institution:'School A',FullName:'Teacher',StartTime:'2026-10-15 09:00:00',Type:'Content', 'Duration (HH:MM:SS)':'01:02:30'});assert.equal(r.minutes,62.5);assert.equal(r.module,'Content / Book');assert.equal(r.date,'2026-10-15')});
+test('missing duration and invalid dates cannot become zero-valued valid sessions',()=>{assert.throws(()=>normalizeUsage({school:'S',teacher:'T',date:'2026-10-15',module:'Content'}));assert.throws(()=>normalizeUsage({school:'S',teacher:'T',date:'2026-02-31',module:'Content',minutes:10}));});
+test('ebook and additional materials do not fall into book totals',()=>{for(const [type,expected] of [['E-book','E-book'],['Additional Materials','Additional Materials'],['Answer Key','Additional Materials']])assert.equal(normalizeUsage({school:'S',teacher:'T',date:'2026-10-15',module:type,minutes:10}).module,expected)});
+test('canonical imports ignore source object key order',()=>assert.equal(canonical({b:1,a:2}),canonical({a:2,b:1})));
+test('contacts validate role and phone; call status validates',()=>{assert.equal(schemas.contact.safeParse({school:'S',entity:'Principal',name:'P',phone:'+91 9876543210'}).success,true);assert.equal(schemas.contact.safeParse({school:'S',entity:'Admin',name:'P',phone:'1'}).success,false);assert.equal(schemas.call.safeParse({school:'S',entity:'Principal',name:'P',date:'2026-10-15',followup:'2026-10-20',notes:'Discuss implementation',status:'bogus'}).success,false)});
+test('working days exclude Sunday and holidays',()=>assert.equal(workingDays('2026-10-12','2026-10-18',['2026-10-15']),5));
+test('exports protect spreadsheet formulas and preserve commas',()=>{assert.match(csv([{name:'=CMD()',notes:'a,b'}]),/"'=CMD\(\)"/);assert.match(csv([{notes:'a,b'}]),/"a,b"/)});
+test('overlapping content exports deduplicate independent of richer metadata',async()=>{const {usageIdentity}=await import('../lib/school-success/domain.js');const basic={school:'School',teacher:'Teacher',date:'2026-10-15',module:'Content / Book',minutes:10,start:'2026-10-15T10:00:00Z',end:'2026-10-15T10:10:00Z'};assert.equal(usageIdentity({...basic,topic:''}),usageIdentity({...basic,topic:'Plants',grade:'3'}));assert.notEqual(usageIdentity(basic),usageIdentity({...basic,end:'2026-10-15T10:11:00Z'}))});
+
