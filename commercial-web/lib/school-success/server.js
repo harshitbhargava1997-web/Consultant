@@ -10,7 +10,7 @@ export async function actor(req){
 }
 async function identify(req){
  if(req.headers.get('X-School-Link')||new URL(req.url).searchParams.get('access'))throw Error('403:School Success is a separate programme. Use its original portal or your Vision teacher link.');
- const db=service(),token=(req.headers.get('Authorization')||'').replace(/^Bearer\\s+/i,'');
+ const db=service(),token=(req.headers.get('Authorization')||'').replace(/^Bearer\s+/i,'');
  if(!token)throw Error('401:Sign in to Vision to open the School Success folder');
  const {data:{user},error}=await db.auth.getUser(token);
  if(error||!user||!(user.email_confirmed_at||user.phone_confirmed_at))throw Error('401:Vision session expired');
