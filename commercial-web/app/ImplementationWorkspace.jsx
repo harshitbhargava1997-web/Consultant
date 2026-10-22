@@ -81,11 +81,11 @@ function ReviewCard({entry,files=[],review,teacher,classLabel,competencyTitles=[
   </div>}
  </article>;
 }
-export default function ImplementationWorkspace({client,session,schoolId,schoolName,competencies=[],isAdmin=false,grants=[]}){
+export default function ImplementationWorkspace({client,session,schoolId,schoolName,competencies=[],isAdmin=false,grants=[],readOnly=false}){
  const can=feature=>isAdmin||grants.includes(feature);
  const [info,setInfo]=useState({entries:[],files:[],reviews:[],people:[],competencyLinks:[],classes:[],canSubmit:false,canReview:false,canFeedback:false,transcriptionAvailable:false});
  const [periods,setPeriods]=useState([emptyPeriod()]);
- const [tab,setTab]=useState("submit");
+ const [tab,setTab]=useState(readOnly?"review":"submit");
  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[message,setMessage]=useState("");
  const [teacherFilter,setTeacherFilter]=useState("all"),[classFilter,setClassFilter]=useState("all");
  const [statusFilter,setStatusFilter]=useState("all"),[categoryFilter,setCategoryFilter]=useState("all"),[search,setSearch]=useState("");
@@ -94,9 +94,9 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
  const [recording,setRecording]=useState(null),[transcribing,setTranscribing]=useState(null);
  const recorder=useRef(null),audioStream=useRef(null),speechRef=useRef(null);
  const preparedVoices=useRef(new Map());
- const hasSubmit=info.canSubmit&&can("implementation.submit");
+ const hasSubmit=!readOnly&&info.canSubmit&&can("implementation.submit");
  const hasReview=info.canReview&&can("implementation.review");
- const hasFeedback=hasReview&&info.canFeedback&&can("implementation.feedback");
+ const hasFeedback=!readOnly&&hasReview&&info.canFeedback&&can("implementation.feedback");
  const own=info.entries.filter(e=>e.teacher_user_id===session?.user?.id);
  const reviewRows=hasReview?info.entries:own;
  const displayRoles=(info.people||[]);
@@ -150,7 +150,7 @@ export default function ImplementationWorkspace({client,session,schoolId,schoolN
   fetch("/api/implementation?schoolId="+encodeURIComponent(schoolId),{
    headers:{"Authorization":"Bearer "+session.access_token},cache:"no-store"
   }).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||"Unable to load evidence.");return j;})
-   .then(j=>{if(active){setInfo(j);setPeriods([emptyPeriod(j.classes[0]?.id||"")]);setTab(j.canSubmit?"submit":"review");setLoading(false);}})
+   .then(j=>{if(active){setInfo(j);setPeriods([emptyPeriod(j.classes[0]?.id||"")]);setTab(!readOnly&&j.canSubmit?"submit":"review");setLoading(false);}})
    .catch(e=>{if(active){setMessage(e.message);setLoading(false);}});
   return()=>{active=false;};
  },[schoolId,session?.access_token]);

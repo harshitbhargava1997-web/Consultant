@@ -12,18 +12,24 @@ Deno.serve(async req=>{try{
   for(const role of ['admin','consultant','teacher','otherTeacher']){const email='vision-qa-'+role.toLowerCase()+'-'+b.runId+'@example.invalid',password=crypto.randomUUID()+'Aa9!';const user=await api('/auth/v1/admin/users','POST',{email,password,email_confirm:true,app_metadata:{vision_integration_qa:b.runId}});users[role]={id:user.id,email,password};}
   await api('/rest/v1/literacy_platform_admins','POST',{user_id:users.admin.id});
   await api('/rest/v1/literacy_memberships','POST',[{school_id:schools[0].id,user_id:users.teacher.id,display_name:'QA Teacher A',role:'teacher'},{school_id:schools[1].id,user_id:users.otherTeacher.id,display_name:'QA Teacher B',role:'teacher'}]);
+  await api('/rest/v1/success_import_state','POST',{key:'qa:'+b.runId,value:{schools,users:Object.values(users).map((u:any)=>({id:u.id,email:u.email})),runId:b.runId}});
+  await api('/rest/v1/literacy_consultants','POST',{user_id:users.consultant.id,display_name:'QA Consultant'});
   await api('/rest/v1/literacy_consultant_assignments','POST',{school_id:schools[0].id,consultant_user_id:users.consultant.id});
   await api('/rest/v1/success_school_mappings','POST',schools.map(s=>({source_school:s.name,vision_school_id:s.id,approved_by:users.admin.id})));
   await api('/rest/v1/success_teacher_mappings','POST',[{source_school:schools[0].name,source_teacher:'QA Teacher A',vision_user_id:users.teacher.id,approved_by:users.admin.id},{source_school:schools[1].name,source_teacher:'QA Teacher B',vision_user_id:users.otherTeacher.id,approved_by:users.admin.id}]);
   await api('/rest/v1/success_members','POST',[{email:users.teacher.email,role:'teacher',school:schools[0].name,name:'QA Teacher A'},{email:users.otherTeacher.email,role:'teacher',school:schools[1].name,name:'QA Teacher B'}]);
-  await api('/rest/v1/success_import_state','POST',{key:'qa:'+b.runId,value:{schools,users:Object.values(users).map((u:any)=>({id:u.id,email:u.email})),runId:b.runId}});
   for(const u of Object.values(users) as any[]){const session=await api('/auth/v1/token?grant_type=password','POST',{email:u.email,password:u.password});u.token=session.access_token;}
+  return Response.json({schools,users});
+ }
+ if(b.action==='resume'){
+  const saved=await api('/rest/v1/success_import_state?key=eq.qa:'+b.runId+'&select=value');if(!saved[0])throw Error('QA run not found');const {schools,users:items}=saved[0].value;const users:Record<string,any>={};
+  for(const u of items){const current=await api('/auth/v1/admin/users/'+u.id);if(current.app_metadata?.vision_integration_qa!==b.runId)throw Error('QA identity mismatch');const role=u.email.includes('otherteacher')?'otherTeacher':u.email.includes('consultant')?'consultant':u.email.includes('teacher')?'teacher':'admin';const link=await api('/auth/v1/admin/generate_link','POST',{type:'magiclink',email:u.email});const session=await api('/auth/v1/verify','POST',{type:'magiclink',token_hash:link.hashed_token});users[role]={...u,token:session.access_token};}
   return Response.json({schools,users});
  }
  if(b.action==='cleanup'){
   const saved=await api('/rest/v1/success_import_state?key=eq.qa:'+b.runId+'&select=value');if(!saved[0])return Response.json({ok:true,absent:true});const {schools,users}=saved[0].value;
   for(const s of schools){const query='?school=eq.'+encodeURIComponent(s.name);await api('/rest/v1/teacher_records?Center=eq.'+encodeURIComponent(s.name),'DELETE');for(const t of ['portal_call_logs','portal_tickets','portal_contacts','portal_evidence_reviews','portal_import_runs','classroom_observations']){if(t==='portal_import_runs')continue;await api('/rest/v1/'+t+query,'DELETE');}await api('/rest/v1/success_members'+query,'DELETE');await api('/rest/v1/success_teacher_mappings?source_school=eq.'+encodeURIComponent(s.name),'DELETE');await api('/rest/v1/success_school_mappings?source_school=eq.'+encodeURIComponent(s.name),'DELETE');await api('/rest/v1/success_config?key=like.'+encodeURIComponent('directoryArchive:%'+b.runId+'%'),'DELETE');await api('/rest/v1/literacy_consultant_assignments?school_id=eq.'+s.id,'DELETE');await api('/rest/v1/literacy_memberships?school_id=eq.'+s.id,'DELETE');await api('/rest/v1/literacy_schools?id=eq.'+s.id,'DELETE');}
-  for(const u of users){const user=await api('/auth/v1/admin/users/'+u.id);if(user.app_metadata?.vision_integration_qa!==b.runId)throw Error('Refusing to delete a non-QA user');await api('/rest/v1/literacy_platform_admins?user_id=eq.'+u.id,'DELETE');await api('/auth/v1/admin/users/'+u.id,'DELETE');}
+  for(const u of users){const user=await api('/auth/v1/admin/users/'+u.id);if(user.app_metadata?.vision_integration_qa!==b.runId)throw Error('Refusing to delete a non-QA user');await api('/rest/v1/literacy_platform_admins?user_id=eq.'+u.id,'DELETE');await api('/rest/v1/literacy_consultants?user_id=eq.'+u.id,'DELETE');await api('/auth/v1/admin/users/'+u.id,'DELETE');}
   await api('/rest/v1/success_import_state?key=eq.qa:'+b.runId,'DELETE');return Response.json({ok:true});
  }
  throw Error('Unsupported action');
