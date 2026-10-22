@@ -7,6 +7,7 @@
 - Super Admin import, backup and mapping interface: https://vision-school-commercial-staging.vercel.app/school-success/migration
 - Independent original: https://school-success-portal.harshitbhargava1997.chatgpt.site
 - Repository: `harshitbhargava1997-web/Consultant`; app root `commercial-web`.
+- Active Vercel deployment: `dpl_9S54jEToPFXuBxpfEE9yNnFg5KQL`, READY, commit `d9fce53a4edb3d6f9b87e1875e4c4777491f3c80`. Target: production environment of the existing staging project. Canonical alias confirmed.
 
 ## Data and access
 
@@ -50,7 +51,7 @@ Protected features verify Vision's Supabase user, administrative role, school as
 | Teacher downloads | Live GET of saved PDF/audio/photo/video-transport URLs passed |
 | Uploads above Vercel body limit | Live 6 MiB direct R2 PUT/preflight passed; file bodies bypass Vercel functions |
 | R2 CORS and permissions | Live PUT, GET and exact canonical origin preflight passed; existing CORS rules retained |
-| Super Admin database backup | Implemented as authenticated NDJSON stream; final deployment verification required |
+| Super Admin database backup | Live authenticated NDJSON download passed (61,639 rows while QA fixtures were present); includes copied settings and encrypted configuration. Final follow-up adds legacy CRM snapshots/import state to this backup |
 | Fresh Vision-school workspace | Implemented with explicit school/user IDs; final deployed new-workspace creation not yet exercised |
 | iPhone Safari / Android Chrome | Responsive source retained; physical-device microphone, speech and usability tests outstanding |
 
@@ -70,5 +71,7 @@ Keep `SCHOOL_SUCCESS_TRANSFER_KEY` and `SCHOOL_SUCCESS_SIGNING_KEY` stable; the 
 `NEXT_PUBLIC_SCHOOL_SUCCESS_ACTIVE=1` switches the active navigation. Removing that flag and redeploying restores the old navigation, while the two data stores remain intact. Do not run the import again after new Vision submissions. Use the protected backup and a reviewed restore procedure instead.
 
 Source export/import services are disabled after transfer, and the source app was republished without the temporary export route. Disposable test accounts/media must be removed and the QA service disabled before handoff. Test cleanup only targets recorded QA-run IDs, never customer schools.
+
+Release cleanup completed: seven disposable R2 objects, temporary QA schools/accounts, records, templates, link tokens, import runs and QA audit entries removed. The QA Edge Function now returns disabled status and requires JWT verification. No customer media or records were removed. The independent source app is published as version 28. Error/fatal runtime-log scan of the final deployment returned no matching entries; this is a point-in-time scan, not continuous monitoring.
 
 Supabase advisor review: new integration tables intentionally use RLS without client policies, with client grants revoked and server-only RPCs. Existing project warnings concerning pre-existing SECURITY DEFINER functions and disabled leaked-password protection were not changed as part of this migration. Review password protection separately: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
