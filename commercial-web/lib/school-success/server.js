@@ -24,7 +24,7 @@ export async function sessionIdentity(req){
 export async function schoolTeachers(school,archives){
  const db=service();
  const [roster,members,flags]=await Promise.all([
-  checked(db.rpc('school_success_roster')),
+  checked(db.rpc('school_success_school_roster',{p_school:school})),
   checked(db.from('success_members').select('school,name,role').eq('school',school)),
   archives?Promise.resolve(archives):loadArchives(database())
  ]);
@@ -53,5 +53,5 @@ async function identify(req){
 }
 export function assertSchool(a,school){if(!school||a.allowedSchools&&!a.allowedSchools.includes(school))throw Error('403:School is outside your assignment');}
 export function checkOrigin(req){const o=req.headers.get('Origin');if(o&&o!==new URL(req.url).origin)throw Error('403:Cross-origin request rejected');}
-export function streamJson(data,init={}){const value=JSON.stringify(data),encoder=new TextEncoder();let offset=0;return new Response(new ReadableStream({pull(controller){if(offset>=value.length){controller.close();return;}controller.enqueue(encoder.encode(value.slice(offset,offset+32768)));offset+=32768;}}),{...init,headers:{'Content-Type':'application/json','Cache-Control':'no-store',...init.headers}});}
+export function streamJson(data,init={}){const bytes=new TextEncoder().encode(JSON.stringify(data));let offset=0;return new Response(new ReadableStream({pull(controller){if(offset>=bytes.length){controller.close();return;}controller.enqueue(bytes.subarray(offset,offset+32768));offset+=32768;}}),{...init,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...init.headers}});}
 export function failure(e){const message=String(e.message||e),status=Number(message.match(/^(401|403|409|413|503):/)?.[1]||400);return Response.json({error:message.replace(/^\d+:/,'')},{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});}

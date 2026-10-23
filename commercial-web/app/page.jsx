@@ -2,21 +2,22 @@
 import {useEffect,useMemo,useState} from "react";
 import dynamic from "next/dynamic";
 import {browserClient,LEVELS,RATINGS,MANAGERS,skillProgress,parseCsv} from "../lib/supabase";
-import BulkWorkspace from "./BulkWorkspace";
-import AssessorWorkspace from "./AssessorWorkspace";
-import AssessmentStructure from "./AssessmentStructure";
-import TeacherSkillsReview from "./TeacherSkillsReview";
-import RolePermissions from "./RolePermissions";
-import SchoolManagementWorkspace from "./SchoolManagementWorkspace";
-import TrainingWorkspace from "./TrainingWorkspace";
-import TrainingImpactPanel from "./TrainingImpactPanel";
-import StudentSoundReport from "./StudentSoundReport";
-import StudentAssessmentEvidence from "./StudentAssessmentEvidence";
-import TeacherSchoolReports from "./TeacherSchoolReports";
-import ImplementationWorkspace from "./ImplementationWorkspace";
+const BulkWorkspace=dynamic(()=>import("./BulkWorkspace"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const AssessorWorkspace=dynamic(()=>import("./AssessorWorkspace"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const AssessmentStructure=dynamic(()=>import("./AssessmentStructure"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const TeacherSkillsReview=dynamic(()=>import("./TeacherSkillsReview"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const RolePermissions=dynamic(()=>import("./RolePermissions"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const SchoolManagementWorkspace=dynamic(()=>import("./SchoolManagementWorkspace"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const TrainingWorkspace=dynamic(()=>import("./TrainingWorkspace"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const TrainingImpactPanel=dynamic(()=>import("./TrainingImpactPanel"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const StudentSoundReport=dynamic(()=>import("./StudentSoundReport"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const StudentAssessmentEvidence=dynamic(()=>import("./StudentAssessmentEvidence"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const TeacherSchoolReports=dynamic(()=>import("./TeacherSchoolReports"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const ImplementationWorkspace=dynamic(()=>import("./ImplementationWorkspace"),{loading:()=> <section className="panel">Opening workspace…</section>});
 const TeacherPortalWorkspace=dynamic(()=>import("./TeacherPortalWorkspace"),{loading:()=> <section className="panel">Opening teacher portal…</section>});
-import CurriculumEditor from "./CurriculumEditor";
-import ConsultantWorkspace,{ConsultantManagement} from "./ConsultantWorkspace";
+const CurriculumEditor=dynamic(()=>import("./CurriculumEditor"),{loading:()=> <section className="panel">Opening workspace…</section>});
+const ConsultantWorkspace=dynamic(()=>import("./ConsultantWorkspace"),{loading:()=> <section className="panel">Opening consultant workspace…</section>});
+const ConsultantManagement=dynamic(()=>import("./ConsultantWorkspace").then(m=>m.ConsultantManagement),{loading:()=> <section className="panel">Opening consultant assignments…</section>});
 import {isEmail,loginLabel,normalizePhone} from "../lib/auth";
 import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNoAxesCombined,
  BookMarked,Eye,Menu,X,LogOut,Plus,Trash2,Search,ChevronRight,RefreshCw,LockKeyhole,
@@ -119,7 +120,7 @@ export default function Home(){
      client.from("literacy_memberships").select("school_id,role,user_id,display_name").eq("user_id",session.user.id),
      client.from("literacy_schools").select("id,name").order("name"),
      fetch("/api/admin",{headers:{Authorization:"Bearer "+session.access_token}}).then(r=>r.json()).catch(()=>({})),
-     fetch("/api/consultants",{headers:{Authorization:"Bearer "+session.access_token}}).then(r=>r.json()).catch(()=>({}))
+     fetch("/api/consultants?summary=1",{headers:{Authorization:"Bearer "+session.access_token}}).then(r=>r.json()).catch(()=>({}))
     ]);
     if(memErr)throw memErr;if(schErr)throw schErr;
     const memberships=mem||[];
@@ -153,9 +154,11 @@ export default function Home(){
    setIdentity(old=>({...old,assignedIds:(tc.data||[]).map(x=>x.class_id)}));
    setActiveClass(old=>cls.some(x=>x.id===old)?old:(cls[0]?.id||""));
    if(cls.length){
-    const allAssignments=await client.from("literacy_teacher_classes").select("class_id,teacher_user_id").in("class_id",cls.map(x=>x.id));
+    const [allAssignments,s]=await Promise.all([
+     client.from("literacy_teacher_classes").select("class_id,teacher_user_id").in("class_id",cls.map(x=>x.id)),
+     client.from("literacy_students").select("id,class_id,student_name,admission_number,active").in("class_id",cls.map(x=>x.id)).limit(3000)
+    ]);
     if(alive)setTeacherClasses(allAssignments.data||[]);
-    const s=await client.from("literacy_students").select("id,class_id,student_name,admission_number,active").in("class_id",cls.map(x=>x.id)).limit(3000);
     if(alive){setStudents(s.data||[]);if(s.error)setMessage(s.error.message);}
    }else {setStudents([]);setTeacherClasses([]);}
   })();

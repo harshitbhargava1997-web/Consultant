@@ -7,29 +7,34 @@ import { ticketSchema } from '@/lib/school-success/crm';
 import { reportSettingsSchema, defaultReportSettings } from '@/lib/school-success/reports';
 import { gateway, publicBase } from '@/lib/school-success/live';
 import { mapLive } from '@/lib/school-success/live-mapping';
-import { actor, database, checkOrigin, failure, assertSchool, schoolTeachers } from '@/lib/school-success/server';
+import { actor, database, checkOrigin, failure, assertSchool, schoolTeachers, streamJson } from '@/lib/school-success/server';
 import { schemas } from '@/lib/school-success/domain';
 export const dynamic = 'force-dynamic';
 async function hash(s) { return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))).map(x => x.toString(16).padStart(2, '0')).join(''); }
 async function handlerGET(req) {
     try {
-        const a = await actor(req), db = database(), url = new URL(req.url), today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-        const from = url.searchParams.get('from') || today.slice(0, 8) + '01', to = url.searchParams.get('to') || today;
-        const raw = await gateway({ action: 'read', from, to }), mapped = await mapLive(raw, publicBase());
-        const local = (await db.prepare("SELECT * FROM portal_entries WHERE kind='school'").all()).results.map((r) => ({ ...JSON.parse(r.payload), id: r.id, kind: r.kind, version: r.version }));
-        const crmArchive = await ensureCrmArchive(db, async () => mapped.entries);
-        const allEntries = [...applyCrmArchive(mapped.entries, crmArchive).filter(r => r.kind !== 'submission' || r.date >= from && r.date <= to), ...local.filter(r=>!a.allowedSchools||a.allowedSchools.includes(r.school))];
-        const saved = await db.prepare("SELECT value FROM portal_config WHERE key='reportSettings'").first();
+        const started=performance.now(),a=await actor(req),authDone=performance.now(),db=database(),url=new URL(req.url),today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+        const from=url.searchParams.get('from')||today.slice(0,8)+'01',to=url.searchParams.get('to')||today,admin=a.role==='admin';
+        const rawTask=gateway({action:'read',from,to}),mappedTask=rawTask.then(raw=>mapLive(raw,publicBase()));
+        const [mapped,localRows,saved,allMemberRows,archiveRows,config,crmArchive]=await Promise.all([
+         mappedTask,admin?db.prepare("SELECT * FROM portal_entries WHERE kind='school'").all():{results:[]},
+         admin?db.prepare("SELECT value FROM portal_config WHERE key='reportSettings'").first():null,
+         admin?db.prepare('SELECT * FROM portal_members ORDER BY school,name').all():{results:[]},
+         loadArchives(db),loadR2Config(env,db),admin?ensureCrmArchive(db,async()=>(await mappedTask).entries):{ids:[]}
+        ]);
+        const raw=await rawTask,dataDone=performance.now();
+        const local=localRows.results.map(r=>({...JSON.parse(r.payload),id:r.id,kind:r.kind,version:r.version}));
+        const allEntries=[...applyCrmArchive(mapped.entries,crmArchive).filter(r=>r.kind!=='submission'||r.date>=from&&r.date<=to),...local.filter(r=>!a.allowedSchools||a.allowedSchools.includes(r.school))];
         const parsed = reportSettingsSchema.safeParse(saved ? JSON.parse(saved.value) : null);
         const reportSettings = parsed.success ? parsed.data : defaultReportSettings;
         const calendars = Object.fromEntries((raw.calendars || []).map((r) => [r.school, Array.isArray(r.calendar_dates) ? r.calendar_dates : []]));
-        const allMembers = a.role === 'admin' ? (await db.prepare('SELECT * FROM portal_members ORDER BY school,name').all()).results.filter(r=>!a.allowedSchools||a.allowedSchools.includes(r.school)) : [];
-        const archives = (await loadArchives(db)).filter(r=>!a.allowedSchools||a.allowedSchools.includes(r.school)), active = (r) => !isArchived(archives, r.school || r.name, r.teacher || '');
+        const allMembers=allMemberRows.results.filter(r=>!a.allowedSchools||a.allowedSchools.includes(r.school));
+        const archives = archiveRows.filter(r=>!a.allowedSchools||a.allowedSchools.includes(r.school)), active = (r) => !isArchived(archives, r.school || r.name, r.teacher || '');
         const entries = allEntries.filter(active), members = allMembers.filter((r) => !isArchived(archives, r.school, r.name));
         const roster = [...new Map([...mapped.roster, ...allMembers].map((r) => [JSON.stringify([r.school, r.name]), { school: r.school, name: r.name }])).values()];
         const activeRoster = roster.filter(r => !isArchived(archives, r.school, r.name));
         const directory = a.role === 'admin' ? { archives, schools: [...new Set([...allEntries.map(r => r.school || r.name), ...roster.map(r => r.school), ...archives.map(r => r.school)])].filter(Boolean).sort(), teachers: [...new Map([...roster, ...archives.filter(r => r.kind === 'teacher').map(r => ({ school: r.school, name: r.teacher }))].map(r => [JSON.stringify([r.school, r.name]), r])).values()], members: allMembers } : undefined;
-        return Response.json({ actor: {...a,allowedSchools:undefined,userId:undefined}, entries: a.role === 'admin' ? entries : entries.filter(r => (r.kind === 'school' && (r.school || r.name) === a.school) || (r.kind === 'submission' && r.school === a.school && r.teacher === a.name && (a.role !== 'school-teacher' || r.uploadedBy === a.email))), members, directory, crmArchive: a.role === 'admin' ? { createdAt: crmArchive.createdAt, count: crmArchive.ids.length } : undefined, archivedEntries: a.role === 'admin' ? allEntries.filter(r => !active(r)) : undefined, archivedRoster: a.role === 'admin' ? roster.filter(r => isArchived(archives, r.school, r.name)) : undefined, roster: a.role === 'admin' ? activeRoster : a.role === 'school-teacher' ? a.teachers.map((name) => ({ name, school: a.school })) : [], source: 'Vision · School Success', period: { from, to }, counts: a.role === 'admin' ? mapped.counts : undefined, reportSettings: a.role === 'admin' ? reportSettings : undefined, calendars: a.role === 'admin' ? calendars : undefined, uploadsEnabled: r2UploadsConfigured(await loadR2Config(env, db)), mediaPublicBase: publicBase(), teacherSubmissionsEnabled: true, importsEnabled: a.role === 'admin' }, { headers: { 'Cache-Control': 'no-store' } });
+        return streamJson({ actor: {...a,allowedSchools:undefined,userId:undefined}, entries: a.role === 'admin' ? entries : entries.filter(r => (r.kind === 'school' && (r.school || r.name) === a.school) || (r.kind === 'submission' && r.school === a.school && r.teacher === a.name && (a.role !== 'school-teacher' || r.uploadedBy === a.email))), members, directory, crmArchive: a.role === 'admin' ? { createdAt: crmArchive.createdAt, count: crmArchive.ids.length } : undefined, archivedEntries: a.role === 'admin' ? allEntries.filter(r => !active(r)) : undefined, archivedRoster: a.role === 'admin' ? roster.filter(r => isArchived(archives, r.school, r.name)) : undefined, roster: a.role === 'admin' ? activeRoster : a.role === 'school-teacher' ? a.teachers.map((name) => ({ name, school: a.school })) : [], source: 'Vision · School Success', period: { from, to }, counts: a.role === 'admin' ? mapped.counts : undefined, reportSettings: a.role === 'admin' ? reportSettings : undefined, calendars: a.role === 'admin' ? calendars : undefined, uploadsEnabled: r2UploadsConfigured(config), mediaPublicBase: publicBase(), teacherSubmissionsEnabled: true, importsEnabled: a.role === 'admin' }, { headers: { 'Cache-Control': 'no-store','Server-Timing':`auth;dur=${(authDone-started).toFixed(1)}, data;dur=${(dataDone-authDone).toFixed(1)}, total;dur=${(performance.now()-started).toFixed(1)}` } });
     }
     catch (e) {
         return failure(e);

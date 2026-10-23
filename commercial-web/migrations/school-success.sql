@@ -264,3 +264,24 @@ CREATE INDEX teacher_records_review_date_idx ON public.teacher_records USING btr
 CREATE INDEX school_success_usage_session_idx ON public.teacher_records USING btree (school_success_usage_key(COALESCE(NULLIF(("Center")::text, ''::text), ("Institution")::text), COALESCE(NULLIF(("FullName")::text, ''::text), TRIM(BOTH FROM (((COALESCE("FirstName", ''::character varying))::text || ' '::text) || (COALESCE("LastName", ''::character varying))::text))), ("Type")::text, "StartTime", "EndTime", "Duration_Min", ("Grade")::text, ("Subject")::text, "Book"));
 CREATE INDEX school_success_submission_idx ON public.teacher_records USING btree (submission_id) WHERE (submission_id IS NOT NULL);
 
+-- 23 October 2026: scoped teacher lookup and loading indexes. No records or permissions are widened.
+create or replace function public.school_success_school_roster(p_school text)
+returns jsonb language sql stable set search_path=''
+as $function$
+ select coalesce(jsonb_agg(x order by x.name),'[]'::jsonb)
+ from (
+  select distinct coalesce(nullif(trim("Center"),''),"Institution") school,
+   coalesce(nullif(trim("FullName"),''),trim(concat_ws(' ',"FirstName","LastName"))) name
+  from public.teacher_records
+  where lower(coalesce("Role",'teacher')) in ('teacher','teachers')
+   and coalesce(nullif(trim("Center"),''),"Institution")=p_school
+ ) x;
+$function$;
+revoke all on function public.school_success_school_roster(text) from public,anon,authenticated;
+grant execute on function public.school_success_school_roster(text) to service_role;
+create index if not exists success_records_teacher_scope_idx on public.teacher_records("Center","FullName","Uploaded_By");
+create index if not exists success_records_prepared_idx on public.teacher_records(preparation_saved_at) where preparation_saved_at is not null;
+create index if not exists success_records_evidence_idx on public.teacher_records(evidence_submitted_at) where evidence_submitted_at is not null;
+create index if not exists success_records_roster_school_idx on public.teacher_records((coalesce(nullif(trim("Center"),''),"Institution")));
+create index if not exists success_members_school_name_idx on public.success_members(school,name);
+

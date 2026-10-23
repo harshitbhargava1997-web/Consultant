@@ -39,10 +39,13 @@ catch {
     throw Error('503:Saved media credentials could not be unlocked. Ask the administrator to save them again.');
 } }
 export async function loadR2Config(base, db) {
- const extra=await db.prepare('SELECT value FROM portal_config WHERE key=?').bind('r2BaseConfig').first();
+ const [extra,saved]=await Promise.all([
+  db.prepare('SELECT value FROM portal_config WHERE key=?').bind('r2BaseConfig').first(),
+  db.prepare('SELECT value FROM portal_config WHERE key=?').bind(MEDIA_SETTINGS_KEY).first()
+ ]);
  if(extra)base={...base,...JSON.parse(extra.value)};
  if (!base.MEDIA_SETTINGS_ENCRYPTION_KEY)
-    return base; const saved = await db.prepare('SELECT value FROM portal_config WHERE key=?').bind(MEDIA_SETTINGS_KEY).first(); if (!saved)
+    return base; if (!saved)
     return base; const keys = await decryptMediaCredentials(saved.value, base.MEDIA_SETTINGS_ENCRYPTION_KEY); return { ...base, R2_ACCESS_KEY_ID: keys.accessKeyId, R2_SECRET_ACCESS_KEY: keys.secretAccessKey }; }
 export async function verifyMediaStorage(config) { const key = 'portal-connection-check/' + crypto.randomUUID() + '.txt'; const content = 'School Success media connection check'; const put = await r2Request(config, key, 'PUT', content, { 'Content-Type': 'text/plain' }); if (!put.ok)
     throw Error('R2 rejected the connection test. Check the key pair and Object Read & Write access to onelern-media.'); try {

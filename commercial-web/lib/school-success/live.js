@@ -1,19 +1,16 @@
 import { actor, assertSchool } from './server';
 import { service, checked } from './database';
 import { prepareUsageImport } from './usage-import.js';
+import {readScope,recordQuery,readAllPages} from './read-query.js';
 // Only the private Site server holds the bearer token. No browser keys or arbitrary SQL.
 const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
-async function request(path, method = 'GET', body, extra = {}) { const r = await fetch(base + path, { method, headers: { ...headers, ...extra }, body: body === undefined ? undefined : JSON.stringify(body) }); if (!r.ok)
-    throw Error('Database request failed: ' + r.status + ' ' + (await r.text()).slice(0, 400)); const text = await r.text(); return text ? JSON.parse(text) : null; }
-async function all(table, order) { const result = []; for (let offset = 0; offset < 100000; offset += 1000) {
-    const rows = await request('/rest/v1/' + table + '?select=*&order=' + order + '&limit=1000&offset=' + offset);
-    result.push(...rows);
-    if (rows.length < 1000)
-        return result;
-} throw Error('Too many records in ' + table); }
+async function request(path, method = 'GET', body, extra = {}, metadata=false) { const r = await fetch(base + path, { method,cache:'no-store', headers: { ...headers,...metadata?{Prefer:'count=exact'}:{}, ...extra }, body: body === undefined ? undefined : JSON.stringify(body) }); if (!r.ok)
+    throw Error('Database request failed: ' + r.status + ' ' + (await r.text()).slice(0, 400)); const text = await r.text(),data=text?JSON.parse(text):null;
+    const total=r.headers.get('content-range')?.match(/\/(\d+)$/)?.[1];return metadata?{rows:data,count:total===undefined?null:Number(total)}:data; }
+async function all(table,order,scope={}){return readAllPages(async(offset,metadata)=>{const result=await request('/rest/v1/'+table+'?'+new URLSearchParams({select:'*',order,...scope,limit:'1000',offset:String(offset)}),'GET',undefined,{},metadata);return metadata?result:{rows:result,count:null};});}
 async function hash(s) { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map(x => x.toString(16).padStart(2, '0')).join(''); }
 async function storage(name) { const saved = await service().from('success_import_state').select('value').eq('key', 'legacy:' + name).maybeSingle(); if (saved.error)
     throw saved.error; return saved.data?.value || (name === 'school_crm_data.json' ? { contacts: {} } : []); }
@@ -32,18 +29,15 @@ async function rawGateway(req) {
                 return json({ error: 'Invalid date range' }, 400);
             if (new Date(b.to).getTime() - new Date(b.from).getTime() > 99 * 86400000)
                 return json({ error: 'Select at most 100 days' }, 400);
-            const start = b.from + 'T00:00:00', end = b.to + 'T23:59:59.999999';
-            const eventStart = new Date(b.from + 'T00:00:00+05:30').toISOString().replace('Z', ''), eventEnd = new Date(b.to + 'T23:59:59.999+05:30').toISOString().replace('Z', '');
-            const records = [];
-            for (let offset = 0; offset < 100000; offset += 1000) {
-                const rows = await request('/rest/v1/teacher_records?select=*&or=' + encodeURIComponent('(and(StartTime.gte.' + start + ',StartTime.lte.' + end + '),and(preparation_saved_at.gte.' + eventStart + ',preparation_saved_at.lte.' + eventEnd + '),and(planned_lesson_on.lte.' + b.to + ',evidence_submitted_at.gte.' + eventStart + '))') + '&order=id&limit=1000&offset=' + offset);
-                records.push(...rows);
-                if (rows.length < 1000)
-                    break;
-                if (offset === 99000)
-                    throw Error('Too many rows; narrow date range');
-            }
-            const [roster, contacts, calls, visits, reviews, legacyContacts, legacyCalls, calendars, tickets] = await Promise.all([request('/rest/v1/rpc/school_success_roster', 'POST', {}), all('portal_contacts', 'school,entity_type'), all('portal_call_logs', 'id'), all('classroom_observations', 'id'), all('portal_evidence_reviews', 'record_id'), storage('school_crm_data.json'), storage('school_call_logs_store.json'), request('/rest/v1/portal_school_plans?select=school,calendar_dates&order=school&limit=1000'), all('portal_tickets', 'created_at.desc')]);
+            const a=await actor(),teacher=a.role!=='admin',scope=readScope(a);
+            const [records,roster,contacts,calls,visits,reviews,legacyContacts,legacyCalls,calendars,tickets]=await Promise.all([
+             teacher&&!a.name?[]:all('teacher_records','id',recordQuery(b.from,b.to,a)),
+             teacher?a.teachers.map(name=>({name,school:a.school})):request('/rest/v1/rpc/school_success_roster','POST',{}),
+             teacher?[]:all('portal_contacts','school,entity_type',scope),teacher?[]:all('portal_call_logs','id',scope),
+             teacher?[]:all('classroom_observations','id',scope),teacher?[]:all('portal_evidence_reviews','record_id',scope),
+             teacher?{contacts:{}}:storage('school_crm_data.json'),teacher?[]:storage('school_call_logs_store.json'),
+             teacher?[]:all('portal_school_plans','school',scope),teacher?[]:all('portal_tickets','created_at.desc',scope)
+            ]);
             return json({ records, roster, contacts, calls, visits, reviews, legacyContacts, legacyCalls, calendars, tickets });
         }
         if (b.action === 'evidenceStatus') {

@@ -110,6 +110,7 @@ export async function GET(request){
    if(ownError)throw ownError;
    consultantSchools=(own||[]).map(a=>a.school_id);
   }
+  if(url.searchParams.get('summary')==='1')return send({isConsultant:!!ctx.profile,isAdmin:ctx.isAdmin,consultantSchools});
   const manageable=ctx.isAdmin?[]:await managerSchools(ctx);
   if(!ctx.isAdmin&&!manageable.length)
    return send({isConsultant:!!ctx.profile,consultantSchools,consultants:[],assignments:[]});

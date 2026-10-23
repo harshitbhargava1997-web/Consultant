@@ -1,12 +1,16 @@
 import { createClient } from "@supabase/supabase-js";
+let sharedBrowserClient;
 
 export function browserClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
-  return createClient(url, key, {
+  if(typeof window!=="undefined"&&sharedBrowserClient)return sharedBrowserClient;
+  const client=createClient(url, key, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
   });
+  if(typeof window!=="undefined")sharedBrowserClient=client;
+  return client;
 }
 export const LEVELS = ["Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5"];
 export const RATINGS = ["Not Assessed","Emerging","Developing","Independent"];
