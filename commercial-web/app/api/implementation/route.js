@@ -1,3 +1,4 @@
+import {activeSchoolError} from "../../../lib/school-lifecycle";
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
 import {isConfirmedUser} from "../../../lib/auth";
@@ -43,6 +44,7 @@ async function authorize(request,schoolId){
  if(superError)return {error:"Unable to validate platform role.",status:503};
  const isAdmin=!!superUser;
  if(!UUID.test(schoolId))return {error:"Select a school to continue.",status:400};
+ const unavailable=await activeSchoolError(admin,schoolId);if(unavailable)return unavailable;
  const [consultant,membership]=await Promise.all([
   admin.from("literacy_consultant_assignments").select("school_id")
    .eq("school_id",schoolId).eq("consultant_user_id",user.id).maybeSingle(),

@@ -1,5 +1,6 @@
 import {createClient} from '@supabase/supabase-js';
 import {isConfirmedUser} from '@/lib/auth';
+import {loadOverviewTotals} from '@/lib/overview';
 import {readModuleGrant} from '@/lib/school-success/module-access';
 export const dynamic='force-dynamic';
 export const runtime='nodejs';
@@ -25,12 +26,20 @@ export async function GET(req){
   const isAdmin=Boolean(admin),consultantSchools=!isAdmin&&profile?assignments.map(a=>a.school_id):[];
   const ids=[...new Set([...memberships.map(m=>m.school_id),...consultantSchools])];
   const roles=[...new Set([...memberships.map(m=>m.role),...consultantSchools.length?['consultant']:[]])];
-  let schoolQuery=db.from('literacy_schools').select('id,name').order('name');if(!isAdmin)schoolQuery=schoolQuery.in('id',ids);
-  const [schools,grants]=await Promise.all([
+  let schoolQuery=db.from('literacy_schools').select('id,name').is('archived_at',null).order('name');if(!isAdmin)schoolQuery=schoolQuery.in('id',ids);
+  const [schools,grants,archivedSchools]=await Promise.all([
    isAdmin||ids.length?checked(schoolQuery):[],
-   !isAdmin&&roles.length?checked(db.from('literacy_role_permissions').select('role,feature').in('role',roles).eq('enabled',true)):[]
+   !isAdmin&&roles.length?checked(db.from('literacy_role_permissions').select('role,feature').in('role',roles).eq('enabled',true)):[],
+   isAdmin?checked(db.from('literacy_schools').select('id,name,archived_at').not('archived_at','is',null).order('name')):[]
   ]);
   const permissionsByRole=Object.fromEntries(roles.map(role=>[role,grants.filter(g=>g.role===role).map(g=>g.feature)]));
-  return Response.json({admin:isAdmin,isConsultant:Boolean(profile),consultantSchools,memberships,schools,permissionsByRole,successAccess:isAdmin||Boolean(readModuleGrant(module?.value,user.id))},{headers:{'Cache-Control':'no-store','Server-Timing':`auth;dur=${(authDone-started).toFixed(1)}, data;dur=${(performance.now()-authDone).toFixed(1)}, total;dur=${(performance.now()-started).toFixed(1)}`}});
+  const activeIds=new Set(schools.map(s=>s.id));
+  const signed=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,{
+   global:{headers:{Authorization:'Bearer '+token}},auth:{persistSession:false,autoRefreshToken:false}
+  });
+  let overview=null,overviewError='';
+  try{overview=await loadOverviewTotals(signed,{isAdmin,schoolIds:[...activeIds]});}
+  catch{overviewError='Overview totals could not be loaded. Please refresh.';}
+  return Response.json({admin:isAdmin,isConsultant:Boolean(profile),consultantSchools:consultantSchools.filter(id=>activeIds.has(id)),memberships:memberships.filter(m=>activeIds.has(m.school_id)),schools,archivedSchools,overview,overviewError,permissionsByRole,successAccess:isAdmin||Boolean(readModuleGrant(module?.value,user.id))},{headers:{'Cache-Control':'no-store','Server-Timing':`auth;dur=${(authDone-started).toFixed(1)}, data;dur=${(performance.now()-authDone).toFixed(1)}, total;dur=${(performance.now()-started).toFixed(1)}`}});
  }catch(e){return Response.json({error:e.message||'Workspace unavailable'},{status:503,headers:{'Cache-Control':'no-store'}});}
 }

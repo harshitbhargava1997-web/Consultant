@@ -44,7 +44,7 @@ export async function authorize(req){
  const can=feature=>isAdmin||grants.some(g=>g.feature===feature),canReview=!link&&role!=='teacher'&&can('implementation.review');
  if(!can('implementation.view')&&!can('implementation.submit')&&!canReview)throw Error('403:Teacher portal access is disabled for your role');
  if(!link&&role!=='teacher'&&!canReview)throw Error('403:Teacher review access is required');
- const school=await checked(db.from('literacy_schools').select('id,name').eq('id',schoolId).maybeSingle());if(!school)throw Error('404:Vision school not found');
+ const school=await checked(db.from('literacy_schools').select('id,name').eq('id',schoolId).is('archived_at',null).maybeSingle());if(!school)throw Error('404:Vision school not found');
  const roster=await checked(db.from('literacy_memberships').select('user_id,display_name').eq('school_id',schoolId).eq('role','teacher').order('display_name'));
  if(teacherId&&!roster.some(t=>t.user_id===teacherId))throw Error('403:Teacher is not assigned to this Vision school');
  const [classes,assignments,competencies]=await Promise.all([

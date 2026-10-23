@@ -19,7 +19,7 @@ async function api(session,method,path,body){
  if(!res.ok)throw Error(json.error||"Request failed.");
  return json;
 }
-export function ConsultantManagement({session,schools}){
+export function ConsultantManagement({session,schools,onChanged}){
  const [roster,setRoster]=useState([]),[assignments,setAssignments]=useState([]);
  const [newPerson,setNewPerson]=useState({displayName:"",email:"",password:"",confirm:""});
  const [choice,setChoice]=useState({consultantId:"",schoolId:""});
@@ -27,6 +27,7 @@ export function ConsultantManagement({session,schools}){
  async function reload(){
   const data=await api(session,"GET","");
   setRoster(data.consultants||[]);setAssignments(data.assignments||[]);
+  await onChanged?.();
  }
  useEffect(()=>{let alive=true;api(session,"GET","").then(d=>{if(alive){setRoster(d.consultants||[]);setAssignments(d.assignments||[]);}}).catch(e=>{if(alive)setMessage(e.message);});return()=>{alive=false;};},[session?.access_token]);
  async function provision(e){

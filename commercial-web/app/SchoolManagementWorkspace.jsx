@@ -173,7 +173,7 @@ export default function SchoolManagementWorkspace({
   {notice&&<div className="notice" role="status">{notice}</div>}
   {isAdmin&&tab==="leaders"&&<SuperAdminStakeholders
    session={session} schools={schools} selectedSchoolId={schoolId} onChanged={reload}/>}
-  {isAdmin&&tab==="consultants"&&<ConsultantManagement session={session} schools={schools}/>}
+  {isAdmin&&tab==="consultants"&&<ConsultantManagement session={session} schools={schools} onChanged={reload}/>}
   {tab==="classes"&&availableTabs.some(t=>t.id==="classes")&&<>
    <div className="two-col">
     {can("classes.manage")&&<section className="panel">

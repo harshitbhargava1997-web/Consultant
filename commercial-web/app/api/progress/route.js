@@ -1,3 +1,4 @@
+import {activeSchoolError} from "../../../lib/school-lifecycle";
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
 import {isConfirmedUser} from "../../../lib/auth";
@@ -23,6 +24,7 @@ async function authorize(request,schoolId){
  const {data:{user},error:userError}=await auth.auth.getUser(token);
  if(userError||!isConfirmedUser(user))return {error:"Session expired. Sign in again.",status:401};
  if(user.app_metadata?.must_change_password)return {error:"Change the initial password first.",status:403};
+ const unavailable=await activeSchoolError(admin,schoolId);if(unavailable)return unavailable;
  const [a,c,m]=await Promise.all([
   admin.from("literacy_platform_admins").select("user_id").eq("user_id",user.id).maybeSingle(),
   admin.from("literacy_consultant_assignments").select("school_id").eq("school_id",schoolId).eq("consultant_user_id",user.id).maybeSingle(),

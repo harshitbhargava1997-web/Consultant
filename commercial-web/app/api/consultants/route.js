@@ -1,3 +1,4 @@
+import {activeSchoolError} from "../../../lib/school-lifecycle";
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
 import {isConfirmedUser} from "../../../lib/auth";
@@ -31,8 +32,9 @@ async function assigned(ctx,schoolId){
  return !!data;
 }
 async function permission(ctx,schoolId,feature){
- if(ctx.isAdmin)return true;
  if(!uuid(schoolId))return false;
+ if(await activeSchoolError(ctx.admin,schoolId))return false;
+ if(ctx.isAdmin)return true;
  const [a,m]=await Promise.all([
   ctx.admin.from("literacy_consultant_assignments").select("school_id")
    .eq("school_id",schoolId).eq("consultant_user_id",ctx.user.id).maybeSingle(),
@@ -106,7 +108,7 @@ export async function GET(request){
   let consultantSchools=[];
   if(!ctx.isAdmin&&ctx.profile){
    const {data:own,error:ownError}=await ctx.admin.from("literacy_consultant_assignments")
-    .select("school_id").eq("consultant_user_id",ctx.user.id).limit(2000);
+    .select("school_id,literacy_schools!inner(id)").is("literacy_schools.archived_at",null).eq("consultant_user_id",ctx.user.id).limit(2000);
    if(ownError)throw ownError;
    consultantSchools=(own||[]).map(a=>a.school_id);
   }
@@ -115,7 +117,7 @@ export async function GET(request){
   if(!ctx.isAdmin&&!manageable.length)
    return send({isConsultant:!!ctx.profile,consultantSchools,consultants:[],assignments:[]});
   let query=ctx.admin.from("literacy_consultant_assignments")
-    .select("consultant_user_id,school_id,assigned_at")
+    .select("consultant_user_id,school_id,assigned_at,literacy_schools!inner(id)").is("literacy_schools.archived_at",null)
     .order("assigned_at",{ascending:false}).limit(2000);
   if(!ctx.isAdmin)query=query.in("school_id",manageable);
   const {data:assignments,error:assignmentError}=await query;
@@ -183,7 +185,7 @@ export async function POST(request){
    if(action==="assignConsultant"){
     const [consultant,school]=await Promise.all([
      ctx.admin.from("literacy_consultants").select("user_id").eq("user_id",consultantId).maybeSingle(),
-     ctx.admin.from("literacy_schools").select("id").eq("id",schoolId).maybeSingle()
+     ctx.admin.from("literacy_schools").select("id").eq("id",schoolId).is("archived_at",null).maybeSingle()
     ]);
     if(consultant.error||school.error||!consultant.data||!school.data)return send({error:"Consultant or school not found."},404);
     const {error}=await ctx.admin.from("literacy_consultant_assignments").upsert({

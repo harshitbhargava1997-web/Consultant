@@ -48,7 +48,7 @@ async function authorized(request,schoolId){
   granted=new Set((permissionRows||[]).map(row=>row.feature));
  }
  const {data:school,error:schoolError}=await admin.from("literacy_schools")
-   .select("id,name").eq("id",schoolId).maybeSingle();
+   .select("id,name").eq("id",schoolId).is("archived_at",null).maybeSingle();
  if(schoolError||!school)return {error:"Assigned school not found.",status:404};
  return {admin,user,isAdmin,isAssignedConsultant,role,granted,school};
 }

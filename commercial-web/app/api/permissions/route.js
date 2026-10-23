@@ -1,3 +1,4 @@
+import {activeSchoolError} from "../../../lib/school-lifecycle";
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
 import {PERMISSION_ROLES,PERMISSION_KEYS} from "../../../lib/permissions";
@@ -30,6 +31,7 @@ export async function GET(request){
    return respond({isAdmin:true,grants:PERMISSION_KEYS,matrix:data||[],role:"super_admin"});
   }
   if(!UUID.test(schoolId))return respond({isAdmin:false,role:null,grants:[]});
+  const unavailable=await activeSchoolError(ctx.admin,schoolId);if(unavailable)return respond({error:unavailable.error},unavailable.status);
   const [consultantResult,memberResult]=await Promise.all([
    ctx.admin.from("literacy_consultant_assignments").select("school_id")
     .eq("consultant_user_id",ctx.user.id).eq("school_id",schoolId).maybeSingle(),

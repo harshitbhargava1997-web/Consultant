@@ -1,3 +1,4 @@
+import {activeSchoolError} from "../../../lib/school-lifecycle";
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
 import {isConfirmedUser} from "../../../lib/auth";
@@ -27,6 +28,7 @@ async function access(request,schoolId){
  const isAdmin=!!superUser;
  if(!schoolId&&!isAdmin)return {error:"Select an assigned school.",status:400};
  if(schoolId&&!UUID.test(schoolId))return {error:"Invalid school ID.",status:400};
+ if(schoolId){const unavailable=await activeSchoolError(admin,schoolId);if(unavailable)return unavailable;}
  let role="super_admin",grants=new Set(),allowedGrades=GRADES;
  if(!isAdmin){
   const [consultant,membership]=await Promise.all([

@@ -1,6 +1,7 @@
 "use client";
 import {useEffect,useMemo,useState} from "react";
 import dynamic from "next/dynamic";
+import OverviewTotals from "./OverviewTotals";
 import {browserClient,LEVELS,RATINGS,MANAGERS,skillProgress,parseCsv} from "../lib/supabase";
 const BulkWorkspace=dynamic(()=>import("./BulkWorkspace"),{loading:()=> <section className="panel">Opening workspace…</section>});
 const AssessorWorkspace=dynamic(()=>import("./AssessorWorkspace"),{loading:()=> <section className="panel">Opening workspace…</section>});
@@ -17,7 +18,6 @@ const ImplementationWorkspace=dynamic(()=>import("./ImplementationWorkspace"),{l
 const TeacherPortalWorkspace=dynamic(()=>import("./TeacherPortalWorkspace"),{loading:()=> <section className="panel">Opening teacher portal…</section>});
 const CurriculumEditor=dynamic(()=>import("./CurriculumEditor"),{loading:()=> <section className="panel">Opening workspace…</section>});
 const ConsultantWorkspace=dynamic(()=>import("./ConsultantWorkspace"),{loading:()=> <section className="panel">Opening consultant workspace…</section>});
-const ConsultantManagement=dynamic(()=>import("./ConsultantWorkspace").then(m=>m.ConsultantManagement),{loading:()=> <section className="panel">Opening consultant assignments…</section>});
 import {isEmail,loginLabel,normalizePhone} from "../lib/auth";
 import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNoAxesCombined,
  BookMarked,Eye,Menu,X,LogOut,Plus,Trash2,Search,ChevronRight,RefreshCw,LockKeyhole,
@@ -27,7 +27,6 @@ const navigation=[
  {id:"overview",label:"Overview",icon:LayoutDashboard},
  {id:"schools",label:"Schools",icon:School,admin:true},
  {id:"users",label:"User management",icon:Users,school:true},
- {id:"consultants",label:"Consultant assignments",icon:Users,admin:true},
  {id:"permissions",label:"Role permissions",icon:ShieldCheck,admin:true},
  {id:"consultant",label:"Consultant support",icon:GraduationCap,consultant:true,school:true},
  {id:"assessment-structure",label:"Assessment Structure",icon:BookMarked,school:true},
@@ -54,6 +53,8 @@ export default function Home(){
  const [roleGrants,setRoleGrants]=useState([]);
  const [roleGrantsByRole,setRoleGrantsByRole]=useState({});
  const [successAccess,setSuccessAccess]=useState(false);
+ const [overview,setOverview]=useState({totals:null,loading:true,error:""});
+ const [archivedSchools,setArchivedSchools]=useState([]);
  const [isMobile,setIsMobile]=useState(false);
  const [mobileNavOpen,setMobileNavOpen]=useState(false);
  const [desktopNavCollapsed,setDesktopNavCollapsed]=useState(false);
@@ -108,22 +109,23 @@ export default function Home(){
   return ()=>{mounted=false;subscription.unsubscribe();};
  },[client]);
  useEffect(()=>{
-  if(!session||!client){setIdentity({admin:false,isConsultant:false,consultantSchools:[],memberships:[],schools:[]});setSuccessAccess(false);setRoleGrantsByRole({});return;}
+  if(!session||!client){setIdentity({admin:false,isConsultant:false,consultantSchools:[],memberships:[],schools:[]});setSuccessAccess(false);setRoleGrantsByRole({});setOverview({totals:null,loading:false,error:""});setArchivedSchools([]);setSchoolId("");return;}
   let alive=true;
   (async()=>{try{
    const response=await fetch('/api/workspace',{headers:{Authorization:'Bearer '+session.access_token},cache:'no-store'}),data=await response.json();
    if(!response.ok)throw Error(data.error||'Workspace unavailable');if(!alive)return;
    const {admin,isConsultant,consultantSchools,memberships,schools,permissionsByRole,successAccess}=data;
+   setOverview({totals:data.overview,loading:false,error:data.overviewError||""});setArchivedSchools(data.archivedSchools||[]);
    setIdentity({admin,isConsultant,consultantSchools,memberships,schools});setSuccessAccess(successAccess);setRoleGrantsByRole(permissionsByRole);
    const permitted=admin?schools.map(s=>s.id):[...new Set([...memberships.map(m=>m.school_id),...consultantSchools])];
    const requestedSchool=new URLSearchParams(location.search).get('schoolId');
    setSchoolId(old=>permitted.includes(old)?old:permitted.includes(requestedSchool)?requestedSchool:(permitted[0]||''));
-  }catch(e){if(alive)setMessage('Unable to load school access: '+e.message);}})();
+  }catch(e){if(alive){setMessage('Unable to load school access: '+e.message);setOverview({totals:null,loading:false,error:'Overview unavailable. Please refresh.'});}}})();
   return()=>{alive=false;};
  },[client,session?.user?.id,session?.access_token]);
  useEffect(()=>{const requested=new URLSearchParams(location.search).get('workspace');if(['implementation','training'].includes(requested))setPage(requested);},[]);
  useEffect(()=>{
-  if(!schoolId||!session||!client){setClasses([]);setStudents([]);return;}
+  if(!schoolId||!session||!client){setClasses([]);setStudents([]);setMembers([]);setAssessments([]);setTeacherClasses([]);setActiveClass("");return;}
   let alive=true;
   (async()=>{
    const [c,m,co,a,tc]=await Promise.all([
@@ -153,8 +155,32 @@ export default function Home(){
  useEffect(()=>{setRoleGrants(roleGrantsByRole[role]||[]);},[roleGrantsByRole,role]);
  useEffect(()=>{setAssessmentTarget("");setRatingForm({});setReportStudent("");setReportData(null);},[activeClass,assessmentSubject,schoolId]);
 
+ async function refreshWorkspace(){
+  setOverview(old=>({...old,loading:true,error:""}));
+  try{
+   const res=await fetch("/api/workspace",{headers:{Authorization:"Bearer "+session.access_token},cache:"no-store"});
+   const data=await res.json();if(!res.ok)throw Error(data.error||"Workspace unavailable");
+   const {admin,isConsultant,consultantSchools,memberships,schools}=data;
+   setIdentity(old=>({...old,admin,isConsultant,consultantSchools,memberships,schools}));
+   setArchivedSchools(data.archivedSchools||[]);
+   setRoleGrantsByRole(data.permissionsByRole);setSuccessAccess(data.successAccess);
+   setOverview({totals:data.overview,loading:false,error:data.overviewError||""});
+   setSchoolId(old=>schools.some(s=>s.id===old)?old:(schools[0]?.id||""));
+  }catch(e){setOverview({totals:null,loading:false,error:"Overview unavailable. Please refresh."});throw e;}
+ }
+ async function changeSchool(s,archived){
+  if(archived&&!window.confirm('Delete "'+s.name+'" from active Vision workspaces? Historical records will be retained and you can restore the school.'))return;
+  setBusy(true);setMessage("");
+  try{
+   const data=await callAdmin(archived?"archiveSchool":"restoreSchool",{schoolId:s.id});
+   await refreshWorkspace();setMessage(data.message);
+  }catch(e){setMessage(e.message);}finally{setBusy(false);}
+ }
  async function refresh(){
-  if(!client||!schoolId)return;setBusy(true);setMessage("");
+  if(!client||!session)return;
+  if(!schoolId){try{await refreshWorkspace();}catch(e){setMessage(e.message);}return;}
+  setBusy(true);setMessage("");
+  const overviewRequest=refreshWorkspace().catch(e=>setMessage(e.message));
   const [c,s,a,m,co]=await Promise.all([
    client.from("literacy_classes").select("*").eq("school_id",schoolId),
    client.from("literacy_classes").select("id").eq("school_id",schoolId),
@@ -169,6 +195,7 @@ export default function Home(){
    const assignments=await client.from("literacy_teacher_classes").select("class_id,teacher_user_id").in("class_id",cl.map(x=>x.id));
    setTeacherClasses(assignments.data||[]);
   }else {setStudents([]);setTeacherClasses([]);}
+  await overviewRequest;
   setBusy(false);if(c.error||s.error||a.error)setMessage((c.error||s.error||a.error).message);
  }
  async function callAdmin(action,body){
@@ -207,7 +234,7 @@ export default function Home(){
  }
  async function addSchool(e){
   e.preventDefault();setBusy(true);setMessage("");
-  try{const data=await callAdmin("createSchool",{name:newSchool});setNewSchool("");setIdentity(old=>({...old,schools:[...old.schools,data.school].sort((a,b)=>a.name.localeCompare(b.name))}));setMessage("School created.");}
+  try{const data=await callAdmin("createSchool",{name:newSchool});setNewSchool("");setIdentity(old=>({...old,schools:[...old.schools,data.school].sort((a,b)=>a.name.localeCompare(b.name))}));await refreshWorkspace();setMessage("School created.");}
   catch(e){setMessage(e.message);}finally{setBusy(false);}
  }
  async function addUser(e){
@@ -320,7 +347,7 @@ export default function Home(){
  if(session.user?.app_metadata?.must_change_password)return <main className="auth-outer"><div className="auth-card"><span className="eyebrow">ACCOUNT SECURITY</span><h1>Set your personal password</h1><p>Replace the temporary password before continuing.</p><Notice message={message}/><form onSubmit={changeInitialPassword}><label>New password<input type="password" minLength={12} value={newPassword} onChange={e=>setNewPassword(e.target.value)} required/></label><Btn type="submit" kind="primary wide" disabled={busy}>Update password</Btn></form><button className="link-button" onClick={logout}>Sign out</button></div></main>;
 
  const navFeature={
-  schools:"schools.view",users:"users.manage",consultants:"consultants.manage",
+  schools:"schools.view",users:"users.manage",
   consultant:"consultants.support",classes:"classes.view",
   competencies:"competencies.view",
   reports:"reports.view",implementation:"implementation.view",observations:"observations.view"
@@ -350,9 +377,23 @@ export default function Home(){
   <aside id="vision-sidebar" className={"sidebar"+(mobileNavOpen?" mobile-open":"")}>
    <div className="brand"><span className="brand-mark"><GraduationCap size={23}/></span><span>VISION <small>School Platform</small></span><button type="button" className="sidebar-close" aria-label="Close menu" onClick={()=>setMobileNavOpen(false)}><X size={20}/></button></div><div className="side-caption">WORKSPACE</div><nav>{availableNav.map(item=>{const Icon=item.icon;return <button key={item.id} onClick={()=>{setPage(item.id);if(item.id==="assessment-structure")setAssessmentView("structure");setMessage("");setMobileNavOpen(false);}} className={"nav-item "+(page===item.id?"active":"")}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={15}/>}</button>;})}</nav><div className="sidebar-bottom"><div className="profile-dot">{loginLabel(session.user).slice(0,1).toUpperCase()}</div><div className="profile-name"><strong>{session.user.email?.split("@")[0]||session.user.phone}</strong><small>{identity.admin?"Platform Admin":role||"Member"}</small></div><button className="icon-btn" aria-label="Sign out" title="Sign out" onClick={logout}><LogOut size={18}/></button></div></aside>
  <main className="main"><header className="topbar"><div className="topbar-title"><button type="button" className="mobile-menu" aria-label={(isMobile?mobileNavOpen:!desktopNavCollapsed)?"Close navigation menu":"Open navigation menu"} aria-controls="vision-sidebar" aria-expanded={isMobile?mobileNavOpen:!desktopNavCollapsed} onClick={toggleNavigation}>{isMobile?mobileNavOpen?<X size={21}/>:<Menu size={21}/>:desktopNavCollapsed?<Menu size={21}/>:<X size={21}/>}</button><span>VISION / <b>{navigation.find(n=>n.id===page)?.label||"Overview"}</b></span></div><div className="topbar-right"><select aria-label="Active school" value={schoolId} onChange={e=>{setSchoolId(e.target.value);setPage("overview");setAssessmentView("structure");}}><option value="">Select a school</option>{identity.schools.filter(s=>identity.admin||identity.memberships.some(m=>m.school_id===s.id)||identity.consultantSchools.includes(s.id)).map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select><span className="avatar">{loginLabel(session.user).slice(0,1).toUpperCase()}</span></div></header><div className="content"><div className="page-heading"><div><span className="eyebrow">{school?.name||"PLATFORM WORKSPACE"}</span><h1>{navigation.find(n=>n.id===page)?.label||"Overview"}</h1><p>{page==="overview"?"An integrated view of school operations and foundational learning.":"Secure workspace · "+(identity.admin?"Super Admin":role||"Assigned member")}</p></div>{schoolId&&<Btn kind="outline" disabled={busy} onClick={refresh}><RefreshCw size={15}/> Refresh</Btn>}</div><Notice message={message}/>
- {page==="overview"&&<><div className="stats"><div className="stat"><span>Schools assigned</span><strong>{new Set([...identity.memberships.map(m=>m.school_id),...identity.consultantSchools]).size}</strong><small>School access</small></div><div className="stat"><span>Classes</span><strong>{visibleClasses.length}</strong><small>Accessible classes</small></div><div className="stat"><span>Students</span><strong>{students.filter(s=>s.active!==false&&visibleClasses.some(c=>c.id===s.class_id)).length}</strong><small>Registered learners</small></div><div className="stat"><span>Assessment sessions</span><strong>{assessments.filter(a=>visibleClasses.some(c=>c.id===a.class_id)).length}</strong><small>Last 500 loaded</small></div></div><div className="two-col"><Box title="Your learning workflow"><div className="workflow">{["Set up school and staff","Create classes and student rosters","Assess cumulative competencies","Review literacy level and interventions"].map((t,i)=><div key={t} className="workflow-row"><span>{i+1}</span>{t}<CircleCheck size={16}/></div>)}</div></Box><Box title="Product readiness"><div className="readiness"><p><CircleCheck size={17}/> Unified authentication and role-aware interface</p><p><CircleCheck size={17}/> Cumulative student assessment and reports</p><p><AlertCircle size={17}/> Legacy evidence migration requires secure ID mapping</p><p><AlertCircle size={17}/> Production security review and end-to-end testing pending</p></div></Box></div></>}
+ {page==="overview"&&<><OverviewTotals totals={overview.totals} admin={identity.admin} loading={overview.loading} error={overview.error}/><div className="two-col"><Box title="Your learning workflow"><div className="workflow">{["Set up school and staff","Create classes and student rosters","Assess cumulative competencies","Review literacy level and interventions"].map((t,i)=><div key={t} className="workflow-row"><span>{i+1}</span>{t}<CircleCheck size={16}/></div>)}</div></Box><Box title="Product readiness"><div className="readiness"><p><CircleCheck size={17}/> Unified authentication and role-aware interface</p><p><CircleCheck size={17}/> Cumulative student assessment and reports</p><p><AlertCircle size={17}/> Legacy evidence migration requires secure ID mapping</p><p><AlertCircle size={17}/> Production security review and end-to-end testing pending</p></div></Box></div></>}
  {page==="permissions"&&identity.admin&&<RolePermissions session={session}/>}
- {page==="schools"&&can("schools.view")&&<div className="two-col"><Box title="Registered schools">{identity.schools.length?<div className="rows">{identity.schools.map(s=><div className="record" key={s.id}><School size={17}/><strong>{s.name}</strong></div>)}</div>:<Empty title="No schools yet" detail="Create your first school to begin."/>}</Box>{identity.admin&&<Box title="Register a school"><form onSubmit={addSchool} className="stack"><label>School name<input required maxLength={180} value={newSchool} onChange={e=>setNewSchool(e.target.value)} placeholder="Full registered school name"/></label><Btn kind="primary" type="submit" disabled={busy}><Plus size={16}/> Create school</Btn></form></Box>}</div>}
+ {page==="schools"&&can("schools.view")&&<div className="two-col">
+  <Box title="Registered schools">
+   {identity.schools.length?<div className="rows">{identity.schools.map(s=><div className="record" style={{flexWrap:"wrap"}} key={s.id}>
+    <School size={17}/><strong style={{minWidth:0,overflowWrap:"anywhere"}}>{s.name}</strong>
+    {identity.admin&&<Btn kind="outline" disabled={busy} onClick={()=>changeSchool(s,true)}><Trash2 size={15}/> Delete school</Btn>}
+   </div>)}</div>:<Empty title="No active schools" detail="Create a school or restore one below."/>}
+   {identity.admin&&archivedSchools.length>0&&<details><summary>Deleted schools ({archivedSchools.length})</summary>
+    <p className="helper">Historical records are retained. Restore a school to make it available again.</p>
+    <div className="rows">{archivedSchools.map(s=><div className="record" style={{flexWrap:"wrap"}} key={s.id}><strong style={{minWidth:0,overflowWrap:"anywhere"}}>{s.name}</strong>
+     <Btn kind="outline" disabled={busy} onClick={()=>changeSchool(s,false)}>Restore school</Btn>
+    </div>)}</div>
+   </details>}
+  </Box>
+  {identity.admin&&<Box title="Register a school"><form onSubmit={addSchool} className="stack"><label>School name<input required maxLength={180} value={newSchool} onChange={e=>setNewSchool(e.target.value)} placeholder="Full registered school name"/></label><Btn kind="primary" type="submit" disabled={busy}><Plus size={16}/> Create school</Btn></form></Box>}
+ </div>}
  {page==="users"&&(identity.admin||schoolId)&&
   (can("users.manage")||can("classes.view")||can("classes.manage")||can("classes.import")||
    can("teachers.assign")||can("staff.import")||can("students.manage")||
@@ -363,7 +404,6 @@ export default function Home(){
    members={members} teacherClasses={teacherClasses}
    grants={roleGrants} isAdmin={identity.admin} canManageAllRoles={canManageAllRoles}
    onChanged={refresh}/>}
- {page==="consultants"&&can("consultants.manage")&&<ConsultantManagement session={session} schools={identity.schools.filter(x=>identity.admin||identity.consultantSchools.includes(x.id)||identity.memberships.some(m=>m.school_id===x.id))}/>} 
  {page==="consultant"&&schoolId&&(can("consultants.support")||can("consultants.log"))&&
   <ConsultantWorkspace session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"}
    isConsultant={can("consultants.log")}/>}

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import {changeSchoolStatus} from "../../../lib/school-lifecycle";
 import { createClient } from "@supabase/supabase-js";
 import {isConfirmedUser,isEmail,normalizePhone} from "../../../lib/auth";
 
@@ -38,7 +39,7 @@ export async function GET(request) {
    const memberships=[];
    for(let page=0;page<20;page++){
     const {data,error}=await admin.from("literacy_memberships")
-     .select("user_id,school_id,display_name,role")
+     .select("user_id,school_id,display_name,role,literacy_schools!inner(id)").is("literacy_schools.archived_at",null)
      .order("school_id").order("user_id").range(page*500,page*500+499);
     if(error)throw error;
     memberships.push(...(data||[]));
@@ -71,9 +72,13 @@ export async function POST(request) {
   // Creating a school is reserved exclusively for the Platform Super Admin.
   if(body.action==="createSchool" && !ctx.isAdmin)
    return response({error:"Only the Platform Super Admin may create schools."},403);
-  if(!["createSchool","createUser"].includes(body.action))
+  if(!["createSchool","createUser","archiveSchool","restoreSchool"].includes(body.action))
    return response({error:"Unknown action."},400);
   const admin=adminClient();
+  if(["archiveSchool","restoreSchool"].includes(body.action)){
+   const result=await changeSchoolStatus(admin,ctx,body.schoolId,body.action==="archiveSchool");
+   return response(result,result.status||200);
+  }
   if(body.action==="createSchool"){
    const name=String(body.name||"").trim();
    if(name.length<3||name.length>180)return response({error:"Enter a valid school name."},400);
@@ -116,7 +121,7 @@ export async function POST(request) {
     if(!isAssignedConsultant&&role!=="teacher")
      return response({error:"School leaders may create or assign teachers only."},403);
    }
-   const {data:school,error:schoolError}=await admin.from("literacy_schools").select("id").eq("id",schoolId).maybeSingle();
+   const {data:school,error:schoolError}=await admin.from("literacy_schools").select("id").eq("id",schoolId).is("archived_at",null).maybeSingle();
    if(schoolError)throw schoolError;
    if(!school)return response({error:"School not found."},400);
    let existing=null;let page=1,emailUser=null,phoneUser=null;

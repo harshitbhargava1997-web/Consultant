@@ -1,3 +1,4 @@
+import {activeSchoolError} from "../../../lib/school-lifecycle";
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
 import {isConfirmedUser} from "../../../lib/auth";
@@ -26,6 +27,7 @@ export async function POST(request){
   if(!["add","remove"].includes(body.action)||!UUID.test(body.schoolId)||!UUID.test(body.classId))
    return response({error:"Invalid student action or selected school/class."},400);
   const admin=createClient(url,secret,{auth:{persistSession:false,autoRefreshToken:false}});
+  const unavailable=await activeSchoolError(admin,body.schoolId);if(unavailable)return response({error:unavailable.error},unavailable.status);
   const {data:cls,error:classError}=await admin.from("literacy_classes")
     .select("id,school_id").eq("id",body.classId).eq("school_id",body.schoolId).maybeSingle();
   if(classError||!cls)return response({error:"Class not found in the selected school."},404);

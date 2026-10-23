@@ -1,3 +1,4 @@
+import {activeSchoolError} from "../../../lib/school-lifecycle";
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
 import {isConfirmedUser} from "../../../lib/auth";
@@ -32,6 +33,7 @@ async function access(request,schoolId){
  const isAdmin=!!administrator;
  if(!schoolId&&!isAdmin)return {error:"Select an assigned school.",status:400};
  if(schoolId&&!UUID.test(schoolId))return {error:"Invalid school ID.",status:400};
+ if(schoolId){const unavailable=await activeSchoolError(admin,schoolId);if(unavailable)return unavailable;}
  let role="super_admin";
  let grants=new Set();
  if(!isAdmin){
@@ -335,7 +337,7 @@ export async function POST(request){
    if(!Number.isInteger(duration)||duration<1||duration>2000||!Number.isInteger(passPercent)||passPercent<0||passPercent>100)
     return send({error:"Invalid estimated duration or passing score."},400);
    const {data:schoolRows,error:schoolsError}=await ctx.admin.from("literacy_schools")
-    .select("id").in("id",schoolIds);
+    .select("id").in("id",schoolIds).is("archived_at",null);
    if(schoolsError||schoolRows?.length!==schoolIds.length)return send({error:"Some selected schools were not found."},400);
    const {data:course,error}=await ctx.admin.from("literacy_training_courses").insert({
     title,description,grade,competency_id:competency||null,
