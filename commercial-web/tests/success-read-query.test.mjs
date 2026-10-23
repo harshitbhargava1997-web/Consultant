@@ -6,7 +6,7 @@ test('school and teacher predicates reach the database without broadening the da
  const a={role:'admin',allowedSchools:['School, "A"']},q=recordQuery('2026-10-01','2026-10-23',a);
  assert.match(q.or,/StartTime.gte.2026-10-01T00:00:00/);assert.match(q.and,/Center.in/);assert.match(q.and,/Center.is.null/);assert.match(q.and,/School, \\"A\\"/);
  assert.deepEqual(readScope({role:'admin',allowedSchools:null},true),{});
- assert.deepEqual(readScope({role:'school-teacher',allowedSchools:['S'],school:'S',name:'Teacher',email:'uploader'},true),{Center:'eq."S"',FullName:'eq."Teacher"',Uploaded_By:'eq."uploader"'});
+ assert.deepEqual(readScope({role:'school-teacher',allowedSchools:['S'],school:'S',name:'Teacher',email:'uploader'},true),{Center:'eq.S',FullName:'eq.Teacher',Uploaded_By:'eq.uploader'});
  assert.throws(()=>readScope({allowedSchools:[]}),/No assigned/);
 });
 test('bounded parallel pagination retains every ordered row without requesting absent pages',async()=>{

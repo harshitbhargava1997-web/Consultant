@@ -52,6 +52,7 @@ export default function Home(){
  const [schoolId,setSchoolId]=useState(""),[page,setPage]=useState("overview");
  const [assessmentView,setAssessmentView]=useState("structure");
  const [roleGrants,setRoleGrants]=useState([]);
+ const [roleGrantsByRole,setRoleGrantsByRole]=useState({});
  const [successAccess,setSuccessAccess]=useState(false);
  const [isMobile,setIsMobile]=useState(false);
  const [mobileNavOpen,setMobileNavOpen]=useState(false);
@@ -107,32 +108,17 @@ export default function Home(){
   return ()=>{mounted=false;subscription.unsubscribe();};
  },[client]);
  useEffect(()=>{
-  let alive=true;setSuccessAccess(false);
-  if(session?.access_token)fetch('/api/school-success/access',{headers:{Authorization:'Bearer '+session.access_token},cache:'no-store'}).then(r=>r.json()).then(d=>{if(alive)setSuccessAccess(d.allowed===true);}).catch(()=>{});
-  return()=>{alive=false;};
- },[session?.access_token]);
- useEffect(()=>{
-  if(!session||!client){setIdentity({admin:false,isConsultant:false,consultantSchools:[],memberships:[],schools:[]});return;}
+  if(!session||!client){setIdentity({admin:false,isConsultant:false,consultantSchools:[],memberships:[],schools:[]});setSuccessAccess(false);setRoleGrantsByRole({});return;}
   let alive=true;
-  (async()=>{
-   try{
-    const [{data:mem,error:memErr},{data:sch,error:schErr},adminRes,consultantRes]=await Promise.all([
-     client.from("literacy_memberships").select("school_id,role,user_id,display_name").eq("user_id",session.user.id),
-     client.from("literacy_schools").select("id,name").order("name"),
-     fetch("/api/admin",{headers:{Authorization:"Bearer "+session.access_token}}).then(r=>r.json()).catch(()=>({})),
-     fetch("/api/consultants?summary=1",{headers:{Authorization:"Bearer "+session.access_token}}).then(r=>r.json()).catch(()=>({}))
-    ]);
-    if(memErr)throw memErr;if(schErr)throw schErr;
-    const memberships=mem||[];
-    if(!alive)return;
-    const consultantSchools=Array.isArray(consultantRes.consultantSchools)?consultantRes.consultantSchools:[];
-    const permitted=adminRes.isAdmin===true?(sch||[]).map(s=>s.id):[...new Set([...memberships.map(x=>x.school_id),...consultantSchools])];
-    setIdentity({admin:adminRes.isAdmin===true,isConsultant:consultantRes.isConsultant===true,
-     consultantSchools,memberships,schools:sch||[]});
-    const requestedSchool=new URLSearchParams(location.search).get('schoolId');
-    setSchoolId(old=>permitted.includes(old)?old:permitted.includes(requestedSchool)?requestedSchool:(permitted[0]||""));
-   }catch(e){if(alive)setMessage("Unable to load school access: "+e.message);}
-  })();
+  (async()=>{try{
+   const response=await fetch('/api/workspace',{headers:{Authorization:'Bearer '+session.access_token},cache:'no-store'}),data=await response.json();
+   if(!response.ok)throw Error(data.error||'Workspace unavailable');if(!alive)return;
+   const {admin,isConsultant,consultantSchools,memberships,schools,permissionsByRole,successAccess}=data;
+   setIdentity({admin,isConsultant,consultantSchools,memberships,schools});setSuccessAccess(successAccess);setRoleGrantsByRole(permissionsByRole);
+   const permitted=admin?schools.map(s=>s.id):[...new Set([...memberships.map(m=>m.school_id),...consultantSchools])];
+   const requestedSchool=new URLSearchParams(location.search).get('schoolId');
+   setSchoolId(old=>permitted.includes(old)?old:permitted.includes(requestedSchool)?requestedSchool:(permitted[0]||''));
+  }catch(e){if(alive)setMessage('Unable to load school access: '+e.message);}})();
   return()=>{alive=false;};
  },[client,session?.user?.id,session?.access_token]);
  useEffect(()=>{const requested=new URLSearchParams(location.search).get('workspace');if(['implementation','training'].includes(requested))setPage(requested);},[]);
@@ -164,18 +150,7 @@ export default function Home(){
   })();
   return()=>{alive=false;};
  },[client,session?.user?.id,schoolId]);
- useEffect(()=>{
-  if(!session||!schoolId){setRoleGrants([]);return;}
-  let alive=true;
-  setRoleGrants([]);
-  fetch("/api/permissions?schoolId="+encodeURIComponent(schoolId),{
-   headers:{Authorization:"Bearer "+session.access_token},cache:"no-store"
-  }).then(async r=>{
-   const data=await r.json();if(!r.ok)throw Error(data.error||"Permissions unavailable.");
-   if(alive)setRoleGrants(data.grants||[]);
-  }).catch(e=>{if(alive){setRoleGrants([]);setMessage("Unable to load permissions: "+e.message);}});
-  return()=>{alive=false;};
- },[session?.access_token,schoolId]);
+ useEffect(()=>{setRoleGrants(roleGrantsByRole[role]||[]);},[roleGrantsByRole,role]);
  useEffect(()=>{setAssessmentTarget("");setRatingForm({});setReportStudent("");setReportData(null);},[activeClass,assessmentSubject,schoolId]);
 
  async function refresh(){

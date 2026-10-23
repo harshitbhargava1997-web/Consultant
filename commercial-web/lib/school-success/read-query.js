@@ -5,7 +5,9 @@ export function readScope(a,records=false){
  if(!a.allowedSchools.length)throw Error('403:No assigned schools');
  const list='('+a.allowedSchools.map(quoted).join(',')+')';
  if(!records)return {school:'in.'+list};
- if(a.role!=='admin')return {Center:'eq.'+quoted(a.school),FullName:'eq.'+quoted(a.name),Uploaded_By:'eq.'+quoted(a.email)};
+ // URLSearchParams encodes scalar equality values. Quotes belong inside IN lists,
+ // while adding them to an eq value would make them part of the teacher name.
+ if(a.role!=='admin')return {Center:'eq.'+a.school,FullName:'eq.'+a.name,Uploaded_By:'eq.'+a.email};
  // Keep the original Center -> Institution fallback for older usage imports.
  return {and:'(or(Center.in.'+list+',and(Center.is.null,Institution.in.'+list+'),and(Center.eq."",Institution.in.'+list+')))'};
 }
