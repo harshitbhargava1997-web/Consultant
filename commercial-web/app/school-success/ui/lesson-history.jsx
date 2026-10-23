@@ -1,0 +1,5 @@
+'use client';
+import {groupLessonRows} from '@/lib/lesson-groups';
+export default function LessonHistory({rows,onDownload}){
+ return groupLessonRows(rows).map(g=><section key={g.grade}><h2>Grade: {g.grade}</h2>{g.subjects.map(s=><section key={s.subject}><h3>Subject: {s.subject}</h3>{s.lessons.map(l=><article className="conversation" key={l.key}><h3>{l.date} · {l.topic}{l.section?' · Section '+l.section:''}</h3>{l.rows.map(r=><section className="teacher-evidence" key={r.id}><b>{r.feedStage||'Lesson reflection'} · Saved / submitted: {r.date}</b>{r.conductedOn&&<p>Taught on: {r.conductedOn}</p>}<button type="button" className="text-button" onClick={()=>onDownload(r)}>Download reflection & evidence links</button>{r.reflection&&<p style={{whiteSpace:'pre-wrap'}}>{r.reflection}</p>}{r.materials&&!r.reflection?.includes('Teaching-learning materials / resources\n')&&<p><b>Materials: </b>{r.materials}</p>}<div className="evidence-files">{r.files?.map((f,i)=><a className="file" key={f.key||i} href={f.url} target="_blank" rel="noopener noreferrer">{f.category}</a>)}</div>{r.review&&<p><b>Feedback: </b>{r.review}</p>}</section>)}</article>)}</section>)}</section>);
+}

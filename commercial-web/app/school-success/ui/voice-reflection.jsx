@@ -32,8 +32,8 @@ export default function VoiceReflection({ disabled, onChange, onRecording, onFil
         const chunks = [];
         recorder.ondataavailable = e => { if (e.data.size)
             chunks.push(e.data); };
-        recorder.onstop = () => { const type = recorder.mimeType, ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm'; if (chunks.length)
-            callbacks.current.onFile(new File(chunks, 'Reflection-' + target + '.' + ext, { type })); audio.getTracks().forEach(t => t.stop()); setRecording(false); callbacks.current.onRecording(false); };
+        recorder.onstop = async () => { audio.getTracks().forEach(t => t.stop()); const type = recorder.mimeType, ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm'; if (chunks.length)
+            await callbacks.current.onFile(new File(chunks, 'Reflection-' + target + '.' + ext, { type })); audio.getTracks().forEach(t => t.stop()); setRecording(false); callbacks.current.onRecording(false); };
         recorder.start();
         const r = new Constructor();
         recognizer.current = r;

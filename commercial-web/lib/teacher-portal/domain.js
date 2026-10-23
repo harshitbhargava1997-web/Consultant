@@ -29,8 +29,9 @@ export function latestReview(lesson){return (lesson.reviews||[]).filter(r=>r.ver
 export function lessonStage(lesson){return lesson.evidence_updates?.length?'Evidence submitted':'Preparation saved';}
 export function visionImplementationSummary(lessons,teacherId){
  const own=lessons.filter(l=>l.teacher_user_id===teacherId),records=[];
- for(const l of own){for(const p of l.periods){const updates=(l.evidence_updates||[]).filter(u=>u.files.some(f=>f.periodId===p.id));if(!updates.length)continue;const counts={};for(const f of lessonFiles(l).filter(f=>f.periodId===p.id))counts[f.category]=(counts[f.category]||0)+1;
-  records.push({id:p.id,class_id:p.classId,teacher_user_id:l.teacher_user_id,implementation_date:updates.at(-1).conductedOn,subject:p.subject,lesson_topic:p.topic,submitted_at:updates.at(-1).submittedAt,files:counts,review:latestReview(l),source:'vision_teacher_portal',lesson_id:l.id});
+ for(const l of own){for(const p of l.periods){const updates=(l.evidence_updates||[]).filter(u=>u.files.some(f=>f.periodId===p.id));if(!updates.length)continue;const counts={},evidenceFiles={};for(const f of lessonFiles(l).filter(f=>f.periodId===p.id))counts[f.category]=(counts[f.category]||0)+1;for(const f of updates.flatMap(u=>u.files).filter(f=>f.periodId===p.id))evidenceFiles[f.category]=(evidenceFiles[f.category]||0)+1;
+  records.push({id:p.id,recordId:p.id,class_id:p.classId,grade:p.grade,section:p.section,plannedDate:l.planned_on,teacher_user_id:l.teacher_user_id,implementation_date:updates.at(-1).conductedOn,subject:p.subject,lesson_topic:p.topic,submitted_at:updates.at(-1).submittedAt,files:counts,evidenceFiles,review:latestReview(l),source:'vision_teacher_portal',lesson_id:l.id});
  }}
- return {preparationSessions:own.length,preparedPeriods:own.reduce((n,l)=>n+l.periods.length,0),preparationMinutes:Math.round(own.reduce((n,l)=>n+Number(l.preparation_minutes||0),0)*100)/100,records};
+ const preparations=own.flatMap(l=>l.periods.map(p=>({id:p.id+':preparation',recordId:p.id,grade:p.grade,section:p.section,subject:p.subject,lesson_topic:p.topic,plannedDate:l.planned_on,implementation_date:l.planned_on,submitted_at:l.prepared_at,stage:'preparation_saved',files:(l.preparation_files||[]).filter(f=>f.periodId===p.id).reduce((counts,f)=>({...counts,[f.category]:(counts[f.category]||0)+1}),{})})));
+ return {preparationSessions:own.length,preparedPeriods:own.reduce((n,l)=>n+l.periods.length,0),preparationMinutes:Math.round(own.reduce((n,l)=>n+Number(l.preparation_minutes||0),0)*100)/100,preparations,records};
 }

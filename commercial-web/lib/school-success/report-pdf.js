@@ -3,6 +3,7 @@ import { compareProfiles } from './report-comparison.js';
 import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
 import { includedMetric } from './reports.js';
+import {lessonReportFiles,lessonReportUsage} from '../lesson-groups.js';
 export function createReportPdf(profiles, from, to, settings, comparison) {
     if (!profiles.length)
         throw Error('Select at least one teacher');
@@ -18,7 +19,7 @@ export function createReportPdf(profiles, from, to, settings, comparison) {
         doc.addPage();
         y = 22;
     } };
-    const heading = (title) => { room(28); text(title, 16, y, 12, navy, true); y += 7; };
+    const heading = (title) => { doc.setFont('Report','bold');doc.setFontSize(12);const lines=doc.splitTextToSize(title,178);room(Math.max(28,lines.length*6+15));text(lines,16,y,12,navy,true);y+=lines.length*6+1; };
     const paragraph = (s) => { doc.setFont('Report', 'normal'); doc.setFontSize(9); const lines = doc.splitTextToSize(s, 178); for (const line of lines) {
         room(5);
         text(line, 16, y, 9, '#51616a');
@@ -90,11 +91,19 @@ export function createReportPdf(profiles, from, to, settings, comparison) {
                     table(['Category', 'Files', 'Period target', 'Status'], evidenceKpis.map(i => { const e = p.evidence[i]; return [e.label, e.actual, e.target, e.status]; }));
                 }
                 paragraph('File counts indicate submission coverage only. Open the linked files below to review teaching practice.');
-                for (const e of [...p.evidence, { label: 'Event pictures', files: p.events }])
-                    if (e.files.length) {
-                        heading(e.label);
-                        table(['Open evidence', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => ['Open file ' + (i + 1), f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]), e.files.map(f => f.url));
+            }
+            // Keep the school/teacher consolidated summaries above; details now
+            // follow grade, subject, planned date and explicit lesson identity.
+            for(const grade of p.lessonGroups||[]){
+                const subjects=grade.subjects.map(s=>({...s,lessons:s.lessons.map(l=>({...l,files:lessonReportFiles(l,settings),usage:lessonReportUsage(l,settings)})).filter(l=>l.files.length||l.usage.length)})).filter(s=>s.lessons.length);
+                if(!subjects.length)continue;
+                room(75);heading('Grade: '+grade.grade);
+                for(const subject of subjects){const before=doc.getNumberOfPages();room(60);if(doc.getNumberOfPages()!==before)heading('Grade: '+grade.grade+' (continued)');heading('Subject: '+subject.subject);
+                    for(const lesson of subject.lessons){room(45);heading(`${lesson.date} | ${lesson.topic}${lesson.section?' | Section '+lesson.section:''}`);
+                        if(lesson.usage.length)table(['Preparation date','Lesson preparation sessions','Minutes'],lesson.usage.map(r=>[r.date,1,Number(r.minutes||0).toFixed(1)]));
+                        if(lesson.files.length)table(['Open evidence','Stage / category','Saved / submitted','Taught on'],lesson.files.map((f,i)=>['Open file '+(i+1),f.stage+' / '+f.category,f.date,f.conductedOn||'—']),lesson.files.map(f=>f.url));
                     }
+                }
             }
             if (settings.sections.observations) {
                 heading('Classroom observation report');

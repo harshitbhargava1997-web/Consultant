@@ -4,6 +4,8 @@ import {BookOpen,CheckCircle2,ClipboardCheck,GraduationCap,RefreshCw,Search,Scho
 import SoundProgressPanel from "./SoundProgressPanel";
 import {usePhonicsCatalog} from "./PhonicsSoundPicker";
 
+import {groupLessonRows} from "@/lib/lesson-groups";
+
 const emptySummary={students:0,teachers:0,classCount:0,student:null,training:null,teacherSkills:null,implementation:null};
 function number(value){return value===null||value===undefined?"Not available":value;}
 function percentage(top,bottom){return bottom?Math.round(top*100/bottom)+"%":"No observations";}
@@ -55,14 +57,8 @@ function TeacherDetail({teacher,available,byId,competencies}){
     <span><strong>{implementation?.pending||0}</strong> awaiting review</span>
     <span><strong>{implementation?.needsFollowUp||0}</strong> needing follow-up</span>
    </div>
-   {(implementation?.records||[]).length?
-    <div className="progress-implementation-list">{implementation.records.map(r=><div key={r.id}>
-     <div className="progress-report-line"><strong>{r.lesson_topic}</strong>
-      <small>{r.implementation_date} · {r.subject}</small></div>
-     <small>{Object.entries(r.files||{}).map(([k,n])=>k.replace(/_/g," ")+": "+n).join(" · ")||"No linked file records"}
-      {" · "}{r.review?.status==="reviewed"?"Reviewed":r.review?.status==="needs_follow_up"?"Needs follow-up":"Awaiting review"}</small>
-     {r.review?.feedback&&<p className="helper">Review feedback: {r.review.feedback}</p>}
-    </div>)}</div>:<p className="helper">No classroom implementation submissions yet. Teachers can upload voice reflections and lesson evidence in Teacher Implementation.</p>}
+   {((implementation?.records||[]).length||(implementation?.preparations||[]).length)?
+    <div className="progress-implementation-list">{groupLessonRows([...(implementation.preparations||[]),...implementation.records]).map(g=><section key={g.grade}><h3>Grade: {g.grade}</h3>{g.subjects.map(sub=><section key={sub.subject}><h4>Subject: {sub.subject}</h4>{sub.lessons.map(l=><article key={l.key}><strong>{l.date} · {l.topic}{l.section?' · Section '+l.section:''}</strong>{l.rows.map(r=><div key={r.id}><small>{r.stage==='preparation_saved'?'Lesson preparation':'Classroom evidence'} · {r.implementation_date}</small><p className="helper">{Object.entries(r.evidenceFiles||r.files||{}).map(([k,n])=>k.replace(/_/g,' ')+': '+n).join(' · ')||'No linked file records'}</p>{r.review&&<p className="helper">{r.review.status==='reviewed'?'Reviewed':r.review.status==='needs_follow_up'?'Needs follow-up':'Awaiting review'}{r.review.feedback?' · '+r.review.feedback:''}</p>}</div>)}</article>)}</section>)}</section>)}</div>:<p className="helper">No lesson preparations or classroom implementation submissions yet.</p>}
    <p className="helper">Open Teacher Portal to review Vision literacy preparations, attachments and feedback. Earlier records remain in Implementation history. Preparation and evidence counts do not establish competency proficiency.</p>
   </section>}
  </div>;

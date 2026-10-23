@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {groupLessonRows} from '../lesson-groups.js';
 export const moduleNames = ['Lesson Plan', 'Content / Book', 'Additional Materials', 'E-book'];
 export const moduleLabels = ['Lesson preparation', 'Book usage', 'Additional Materials', 'E-books'];
 export const evidenceNames = ['Activity files', 'Writing samples', 'LP / Audio notes', 'Phonics evidence', 'Portfolio artifacts'];
@@ -54,7 +55,7 @@ export function buildProfiles(entries, roster, from, to, settings, calendars = {
             item.minutes += Number(r.minutes || 0);
             preparationGroups.set(key, item);
         }
-        return { ...t, days, holidays, metrics, evidence, evidenceStatus, observations, preparations: [...preparationGroups.values()].sort((a, b) => b.minutes - a.minutes), usage, books: [...bookGroups.values()].sort((a, b) => b.minutes - a.minutes), events: unique(['Event_Pictures_Link']) };
+        return { ...t, days, holidays, metrics, evidence, evidenceStatus, observations, lessonGroups:groupLessonRows([...submissions.map((r,i)=>({...r,id:r.id||'submission:'+i})),...usage.filter(r=>r.module==='Lesson Plan').map((r,i)=>({...r,id:r.id||'usage:'+i}))]), preparations: [...preparationGroups.values()].sort((a, b) => b.minutes - a.minutes), usage, books: [...bookGroups.values()].sort((a, b) => b.minutes - a.minutes), events: unique(['Event_Pictures_Link']) };
     });
 }
 export function includedMetric(index, settings) { return index === 1 || index === 0 && settings.sections.lessonPlan || index === 2 && settings.sections.additional || index === 3 && settings.sections.ebooks; }
