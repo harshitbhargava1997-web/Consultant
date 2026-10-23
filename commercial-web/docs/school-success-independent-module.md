@@ -2,6 +2,8 @@
 
 23 October 2026. This supersedes the mapping-based first-stage integration and the later restriction that disabled School Success school links.
 
+Performance follow-up: the deployed runtime is now `c5ecb0659dceabb8698a876cf72ef1d630049960`. See [portal-performance.md](portal-performance.md) for the later loading improvements, measurements and final regression checks. The release validation below records the original independent-module release.
+
 Open https://vision-school-commercial-staging.vercel.app/school-success from **School Success folder** in Vision. It runs within the existing Next.js application and Vercel staging project.
 
 ## Programme boundary
