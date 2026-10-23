@@ -25,3 +25,14 @@ test('previous report layout keeps file lists chronological and separates saved 
  const activity=text.slice(text.indexOf('Activity files',text.indexOf('File counts indicate')));assert(activity.indexOf('2026-10-12')<activity.indexOf('2026-10-13'));assert.match(text,/Activity\s+Sessions\s+Total minutes/);
 });
 
+test('individual teacher PDF shows preparation and library data before PDFs, audio, activities, writing and phonics',()=>{
+ const s=structuredClone(defaultReportSettings);s.quantitative=false;s.qualitative=false;
+ const base={school:'School',teacher:'Teacher One',date:'2026-10-12',grade:'LKG',subject:'English',topic:'Blending'};
+ const files=['Video_Evidence_1','Writing_Sample_Link','Phonics_Evidence_Link','Portfolio_Evidence_Link','Voice_Note_Link','Lesson_Plan_Picture','Event_Pictures_Link'].map((column,i)=>({column,url:'https://example.com/file'+i}));
+ const text=render(s,false,[{...base,kind:'usage',module:'Lesson Plan',minutes:10},{...base,kind:'usage',module:'Content / Book',minutes:25},{...base,kind:'submission',files}]);
+ const teacher=text.slice(text.indexOf('TEACHER PROFILE'));
+ const headings=['Lesson preparation - consolidated report','Book / chapter breakdown','Lesson preparation PDFs','Audio recordings','Activity files','Writing samples','Phonics evidence','Portfolio artifacts','Event pictures'];
+ let previous=-1;for(const heading of headings){const index=teacher.indexOf(heading);assert(index>previous,'Missing or out-of-order section: '+heading);previous=index;}
+ assert.doesNotMatch(teacher,/Grade:|Subject:/);
+});
+

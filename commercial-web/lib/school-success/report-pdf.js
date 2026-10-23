@@ -91,7 +91,9 @@ export function createReportPdf(profiles, from, to, settings, comparison) {
                     table(['Category', 'Files', 'Period target', 'Status'], evidenceKpis.map(i => { const e = p.evidence[i]; return [e.label, e.actual, e.target, e.status]; }));
                 }
                 paragraph('File counts indicate submission coverage only. Open the linked files below to review teaching practice.');
-                for (const e of reportEvidenceGroups(p))
+                const fileOrder=['Lesson preparation PDFs','Audio recordings','Activity files','Writing samples','Phonics evidence'];
+                const order=label=>{const i=fileOrder.indexOf(label);return i<0?fileOrder.length:i;};
+                for (const e of reportEvidenceGroups(p).sort((a,b)=>order(a.label)-order(b.label)))
                     if (e.files.length) {
                         heading(e.label);
                         table(['Open evidence', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => ['Open file ' + (i + 1), f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]), e.files.map(f => f.url));
