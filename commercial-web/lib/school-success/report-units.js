@@ -1,10 +1,9 @@
-export function reportTime(settings = {}) {
- const hours = settings.timeUnit !== 'minutes';
- return {unit: hours ? 'hours' : 'minutes', label: hours ? 'Hours' : 'Minutes', short: hours ? 'hr' : 'min', digits: hours ? 2 : 1,
-  value: minutes => Number(minutes || 0) / (hours ? 60 : 1),
-  format(minutes) {
-   const value = Number(minutes || 0) / (hours ? 60 : 1);
-   return Math.abs(value) > 0 && Math.abs(value) < (hours ? .01 : .1) ? (value < 0 ? '-' : '') + (hours ? '<0.01' : '<0.1') : value.toLocaleString('en-IN', {minimumFractionDigits: hours ? 0 : 1, maximumFractionDigits: hours ? 2 : 1});
-  }
- };
+// Presentation only: raw minutes still drive totals, averages and benchmarks.
+export function formatReportDuration(minutes) {
+ const value = Number(minutes || 0);
+ if (!Number.isFinite(value)) return '—';
+ const negative = value < 0 ? '-' : '', absolute = Math.abs(value), rounded = Math.round(absolute);
+ if (absolute > 0 && rounded === 0) return negative + '<1 min';
+ const hours = Math.floor(rounded / 60), remainder = rounded % 60;
+ return negative + (hours ? hours.toLocaleString('en-IN') + ' hr ' + remainder + ' min' : remainder + ' min');
 }

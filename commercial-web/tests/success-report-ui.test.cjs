@@ -9,12 +9,10 @@ function component(relative){
 }
 const Workspace=component('app/school-success/ui/report-workspace.jsx').default;
 function render(visualization,timeUnit){const settings={...structuredClone(defaultReportSettings),visualization,timeUnit};return renderToStaticMarkup(React.createElement(Workspace,{data:{reportSettings:settings,entries:[{kind:'usage',school:'School',teacher:'Teacher',date:'2026-10-12',module:'Content / Book',minutes:90,topic:'Reading resource'}],roster:[{school:'School',name:'Teacher'}],period:{from:'2026-10-12',to:'2026-10-13'}},school:'School',from:'2026-10-12',to:'2026-10-13',setFrom(){},setTo(){},refresh(){},mode:'Teacher 360°'}));}
-test('real report component renders the selected format, unit and accurate book values',()=>{
+test('real report component always renders tables and hours with minutes, ignoring old chart preferences',()=>{
  for(const view of ['tables','charts','both'])for(const unit of ['hours','minutes']){
-  const html=render(view,unit);assert.match(html,/aria-label="Report display format"/);assert.match(html,/aria-label="Report time unit"/);
-  assert.equal(html.includes('aria-label="Recorded resource usage"'),view!=='tables');
-  assert.equal(html.includes('<th>Book / chapter</th>'),view!=='charts');assert.match(html,unit==='hours'?/1\.5/:/90\.0/);
-  assert.match(html,new RegExp('aria-pressed="true">'+view[0].toUpperCase()+view.slice(1)+'</button>'));assert.match(html,new RegExp('aria-pressed="true">'+unit[0].toUpperCase()+unit.slice(1)+'</button>'));
+  const html=render(view,unit);assert.doesNotMatch(html,/Report display format|Report time unit|Recorded resource usage|report-chart/);
+  assert.ok(html.includes('<th>Book / chapter</th>'));assert.match(html,/1 hr 30 min/);assert.match(html,/<th>Preparation time<\/th>/);
   assert.match(html,/Teacher PDF/);assert.match(html,/Combined PDF/);assert.match(html,/School PDFs/);
  }
 });
