@@ -2,6 +2,8 @@
 
 23 October 2026. Scope: Vision's native literacy teacher portal and the independent School Success module within the existing Vision staging application. Their directories, records, permissions, storage and lesson identities stay separate. The original standalone School Success site is not automatically synchronized or changed by this release.
 
+Deployed runtime: `2c35dbecadd7812aa2c146947192d8bf0620af50`. Vercel deployment `dpl_7boKMWWPKTUWR8WrmwUQj424XqnZ` is READY in `bom1`; https://vision-school-commercial-staging.vercel.app/ resolves to this deployment.
+
 ## Combined recording
 
 Each class period now has one combined microphone recording. Stopping and restarting dictation for learning objective, teaching-learning materials, teacher activity, student activity, practice and review adds audio to the same draft attachment. Written reflection fields remain separate. The separate microphone-only control contributes to the same combined recording.
@@ -26,5 +28,7 @@ Saving stays blocked while capture or combining is active, and recording control
 - PDF text checks verify dated grade/subject grouping, linked preparation and successive updates, original KPI visibility, consolidated summaries and comparison layout.
 - A three-page synthetic report was rendered and visually inspected for table layout and heading/page-break behaviour. It is a QA sample, not a customer's report or a deployed-workflow demonstration.
 - Production Next.js build passed. No schema migration, credential change, permission change or customer-record rewrite is required.
+- Deployed root, School Success and native teacher route returned HTTP 200. The served teacher bundle contains the combined-recording control. Anonymous School Success, native teacher and school-progress API calls returned HTTP 401. These are availability/code-delivery/access checks, not a signed-in microphone workflow test.
+- Database counts before and after release matched: 61,524 School Success records, one native Vision lesson and two historical implementation entries. No customer writes were made for these checks. The final deployment's error/fatal runtime-log scan returned no matching entries at the time checked.
 
 Physical iPhone/Android microphone capture, browser speech recognition and real-device codec conversion remain untested in this pass. Local audio encoding/decoding and component tests do not substitute for those device checks. Previously saved audio is not retroactively combined.
