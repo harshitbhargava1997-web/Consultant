@@ -6,7 +6,9 @@ import LessonVoiceControls from '../../LessonVoiceControls';
 import {RECORDING_SLOT,recordingAttachment} from '@/lib/lesson-audio';
 import SchoolSharingLinks from './school-sharing-links';
 import LessonEvidence from './lesson-evidence';
-import LessonHistory from './lesson-history';
+import StoredFileLinks from '../../StoredFileLinks';
+import {chronologicalRows} from '@/lib/report-sequence';
+import { lessonStageLabel } from '@/lib/school-success/lesson-workflow';
 import { teacherGrades, teacherSections, teacherSubjects, teachingPracticeText, downloadPractice } from '@/lib/school-success/teacher-flow';
 import { submissionSchema, submissionRecords } from '@/lib/school-success/teacher-submissions';
 const day = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -120,6 +122,6 @@ export default function TeacherPortal({ data, school, refresh }) {
             </section>)}
  <div className="actions"><button className="button" type="button" onClick={() => downloadPractice(teachingPracticeText(selectedSchool, teacherValue, date, periods))}>Download reflection draft</button><button className="button" type="button" disabled={periods.length >= 10} onClick={() => setPeriods(rows => [...rows, newPeriod()])}><Plus size={17}/>Add class period</button><button className="button primary" type="submit" disabled={!selectedSchool || !teacherValue || recordingIds.length > 0}>{recordingIds.length ? 'Stop voice recording before saving' : busy || 'Save lesson preparation'}</button></div></fieldset>{busy && <p role="status">{busy}…</p>}{error && <p className="negative" role="alert">{error}</p>}</form>}
 
- {<section className="card"><div className="card-head"><div><h2>{admin ? 'Teacher evidence' : 'My Evidence'}</h2><p>Loaded period: {data.period?.from} to {data.period?.to}</p></div><span className="pill blue">{history.length} feed entry / entries</span></div>{!history.length && <p className="hint">No submissions in the loaded period. Your new submissions will appear here after saving.</p>}<LessonHistory rows={history} onDownload={r=>downloadPractice(teachingPracticeText(r.school,r.teacher,r.date,[r]))}/></section>}</div>;
+ {<section className="card"><div className="card-head"><div><h2>{admin ? 'Teacher evidence' : 'My Evidence'}</h2><p>Loaded period: {data.period?.from} to {data.period?.to}</p></div><span className="pill blue">{history.length} feed entry / entries</span></div>{!history.length && <p className="hint">No submissions in the loaded period. Your new submissions will appear here after saving.</p>}{chronologicalRows(history).map((r) => <article className="conversation" key={r.id}><div className="flex-between"><b>{r.grade}{r.section ? ' · ' + r.section : ''} · {r.subject}</b><small>{r.date}</small></div><h3>{r.topic}</h3>{r.stage && <span className="pill blue">{r.feedStage || lessonStageLabel(r.stage)}</span>}<p className="hint">Planned lesson: {r.plannedDate || r.date}{r.conductedOn ? ' · Taught on: ' + r.conductedOn : ''}</p><button type="button" className="text-button" onClick={() => downloadPractice(teachingPracticeText(r.school, r.teacher, r.date, [r]))}>Download reflection & evidence links</button>{r.reflection && <p style={{ whiteSpace: 'pre-wrap' }}>{r.reflection}</p>}{r.materials && !r.reflection?.includes('Teaching-learning materials / resources\n') && <p><b>Materials: </b>{r.materials}</p>}<StoredFileLinks files={r.files||[]}/>{r.review && <p><b>Feedback: </b>{r.review}</p>}</article>)}</section>}</div>;
 }
 

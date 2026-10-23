@@ -188,7 +188,7 @@ async function schoolTraining(ctx,teachers){
   truncated:linkLimit||unitsResult.truncated||certificateResult.truncated||
    sessionsResult.truncated||attendanceResult.truncated||progress.truncated};
 }
-async function implementation(ctx,teachers,classes=[]){
+async function implementation(ctx,teachers){
  if(!ctx.can("implementation.review"))return null;
  const native=await allRows(()=>ctx.admin.from("literacy_teacher_lessons")
   .select("id,school_id,teacher_user_id,planned_on,periods,preparation_minutes,prepared_at,preparation_files,evidence_updates,reviews,version")
@@ -225,13 +225,13 @@ async function implementation(ctx,teachers,classes=[]){
  }
  const teacherStats=teachers.map(t=>{
   const own=schoolEntries.filter(e=>e.teacher_user_id===t.user_id),fresh=visionImplementationSummary(native.rows,t.user_id);
-  const records=[...own.map(e=>{const cls=classes.find(c=>c.id===e.class_id);return {...e,grade:cls?.grade,section:cls?.section,files:fileCounts[e.id]||{},review:reviewById.get(e.id)||null};}),...fresh.records];
+  const records=[...own.map(e=>({...e,files:fileCounts[e.id]||{},review:reviewById.get(e.id)||null})),...fresh.records];
   const reviewed=records.filter(e=>e.review?.status==="reviewed").length;
   const needsFollowUp=records.filter(e=>e.review?.status==="needs_follow_up").length;
   const files=records.reduce((sum,x)=>sum+Object.values(x.files||{}).reduce((a,b)=>a+b,0),0);
   return {user_id:t.user_id,submissions:records.length,files,reviewed,needsFollowUp,pending:records.length-reviewed-needsFollowUp,
    preparationSessions:fresh.preparationSessions,preparedPeriods:fresh.preparedPeriods,preparationMinutes:fresh.preparationMinutes,
-   preparations:fresh.preparations.sort((a,b)=>String(b.submitted_at).localeCompare(String(a.submitted_at))).slice(0,45),records:records.sort((a,b)=>String(b.submitted_at).localeCompare(String(a.submitted_at))).slice(0,45)};
+   records:records.sort((a,b)=>String(b.submitted_at).localeCompare(String(a.submitted_at))).slice(0,45)};
  });
  return {teacherStats,submissions:teacherStats.reduce((n,t)=>n+t.submissions,0),
   pending:teacherStats.reduce((n,t)=>n+t.pending,0),
@@ -293,7 +293,7 @@ export async function GET(request){
   const base=await baseSchool(ctx);
   const studentPromise=mode==="school"&&ctx.can("assessments.view")?studentStats(ctx,base):Promise.resolve(null);
   const [studentData,trainingData,implementationData,teacherData]=await Promise.all([
-   studentPromise,schoolTraining(ctx,base.teachers),implementation(ctx,base.teachers,base.classes),
+   studentPromise,schoolTraining(ctx,base.teachers),implementation(ctx,base.teachers),
    teacherSkillReviews(ctx,base.teachers)
   ]);
   const teachers=base.teachers.map(t=>{

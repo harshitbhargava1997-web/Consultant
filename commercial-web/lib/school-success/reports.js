@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import {groupLessonRows} from '../lesson-groups.js';
+import {chronologicalRows} from '../report-sequence.js';
 export const moduleNames = ['Lesson Plan', 'Content / Book', 'Additional Materials', 'E-book'];
 export const moduleLabels = ['Lesson preparation', 'Book usage', 'Additional Materials', 'E-books'];
 export const evidenceNames = ['Activity files', 'Writing samples', 'LP / Audio notes', 'Phonics evidence', 'Portfolio artifacts'];
@@ -20,7 +20,7 @@ export function teacherRoster(entries, roster) { const map = new Map(); for (con
     } return [...map.values()].sort((a, b) => a.school.localeCompare(b.school) || a.name.localeCompare(b.name)); }
 export function buildProfiles(entries, roster, from, to, settings, calendars = {}) {
     // Consultant observations are opt-in and stay separate from teacher-submitted evidence.
-    const period = entries.filter(r => (r.kind === 'usage' || r.kind === 'submission' || settings.sections.observations && r.kind === 'observation') && r.date >= from && r.date <= to);
+    const period = chronologicalRows(entries.filter(r => (r.kind === 'usage' || r.kind === 'submission' || settings.sections.observations && r.kind === 'observation') && r.date >= from && r.date <= to));
     return teacherRoster(entries.filter(r => r.kind !== 'observation' || settings.sections.observations), roster).map(t => {
         const rows = period.filter(r => r.school === t.school && r.teacher === t.name), usage = rows.filter(r => r.kind === 'usage'), submissions = rows.filter(r => r.kind === 'submission'), observations = rows.filter(r => r.kind === 'observation');
         const holidays = [...settings.holidays, ...(settings.useSchoolCalendars ? (calendars[t.school] || []) : [])], days = eligibleDays(from, to, holidays, settings.excludeSundays);
@@ -37,7 +37,7 @@ export function buildProfiles(entries, roster, from, to, settings, calendars = {
             }
         const unique = (cols) => [...new Map(cols.flatMap(c => [...(byColumn.get(c) || new Map()).entries()])).values()];
         const groups = [unique(['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']), unique(['Writing_Sample_Link']), [...unique(['Lesson_Plan_Picture']), ...unique(['Voice_Note_Link'])], unique(['Phonics_Evidence_Link']), unique(['Portfolio_Evidence_Link'])];
-        const evidence = groups.map((files, i) => ({ label: evidenceNames[i], actual: files.length, target: settings.qualitative ? settings.evidence[i] : 0, files, status: !days ? 'Scheduled break' : !settings.qualitative || !settings.evidence[i] ? 'Not applicable' : files.length >= settings.evidence[i] ? 'Met target' : 'Needs follow-up' }));
+        const evidence = groups.map((files, i) => ({ label: evidenceNames[i], actual: files.length, target: settings.qualitative ? settings.evidence[i] : 0, files:chronologicalRows(files), status: !days ? 'Scheduled break' : !settings.qualitative || !settings.evidence[i] ? 'Not applicable' : files.length >= settings.evidence[i] ? 'Met target' : 'Needs follow-up' }));
         const applicable = evidence.filter(e => e.target > 0), evidenceStatus = !days || !applicable.length ? 'Not applicable' : applicable.every(e => e.actual >= e.target) ? 'Met selected targets' : 'Needs follow-up';
         const bookGroups = new Map();
         for (const r of usage.filter(r => r.module === 'Content / Book')) {
@@ -55,7 +55,7 @@ export function buildProfiles(entries, roster, from, to, settings, calendars = {
             item.minutes += Number(r.minutes || 0);
             preparationGroups.set(key, item);
         }
-        return { ...t, days, holidays, metrics, evidence, evidenceStatus, observations, lessonGroups:groupLessonRows([...submissions.map((r,i)=>({...r,id:r.id||'submission:'+i})),...usage.filter(r=>r.module==='Lesson Plan').map((r,i)=>({...r,id:r.id||'usage:'+i}))]), preparations: [...preparationGroups.values()].sort((a, b) => b.minutes - a.minutes), usage, books: [...bookGroups.values()].sort((a, b) => b.minutes - a.minutes), events: unique(['Event_Pictures_Link']) };
+        return { ...t, days, holidays, metrics, evidence, evidenceStatus, observations, preparations: [...preparationGroups.values()].sort((a, b) => b.minutes - a.minutes), usage, books: [...bookGroups.values()].sort((a, b) => b.minutes - a.minutes), events: unique(['Event_Pictures_Link']) };
     });
 }
 export function includedMetric(index, settings) { return index === 1 || index === 0 && settings.sections.lessonPlan || index === 2 && settings.sections.additional || index === 3 && settings.sections.ebooks; }
