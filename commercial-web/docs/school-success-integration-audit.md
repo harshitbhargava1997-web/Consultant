@@ -1,6 +1,6 @@
 # School Success → Vision integration inventory
 
-Inspected 22 October 2026. This is the original inspection baseline, not the release status. See [school-success-release.md](school-success-release.md) for the subsequent implementation and verification results.
+Inspected 22 October 2026. This is the original inspection baseline, not the release status. See [school-success-independent-module.md](school-success-independent-module.md) for the current programme boundary and verification; [school-success-release.md](school-success-release.md) preserves the first-stage migration history.
 
 ## Exact sources and release state
 

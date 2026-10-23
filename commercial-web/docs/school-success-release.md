@@ -1,5 +1,7 @@
 # School Success in Vision — release and verification
 
+Historical first-stage release. The current independent-module architecture and verification are documented in [school-success-independent-module.md](school-success-independent-module.md). School Success school/teacher mappings and the active-navigation flag described below no longer control either programme.
+
 22 October 2026. Target is the existing Vision staging project, not a new application.
 
 - Vision: https://vision-school-commercial-staging.vercel.app/

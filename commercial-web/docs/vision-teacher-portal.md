@@ -1,6 +1,6 @@
 # Vision literacy Teacher Portal
 
-22 October 2026. This supersedes the earlier full School Success integration direction.
+22 October 2026; programme boundary updated 23 October. Vision literacy and the complete School Success module operate independently. See [school-success-independent-module.md](school-success-independent-module.md) for the current module release.
 
 Vision's main navigation contains **Teacher Portal**. Its directory uses the selected Vision school, teacher membership IDs and class assignments. Preparation uses Vision's published literacy competencies. No School Success mapping is required.
 
@@ -12,7 +12,7 @@ Protected requests validate Vision authentication and implementation permissions
 
 Teacher and school progress reports combine the native Vision implementation history and new Vision lessons. Preparations/sessions/minutes are shown separately from implemented periods. School Success records never enter these reports. Historical implementation attachments remain accessible through the read-only **Implementation history** navigation item.
 
-**School Success folder** remains a separate Super Admin entry. Its copied records, CRM, templates, archives and reports are retained. Ordinary Vision stakeholders cannot access that folder; its old shared capabilities and school/teacher mapping controls are paused. The existing mapping rows are retained as history but no longer authorize access. The independent original School Success portal is unchanged and remains at https://school-success-portal.harshitbhargava1997.chatgpt.site.
+**School Success folder** opens the complete independent programme. Super Admin has full access and can explicitly assign existing user IDs to School Success schools through its own Module access page. Its public school links use its own teacher directory, independently of Vision literacy schools, memberships, classes or competencies. Existing mapping rows are retained as history and do not authorize module access. The independent original School Success portal is unchanged and remains at https://school-success-portal.harshitbhargava1997.chatgpt.site.
 
 Validation: Next.js production build passed. `node --test tests/vision-teacher-portal.test.mjs tests/success-*.test.mjs` passed 43 tests.
 
