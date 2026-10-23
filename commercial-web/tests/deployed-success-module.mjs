@@ -6,6 +6,9 @@ import {weeklyConnects} from '../lib/school-success/crm.js';
 import {readUsageWorkbooks} from '../lib/school-success/workbook-import.js';
 import * as XLSX from 'xlsx';
 import {jsPDF} from 'jspdf';
+import {createReportPdf} from '../lib/school-success/report-pdf.js';
+import {buildProfiles,defaultReportSettings,reportRows} from '../lib/school-success/reports.js';
+import {zipSync,unzipSync} from 'fflate';
 const rl=readline.createInterface({input:process.stdin});
 let fixture,key,base,runId,resumeOnly=false;
 const qa=async action=>{const r=await fetch('https://amtjvwroaennfypurkji.supabase.co/functions/v1/school-success-module-qa',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({action,runId})});const v=await r.json();if(!r.ok)throw Error(v.error);return v;};
@@ -43,5 +46,13 @@ for await(const line of rl){try{const msg=JSON.parse(line);if(msg.mode==='cleanu
  const state=await api('migration');assert(state.state.some(s=>s.key==='complete'));
  const response=await fetch(base+'/api/school-success/migration?download=database',{headers:{Authorization:'Bearer '+fixture.users.admin.token}});assert(response.ok,'Database backup status');assert.equal(response.headers.get('content-type'),'application/x-ndjson');let count=0,tail='';const decoder=new TextDecoder();for await(const chunk of response.body){tail+=decoder.decode(chunk,{stream:true});let pos;while((pos=tail.indexOf('\n'))>=0){const row=JSON.parse(tail.slice(0,pos));assert(row.table&&row.row);count++;tail=tail.slice(pos+1);}}assert(count>=61523,'Complete streamed database backup');console.log('PASS Super Admin database backup: '+count+' rows');
  console.log(JSON.stringify({qaMediaCleanup:await api('migration',{action:'cleanupQaMedia',runId})}));continue;
+}if(msg.mode==='postchecks'){
+ const isolated=await qa('isolation');assert.equal(isolated.unchanged,true,JSON.stringify(isolated));console.log('PASS all native Vision rows and historical mappings unchanged');
+ const school=fixture.schools[0].name,link=(await api('portal',{action:'schoolLink',school})).url,access=new URL(link).searchParams.get('access');const native=await fetch(base+'/api/teacher-portal',{headers:{'X-School-Link':access,'X-Teacher':encodeURIComponent('QA Teacher A')}});assert.equal(native.status,401);console.log('PASS School Success school link cannot authorize native Vision API');
+ await api('access',{userId:fixture.users.consultant.id,enabled:false,schools:[]});await api('portal',undefined,'consultant',{},403);console.log('PASS module consultant access revocation');
+ const data=await api('portal?from='+today()+'&to='+today()),schools=fixture.schools.map(s=>s.name),entries=data.entries.filter(r=>schools.includes(r.school||r.name)),roster=data.roster.filter(r=>schools.includes(r.school)),settings=structuredClone(defaultReportSettings);settings.quantitative=false;settings.qualitative=false;
+ const profiles=buildProfiles(entries,roster,today(),today(),settings);assert.equal(profiles.length,2);const bytes=new Uint8Array(createReportPdf(profiles,today(),today(),settings).output('arraybuffer'));assert.equal(Buffer.from(bytes).subarray(0,4).toString(),'%PDF');const files=Object.fromEntries(schools.map((s,i)=>[i+'.pdf',new Uint8Array(createReportPdf(profiles.filter(p=>p.school===s),today(),today(),settings).output('arraybuffer'))]));const zip=unzipSync(zipSync(files));assert.equal(Object.keys(zip).length,2);for(const value of Object.values(zip))assert.equal(Buffer.from(value).subarray(0,4).toString(),'%PDF');
+ const workbook=XLSX.utils.book_new();XLSX.utils.book_append_sheet(workbook,XLSX.utils.json_to_sheet(reportRows(profiles)),'Teacher KPI summary');const restored=XLSX.read(XLSX.write(workbook,{type:'buffer',bookType:'xlsx'}));assert.equal(XLSX.utils.sheet_to_json(restored.Sheets['Teacher KPI summary']).length,2);console.log('PASS actual deployed data generates combined PDF, two school PDFs in ZIP and workbook summary');
+ console.log(JSON.stringify({browserLink:link,runId}));continue;
 }const passed=await checks();console.log(JSON.stringify({result:'passed',count:passed.length}));}catch(e){console.log('FAILED '+e.message);}console.log('Ready for retry or cleanup.');}
 

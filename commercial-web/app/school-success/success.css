@@ -10,3 +10,9 @@
 .success-app .crm-counts{display:flex;gap:24px;flex-wrap:wrap;padding:14px 20px;background:#f1f7f6;border:1px solid var(--line);border-radius:8px;margin:0 0 24px;font-size:12px;color:#51616a}.success-app .crm-counts b{margin-left:8px;color:#163a43}
 .success-app .teacher-fields{border:0;padding:0;margin:0;min-width:0}.success-app .teacher-period{border-top:1px solid var(--line);padding:24px 0;margin-top:18px}.success-app .teacher-evidence{background:#f5f8f6;padding:20px;border-radius:9px;margin:18px 0}.success-app .teacher-file{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}.success-app .teacher-file>div{flex:1;min-width:0;overflow-wrap:anywhere}.success-app .teacher-file small{display:block;margin-top:5px}.success-app .reflection-prompts{padding:12px 0;font-size:12px}.success-app .reflection-prompts summary{font-weight:600;cursor:pointer}.success-app .upload-paused{opacity:.6}.success-app .teacher-workspace code{overflow-wrap:anywhere}.success-app .teacher-workspace .conversation p{white-space:pre-wrap}.success-app .teacher-workspace .teacher-banner{margin-bottom:20px}.success-app .teacher-workspace .actions{flex-wrap:wrap}
 
+/* Keep the independent module legible inside Vision's global stylesheet. */
+.success-app .sidebar{color:var(--ink);overflow-y:auto}
+.success-app .sidebar .brand{color:var(--ink)}
+.success-app .sidebar .brand small{color:var(--muted)}
+.success-app .sidebar-bottom{display:block;padding:0;border-top:0}
+.success-app .sidebar .profile{color:var(--ink)}
