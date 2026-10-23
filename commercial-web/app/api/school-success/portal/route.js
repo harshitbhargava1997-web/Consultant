@@ -7,8 +7,7 @@ import { ticketSchema } from '@/lib/school-success/crm';
 import { reportSettingsSchema, defaultReportSettings } from '@/lib/school-success/reports';
 import { gateway, publicBase } from '@/lib/school-success/live';
 import { mapLive } from '@/lib/school-success/live-mapping';
-import { actor, database, checkOrigin, failure, assertSchool, streamJson } from '@/lib/school-success/server';
-import {service,checked} from '@/lib/school-success/database';
+import { actor, database, checkOrigin, failure, assertSchool, schoolTeachers } from '@/lib/school-success/server';
 import { schemas } from '@/lib/school-success/domain';
 export const dynamic = 'force-dynamic';
 async function hash(s) { return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))).map(x => x.toString(16).padStart(2, '0')).join(''); }
@@ -41,7 +40,6 @@ async function handlerPOST(req) {
         checkOrigin(req);
         const a = await actor(req), db = database();
         const b = await req.json();
-        if(b.action==='schoolLink')throw Error('403:School Success teacher links are managed in the independent original portal. Use Vision Teacher Portal for Vision schools.');
         const now = new Date().toISOString();
         if(a.allowedSchools&&b.kind==='school')throw Error('403:Only Super Admin may add schools');
         if(b.data?.school)assertSchool(a,b.data.school);if(b.school)assertSchool(a,b.school);
@@ -59,20 +57,16 @@ async function handlerPOST(req) {
         if (b.action === 'schoolLink') {
             if (a.role !== 'admin')
                 throw Error('403:Admin required');
-            const school = String(b.school || ''), archives = await loadArchives(db);
+            if(typeof b.school!=='string'||!b.school.trim()||b.school.length>1000)throw Error('Choose a School Success school');
+            const school = b.school, archives = await loadArchives(db);
             if (isArchived(archives, school))
                 throw Error('403:Restore this school before sharing its teacher link');
-            const mapped=await checked(service().from('success_school_mappings').select('vision_school_id').eq('source_school',school).maybeSingle());
-            if(!mapped)throw Error('Approve this school mapping in Super Admin first');
-            const maps=await checked(service().from('success_teacher_mappings').select('source_teacher,vision_user_id').eq('source_school',school));
-            const members=await checked(service().from('literacy_memberships').select('user_id').eq('school_id',mapped.vision_school_id).eq('role','teacher'));
-            const ids=new Set(members.map(m=>m.user_id));
-            const teachers=maps.filter(m=>ids.has(m.vision_user_id)).map(m=>m.source_teacher);
-            if (!teachers.some(name => !isArchived(archives, school, String(name))))
+            const teachers=await schoolTeachers(school,archives);
+            if (!teachers.length)
                 throw Error('No active teachers found for this school');
             const saved = await db.prepare('SELECT value FROM portal_config WHERE key=?').bind('schoolLinkToken:' + school).first();
             const token = saved?.value || crypto.randomUUID();
-            await db.batch([db.prepare('INSERT INTO portal_config(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('schoolLink:' + token, JSON.stringify({ school, teachers,visionSchoolId:mapped.vision_school_id })), db.prepare('INSERT INTO portal_config(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('schoolLinkToken:' + school, token)]);
+            await db.batch([db.prepare('INSERT INTO portal_config(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('schoolLink:' + token, JSON.stringify({ school, teachers,scope:'school-success' })), db.prepare('INSERT INTO portal_config(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('schoolLinkToken:' + school, token)]);
             return Response.json({ url: new URL('/school-success?' + new URLSearchParams({ school, access: token, view: 'teacher' }), req.url).href }, { headers: { 'Cache-Control': 'no-store' } });
         }
         if (b.action === 'reportSettings') {

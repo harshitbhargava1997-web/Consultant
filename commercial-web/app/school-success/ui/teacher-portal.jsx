@@ -40,18 +40,18 @@ export default function TeacherPortal({ data, school, refresh }) {
         setResumeToken(token);
         setMode('evidence');
     } try {
-        const stored = JSON.parse(localStorage.getItem('teacher-lesson-links-v1') || '[]');
+        const stored = JSON.parse(localStorage.getItem('school-success:teacher-lesson-links-v1') || '[]');
         if (Array.isArray(stored))
-            setSavedLinks(stored.filter(l => typeof l?.url === 'string' && l.url.startsWith(location.origin + '/?') && typeof l.submissionId === 'string'));
+            setSavedLinks(stored.filter(l => typeof l?.url === 'string' && l.url.startsWith(location.origin + '/school-success?') && typeof l.submissionId === 'string'));
     }
     catch { } }, []);
     useEffect(() => { const open = () => { const url = new URL(location.href); url.searchParams.delete('resume'); window.history.replaceState(null, '', url.href); setMode('preparation'); setResumeToken(''); requestAnimationFrame(() => document.getElementById('teacher-submission-form')?.scrollIntoView({ behavior: 'smooth' })); }; window.addEventListener('teacher-new-preparation', open); return () => window.removeEventListener('teacher-new-preparation', open); }, []);
-    useEffect(() => { const pending = sessionStorage.getItem('teacher-pending-submission'); if (pending && /^[a-f0-9-]{36}$/i.test(pending))
+    useEffect(() => { const pending = sessionStorage.getItem('school-success:teacher-pending-submission'); if (pending && /^[a-f0-9-]{36}$/i.test(pending))
         setId(pending); }, []);
     const teachers = [...new Set(roster.filter(r => r.school === selectedSchool).map(r => r.name))].sort();
     const teacherValue = admin ? teacher : schoolLink ? data.actor.name : data.actor.name;
     const contextHeaders = () => { const access = new URLSearchParams(location.search).get('access'); return access ? { 'X-School-Link': access, 'X-Teacher': encodeURIComponent(teacherValue) } : {}; };
-    async function selectTeacher(name, nextMode = 'preparation') { const url = new URL(location.href); url.searchParams.set('teacher', name); url.searchParams.delete('resume'); historyReplace(url); setMode(nextMode); setResumeToken(''); setPeriods([newPeriod()]); setId(crypto.randomUUID()); setReceipt(null); sessionStorage.removeItem('teacher-pending-submission'); try {
+    async function selectTeacher(name, nextMode = 'preparation') { const url = new URL(location.href); url.searchParams.set('teacher', name); url.searchParams.delete('resume'); historyReplace(url); setMode(nextMode); setResumeToken(''); setPeriods([newPeriod()]); setId(crypto.randomUUID()); setReceipt(null); sessionStorage.removeItem('school-success:teacher-pending-submission'); try {
         await refresh();
     }
     catch (e) {
@@ -64,7 +64,7 @@ export default function TeacherPortal({ data, school, refresh }) {
     async function request(body) { const r = await successFetch('/api/school-success/evidence', { method: 'POST', headers: { 'Content-Type': 'application/json', ...contextHeaders() }, body: JSON.stringify(body) }); const result = await r.json(); if (!r.ok)
         throw Error(result.error || 'Could not save the submission'); return result; }
     async function submit(e) { e.preventDefault(); if (busy)
-        return; setError(''); setReceipt(null); setBusy('Checking your submission'); sessionStorage.setItem('teacher-pending-submission', submissionId); try {
+        return; setError(''); setReceipt(null); setBusy('Checking your submission'); sessionStorage.setItem('school-success:teacher-pending-submission', submissionId); try {
         let submission = submissionSchema.parse({ id: submissionId, school: selectedSchool, teacher: teacherValue, date, periods: periods.map(({ category, files, ...p }) => p), files: periods.flatMap(p => p.files.map(f => ({ id: f.id, periodId: p.id, category: f.category, name: f.file.name, size: f.file.size }))) });
         setBusy('Creating lesson preparation PDFs');
         const { preparationPdf } = await import('@/lib/school-success/preparation-pdf');
@@ -103,12 +103,12 @@ export default function TeacherPortal({ data, school, refresh }) {
         const links = [saved, ...savedLinks.filter(l => l.submissionId !== result.submissionId)].slice(0, 30);
         setSavedLinks(links);
         try {
-            localStorage.setItem('teacher-lesson-links-v1', JSON.stringify(links));
+            localStorage.setItem('school-success:teacher-lesson-links-v1', JSON.stringify(links));
         }
         catch { }
         setPeriods([newPeriod()]);
         setId(crypto.randomUUID());
-        sessionStorage.removeItem('teacher-pending-submission');
+        sessionStorage.removeItem('school-success:teacher-pending-submission');
         try {
             await refresh();
         }

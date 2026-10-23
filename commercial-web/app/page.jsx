@@ -51,6 +51,7 @@ export default function Home(){
  const [schoolId,setSchoolId]=useState(""),[page,setPage]=useState("overview");
  const [assessmentView,setAssessmentView]=useState("structure");
  const [roleGrants,setRoleGrants]=useState([]);
+ const [successAccess,setSuccessAccess]=useState(false);
  const [isMobile,setIsMobile]=useState(false);
  const [mobileNavOpen,setMobileNavOpen]=useState(false);
  const [desktopNavCollapsed,setDesktopNavCollapsed]=useState(false);
@@ -104,6 +105,11 @@ export default function Home(){
   const {data:{subscription}}=client.auth.onAuthStateChange((_event,s)=>{if(mounted)setSession(s||null);});
   return ()=>{mounted=false;subscription.unsubscribe();};
  },[client]);
+ useEffect(()=>{
+  let alive=true;setSuccessAccess(false);
+  if(session?.access_token)fetch('/api/school-success/access',{headers:{Authorization:'Bearer '+session.access_token},cache:'no-store'}).then(r=>r.json()).then(d=>{if(alive)setSuccessAccess(d.allowed===true);}).catch(()=>{});
+  return()=>{alive=false;};
+ },[session?.access_token]);
  useEffect(()=>{
   if(!session||!client){setIdentity({admin:false,isConsultant:false,consultantSchools:[],memberships:[],schools:[]});return;}
   let alive=true;
@@ -342,7 +348,7 @@ export default function Home(){
   reports:"reports.view",implementation:"implementation.view",observations:"observations.view"
  };
  const availableNav=navigation.filter(n=>{
-  if(n.id==="school-success")return identity.admin;
+  if(n.id==="school-success")return identity.admin||successAccess;
   if(n.id==="implementation-history")return !!schoolId&&(can("implementation.view")||can("implementation.review"));
   if(n.id==="permissions")return identity.admin;
   if(n.id==="training")return identity.admin||!!schoolId&&
@@ -434,7 +440,7 @@ export default function Home(){
   (reportsTab==="teacher"||reportsTab==="school")&&
   <TeacherSchoolReports client={client} session={session} schoolId={schoolId}
    mode={reportsTab} competencies={competencies}/>}
- {page==="school-success"&&identity.admin&&<Box title="School Success · Separate programme"><p>School Success supports its own curriculum programme. Its copied schools, CRM and reports are kept separately from Vision literacy.</p><a className="btn" href="/school-success">Open School Success folder <ArrowRight size={16}/></a><a className="btn" href="/school-success/migration">Imported database & backup</a><a className="btn" href="https://school-success-portal.harshitbhargava1997.chatgpt.site" target="_blank" rel="noopener noreferrer">Original School Success portal</a></Box>}
+ {page==="school-success"&&(identity.admin||successAccess)&&<Box title="School Success · Independent module"><p>Open the complete School Success workspace: CRM, teacher preparation and evidence, usage reports, imports and archives. It uses its own school and teacher directory, independently of Vision literacy.</p><a className="btn" href="/school-success">Open School Success <ArrowRight size={16}/></a>{identity.admin&&<><a className="btn" href="/school-success/access">School Success access</a><a className="btn" href="/school-success/migration">Database & backup</a></>}<a className="btn" href="https://school-success-portal.harshitbhargava1997.chatgpt.site" target="_blank" rel="noopener noreferrer">Original School Success portal</a></Box>}
  {page==="implementation-history"&&schoolId&&(can("implementation.view")||can("implementation.review"))&&<ImplementationWorkspace client={client} session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"} competencies={competencies} isAdmin={identity.admin} grants={roleGrants} readOnly/>}
  {page==="implementation"&&schoolId&&
    (can("implementation.view")||can("implementation.submit")||can("implementation.review"))&&
