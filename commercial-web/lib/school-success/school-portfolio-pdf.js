@@ -1,12 +1,12 @@
 import {jsPDF} from 'jspdf';
 import {autoTable} from 'jspdf-autotable';
 import {regularFont,boldFont} from './report-fonts.js';
-import {portfolioModules,portfolioCategories,fileCategory,portfolioTotals} from './school-portfolio.js';
+import {portfolioModules,portfolioCategories,fileCategory,portfolioTotals,selectedPortfolioCounts,portfolioComparison} from './school-portfolio.js';
 import {formatReportDuration as duration} from './report-units.js';
 import {chronologicalRows} from '../report-sequence.js';
 const labels=['Lesson preparation','Book usage','Additional Materials','E-books'];
 const sessions=count=>`${count} session${count===1?'':'s'}`;
-export function createSchoolPortfolioPdf({schools,from,to,settings,detail=false,includeEvidence=false,includeObservations=false,rawObservations=[]}){
+export function createSchoolPortfolioPdf({schools,from,to,settings,detail=false,includeEvidence=false,includeObservations=false,rawObservations=[],options={},comparison}){
  if(!schools.length)throw Error('Select at least one school.');
  const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4',compress:true});
  doc.addFileToVFS('Report-Regular.ttf',regularFont);doc.addFont('Report-Regular.ttf','Report','normal');
@@ -34,19 +34,33 @@ export function createSchoolPortfolioPdf({schools,from,to,settings,detail=false,
  text('School usage and participation',13,true);
  table(['School','Teachers using / total',...modules.map(i=>labels[i]),...(settings.quantitative?['Teachers meeting usage targets']:[])],
   schools.map(s=>[s.name,`${s.withUsage} / ${s.teachers}`,...modules.map(i=>`${duration(s.metrics[i].actual)}\n${sessions(s.metrics[i].sessions)}`),...(settings.quantitative?[s.targetTeachers?`${s.targetsMet} / ${s.targetTeachers}`:'Not applicable']:[])]));
- if(settings.sections.evidence){
+ const counts=selectedPortfolioCounts(options);
+ if(settings.sections.evidence&&counts.length){
   text('Preparation and evidence counts',13,true);
-  table(['School','Prepared lessons','Classroom lessons with evidence','Unique files','Teachers with uploads','Lessons awaiting review'],schools.map(s=>[s.name,s.preparations,s.classroomLessons,s.files,s.teachersWithFiles,s.pendingReview]));
+  table(['School',...counts.map(([,label])=>label)],schools.map(s=>[s.name,...counts.map(([key])=>s[key])]));
  }
  if(settings.quantitative){
   text('School usage targets',13,true);
   table(['School',...modules.map(i=>labels[i]+' target')],schools.map(s=>[s.name,...modules.map(i=>s.metrics[i].target?duration(s.metrics[i].target):'Off')]));
  }
+ if(comparison){
+  if(!comparison.from||!comparison.to||comparison.from>comparison.to||comparison.to>=from)throw Error('Comparison periods must be valid and must not overlap.');
+  const rows=portfolioComparison(schools,comparison.schools);
+  text('Period comparison',16,true);
+  text('Totals reflect each full selected period. Compare working days when period lengths differ.',9);
+  table(['School',`Previous period\n${comparison.from} to ${comparison.to}`,`Current period\n${from} to ${to}`],rows.map(({current:s,previous:p})=>[s.name,`${p?.days??0} working days\n${p?.withUsage??0} / ${p?.teachers??0} teachers with usage`,`${s.days} working days\n${s.withUsage} / ${s.teachers} teachers with usage`]));
+  for(const i of modules){
+   text(labels[i]+' comparison',13,true);
+   table(['School',`Previous period\n${comparison.from} to ${comparison.to}`,`Current period\n${from} to ${to}`,'Change in time'],rows.map(({current:s,previous:p})=>{const before=p?.metrics[i],delta=s.metrics[i].actual-(before?.actual||0);return [s.name,`${duration(before?.actual||0)}\n${sessions(before?.sessions||0)}`,`${duration(s.metrics[i].actual)}\n${sessions(s.metrics[i].sessions)}`,(delta>0?'+':'')+duration(delta)];}));
+  }
+  if(settings.sections.evidence)for(const [key,label] of counts){text(label+' comparison',13,true);table(['School',`Previous period\n${comparison.from} to ${comparison.to}`,`Current period\n${from} to ${to}`,'Change'],rows.map(({current:s,previous:p})=>[s.name,p?.[key]||0,s[key],s[key]-(p?.[key]||0)]));}
+ }
  if(schoolDetail){
   const school=schools[0];text('Teacher breakdown',13,true);
-  table(['Teacher',...modules.map(i=>labels[i]),...(settings.sections.evidence?['Unique uploaded files']:[])],school.profiles.map(p=>[p.name,...modules.map(i=>`${duration(p.metrics[i].actual)}\n${sessions(p.metrics[i].logs.length)}`),...(settings.sections.evidence?[new Set(school.submissions.filter(r=>r.teacher===p.name).flatMap(r=>(r.files||[]).map(f=>f.url).filter(Boolean))).size]:[])]));
+  table(['Teacher',...modules.map(i=>labels[i]),...(settings.sections.evidence&&options.counts?.files!==false?['Unique uploaded files']:[])],school.profiles.map(p=>[p.name,...modules.map(i=>`${duration(p.metrics[i].actual)}\n${sessions(p.metrics[i].logs.length)}`),...(settings.sections.evidence&&options.counts?.files!==false?[new Set(school.submissions.filter(r=>r.teacher===p.name).flatMap(r=>(r.files||[]).map(f=>f.url).filter(Boolean))).size]:[])]));
   if(includeEvidence&&settings.sections.evidence){
    for(const category of ['preparation','audio','activity','writing','phonics','portfolio','events','other']){
+    if(options.categories?.[category]===false)continue;
     const seen=new Set(),rows=[];
     for(const row of chronologicalRows(school.submissions))for(const file of row.files||[]){
      const key=JSON.stringify([row.teacher,file.url]);

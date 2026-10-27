@@ -3,7 +3,18 @@ import {reportDirectorySource,isArchived} from './directory.js';
 import {chronologicalRows} from '../report-sequence.js';
 import {formatReportDuration} from './report-units.js';
 
-export const portfolioModules=settings=>[0,1,3,2].filter(i=>includedMetric(i,settings));
+export const portfolioModules=settings=>[0,1,3,2].filter(i=>includedMetric(i,settings)&&(i!==1||settings.sections.book!==false));
+
+// Export choices are local to School 360; never write them into Teacher 360 defaults.
+export const portfolioCountColumns=[['preparations','Prepared lessons'],['classroomLessons','Classroom lessons with evidence'],['files','Unique files'],['teachersWithFiles','Teachers with uploads'],['pendingReview','Lessons awaiting review']];
+export const selectedPortfolioCounts=(options={})=>portfolioCountColumns.filter(([key])=>options.counts?.[key]!==false);
+export function portfolioPdfSettings(settings,options={}){
+ return {...settings,quantitative:options.targets??settings.quantitative,sections:{...settings.sections,...options.modules,evidence:options.evidence??settings.sections.evidence}};
+}
+export function portfolioComparison(current,previous){
+ const before=new Map(previous.map(s=>[s.name,s]));
+ return current.map(s=>({current:s,previous:before.get(s.name)||null}));
+}
 export const portfolioSettings=data=>{const parsed=reportSettingsSchema.safeParse(data.reportSettings);return parsed.success?parsed.data:structuredClone(defaultReportSettings);};
 export const fileCategory=file=>{
  const column=file.column||String(file.key||'').split(':')[0];
@@ -41,13 +52,14 @@ function aggregate(name,profiles,submissions,from,to,settings,calendars){
  });
  const withUsage=profiles.filter(p=>p.metrics.some(m=>m.actual>0)).length,stats=submissionStats(submissions);
  const lastDate=[...profiles.flatMap(p=>p.usage.map(r=>r.date)),...submissions.map(r=>r.date)].sort().at(-1)||'';
- const applicable=profiles.filter(p=>p.metrics.some((m,i)=>includedMetric(i,settings)&&m.target>0));
- const targetsMet=applicable.filter(p=>p.metrics.every((m,i)=>!includedMetric(i,settings)||!m.target||m.actual>=m.target)).length;
+ const modules=portfolioModules(settings);
+ const applicable=profiles.filter(p=>p.metrics.some((m,i)=>modules.includes(i)&&m.target>0));
+ const targetsMet=applicable.filter(p=>p.metrics.every((m,i)=>!modules.includes(i)||!m.target||m.actual>=m.target)).length;
  return {name,profiles,submissions,metrics,teachers:profiles.length,withUsage,participation:profiles.length?withUsage/profiles.length*100:null,
   ...stats,lastDate,targetsMet,targetTeachers:applicable.length,days:profiles[0]?.days??eligibleDays(from,to,[...settings.holidays,...(settings.useSchoolCalendars?calendars[name]||[]:[])],settings.excludeSundays)};
 }
-export function buildSchoolPortfolio(data,from,to,{includeArchived=false}={}){
- const settings=portfolioSettings(data),archives=data.directory?.archives||[],source=reportDirectorySource(data,archives,includeArchived);
+export function buildSchoolPortfolio(data,from,to,{includeArchived=false,settings:override}={}){
+ const settings=override||portfolioSettings(data),archives=data.directory?.archives||[],source=reportDirectorySource(data,archives,includeArchived);
  const profiles=buildProfiles(source.entries,source.roster,from,to,settings,data.calendars||{});
  const submissions=chronologicalRows(source.entries.filter(r=>r.kind==='submission'&&r.date>=from&&r.date<=to));
  const names=[...new Set([...profiles.map(p=>p.school),...source.entries.filter(r=>r.kind==='school').map(r=>r.school||r.name)])]

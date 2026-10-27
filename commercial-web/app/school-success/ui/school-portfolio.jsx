@@ -1,5 +1,7 @@
 'use client';
 import {useEffect,useMemo,useState} from 'react';
+import {successFetch} from '@/lib/school-success/client';
+import {portfolioCountColumns,portfolioPdfSettings,selectedPortfolioCounts,portfolioComparison} from '@/lib/school-success/school-portfolio';
 import dynamic from 'next/dynamic';
 import {ArrowLeft,ArrowUpRight,Download,FileText,School,Users} from 'lucide-react';
 import {buildSchoolPortfolio,filterPortfolioSchools,filterSchoolEvidence,portfolioTotals,portfolioModules,portfolioExportRows,portfolioCategories,fileCategory,submissionStats} from '@/lib/school-success/school-portfolio';
@@ -15,11 +17,17 @@ function save(blob,name){const url=URL.createObjectURL(blob),a=document.createEl
 const safeMediaUrl=url=>typeof url==='string'&&(/^https?:\/\//i.test(url)||url.startsWith('/api/school-success/evidence?'))?url:'';
 export default function SchoolPortfolio({data,schoolFilter='',query='',from,to,setFrom,setTo,refresh,view,onViewChange,onReview}){
  const [busy,setBusy]=useState(''),[error,setError]=useState('');
+ const [previousData,setPreviousData]=useState(null);
  const model=useMemo(()=>buildSchoolPortfolio(data,from,to,{includeArchived:view.includeArchived}),[data,from,to,view.includeArchived]);
  const {schools,settings}=model,modules=portfolioModules(settings);
+ const options=view.pdfOptions||{},pdfSettings=portfolioPdfSettings(settings,options),pdfModules=portfolioModules(pdfSettings);
+ const comparisonReady=Boolean(view.compareEnabled&&previousData?.period?.from===view.previousFrom&&previousData?.period?.to===view.previousTo&&view.previousFrom<=view.previousTo&&view.previousTo<from);
+ const previousModel=useMemo(()=>comparisonReady?buildSchoolPortfolio({...previousData,directory:data.directory},view.previousFrom,view.previousTo,{includeArchived:view.includeArchived}):null,[comparisonReady,previousData,data.directory,view.previousFrom,view.previousTo,view.includeArchived]);
  const visible=filterPortfolioSchools(schools,{school:schoolFilter,query,status:view.status,sort:view.sort}),totals=portfolioTotals(visible);
  const selected=schools.find(s=>s.name===view.school),fresh=data.period?.from===from&&data.period?.to===to;
  const change=patch=>onViewChange(old=>({...old,...patch}));
+ const choose=(group,key,value)=>onViewChange(old=>({...old,pdfOptions:{...old.pdfOptions,[group]:{...old.pdfOptions?.[group],[key]:value}}}));
+ const chooseFlag=(key,value)=>onViewChange(old=>({...old,pdfOptions:{...old.pdfOptions,[key]:value}}));
  useEffect(()=>{const frame=requestAnimationFrame(()=>window.scrollTo({top:view.restoreScroll||0,behavior:'instant'}));return()=>cancelAnimationFrame(frame);},[view.level,view.school,view.restoreScroll]);
  async function run(label,fn){setBusy(label);setError('');try{await fn();}catch(e){setError(e.message||'Unable to complete this request.');}finally{setBusy('');}}
  function openSchool(name){change({...emptyFilters,level:'school',school:name,teacherKey:'',portfolioScroll:window.scrollY,restoreScroll:0});}
@@ -28,12 +36,15 @@ export default function SchoolPortfolio({data,schoolFilter='',query='',from,to,s
  function backSchool(){change({level:'school',teacherKey:'',restoreScroll:view.schoolScroll||0});}
  async function exportSummary(kind){
   if(!fresh)throw Error('Apply the selected period before downloading.');
+  if(view.compareEnabled&&!comparisonReady)throw Error('Load a valid comparison period before downloading.');
   const detail=view.level==='school',scope=detail&&selected?[selected]:visible;
   if(!scope.length)throw Error('No schools match these filters.');
   const name='School_360_'+safeName(detail?selected.name:'Portfolio')+'_'+from+'_'+to;
   if(kind==='csv'){save(new Blob([csv(portfolioExportRows(scope,settings))],{type:'text/csv;charset=utf-8'}),name+'.csv');return;}
   const {createSchoolPortfolioPdf}=await import('@/lib/school-success/school-portfolio-pdf');
-  const pdf=createSchoolPortfolioPdf({schools:scope,from,to,settings,detail,includeEvidence:detail&&Boolean(view.exportEvidence),includeObservations:detail&&Boolean(view.includeObservations),observations:model.profiles.flatMap(p=>p.observations),rawObservations:data.entries.filter(r=>r.kind==='observation')});
+  const exportModel=buildSchoolPortfolio(data,from,to,{includeArchived:view.includeArchived,settings:pdfSettings});
+  const pdfSchools=scope.map(s=>exportModel.schools.find(p=>p.name===s.name)).filter(Boolean);
+  const pdf=createSchoolPortfolioPdf({schools:pdfSchools,from,to,settings:pdfSettings,options,comparison:comparisonReady?{schools:previousModel.schools,from:view.previousFrom,to:view.previousTo}:undefined,detail,includeEvidence:detail&&Boolean(view.exportEvidence),includeObservations:detail&&Boolean(view.includeObservations),rawObservations:data.entries.filter(r=>r.kind==='observation')});
   save(pdf.output('blob'),name+'.pdf');
  }
  const breadcrumb=<nav className="school360-breadcrumb" aria-label="School 360 navigation"><button className="text-button" onClick={backPortfolio}>All schools</button>{view.level!=='portfolio'&&<><span>/</span><button className="text-button" onClick={backSchool}>{view.school}</button></>}{view.level==='teacher'&&<><span>/</span><span>Teacher 360°</span></>}</nav>;
@@ -46,8 +57,20 @@ export default function SchoolPortfolio({data,schoolFilter='',query='',from,to,s
    <label className="check-line"><input type="checkbox" checked={Boolean(view.includeArchived)} onChange={e=>change({includeArchived:e.target.checked})}/>Include archived schools and teachers</label>
    <p className="hint">Durations use hours and minutes. Targets follow the saved Teacher 360° benchmarks and each school’s working days.</p>
   </section>
+  <section className="card"><label className="check-line"><input type="checkbox" checked={Boolean(view.compareEnabled)} onChange={e=>change({compareEnabled:e.target.checked})}/><b>Compare two review periods</b></label>
+   {view.compareEnabled&&<><div className="report-filter-grid"><label className="field"><span>Previous period · from</span><input type="date" value={view.previousFrom||''} onChange={e=>change({previousFrom:e.target.value})}/></label><label className="field"><span>Previous period · to</span><input type="date" min={view.previousFrom} max={from} value={view.previousTo||''} onChange={e=>change({previousTo:e.target.value})}/></label><button className="button" disabled={!!busy||!view.previousFrom||!view.previousTo||view.previousFrom>view.previousTo||view.previousTo>=from} onClick={()=>run('Loading comparison period',async()=>{const response=await successFetch('/api/school-success/portal?'+new URLSearchParams({from:view.previousFrom,to:view.previousTo}));const result=await response.json();if(!response.ok)throw Error(result.error||'Unable to load comparison.');setPreviousData(result);})}>Load comparison</button></div><p className="hint">Periods must not overlap. Totals use each full period; working days are shown alongside them. Comparison is included in the PDF.</p>{!comparisonReady&&<p role="status">Load the selected previous period to see the comparison.</p>}</>}
+  </section>
+  <details className="card"><summary><b>PDF modules and inclusions</b></summary><p className="hint">Choose what to share. Unchecked sections disappear from the PDF. These choices do not change saved Teacher 360° defaults or stored records. CSV retains the standard summary.</p>
+   <div className="benchmark-grid"><div><h3>Usage modules</h3>{[['lessonPlan','Lesson preparation'],['book','Book usage'],['ebooks','E-book usage'],['additional','Additional Materials']].map(([key,label])=><label className="check-line" key={key}><input type="checkbox" checked={pdfSettings.sections[key]!==false} onChange={e=>choose('modules',key,e.target.checked)}/>{label}</label>)}<label className="check-line"><input type="checkbox" checked={pdfSettings.quantitative} onChange={e=>chooseFlag('targets',e.target.checked)}/>Usage targets</label></div>
+   <div><h3>Preparation and evidence counts</h3><label className="check-line"><input type="checkbox" checked={pdfSettings.sections.evidence} onChange={e=>chooseFlag('evidence',e.target.checked)}/>Include preparation and evidence sections</label>{portfolioCountColumns.map(([key,label])=><label className="check-line" key={key}><input type="checkbox" disabled={!pdfSettings.sections.evidence} checked={options.counts?.[key]!==false} onChange={e=>choose('counts',key,e.target.checked)}/>{label}</label>)}</div></div>
+   {view.level==='school'&&<><h3>School PDF file links</h3><label className="check-line"><input type="checkbox" disabled={!pdfSettings.sections.evidence} checked={Boolean(view.exportEvidence)} onChange={e=>change({exportEvidence:e.target.checked})}/>Include selected teacher file categories</label>{portfolioCategories.filter(([key])=>key!=='all').map(([key,label])=><label className="check-line" key={key}><input type="checkbox" disabled={!pdfSettings.sections.evidence||!view.exportEvidence} checked={options.categories?.[key]!==false} onChange={e=>choose('categories',key,e.target.checked)}/>{label}</label>)}<label className="check-line"><input type="checkbox" checked={Boolean(view.includeObservations)} onChange={e=>change({includeObservations:e.target.checked})}/>Include consultant classroom observations</label></>}
+   <p className="hint">The complete portfolio PDF remains quantitative. Open a school to include its selected preparation PDFs, audio and evidence links.</p>
+  </details>
   {error&&<p className="alert error" role="alert">{error}</p>}{busy&&<p className="alert success" role="status">{busy}…</p>}
   {!fresh?<p className="alert error" role="status">Apply the selected period before reviewing or exporting School 360°. Loaded period: {data.period?.from} to {data.period?.to}.</p>:<>
+   {comparisonReady&&<section className="card"><h3>Period comparison</h3>{pdfModules.map(i=><div key={i}><h4>{labels[i]}</h4><div className="table-scroll"><table><thead><tr><th>School</th><th>Previous period<small>{view.previousFrom} to {view.previousTo}</small></th><th>Current period<small>{from} to {to}</small></th><th>Change in time</th></tr></thead><tbody>{portfolioComparison(view.level==='school'?(selected?[selected]:[]):visible,previousModel.schools).map(({current:s,previous:p})=>{const metric=p?.metrics[i],delta=s.metrics[i].actual-(metric?.actual||0);return <tr key={s.name}><td>{s.name}</td><td>{duration(metric?.actual||0)}<small>{metric?.sessions||0} sessions · {p?.days??0} working days</small></td><td>{duration(s.metrics[i].actual)}<small>{s.metrics[i].sessions} sessions · {s.days} working days</small></td><td>{delta>0?'+':''}{duration(delta)}</td></tr>;})}</tbody></table></div></div>)}
+   {pdfSettings.sections.evidence&&selectedPortfolioCounts(options).map(([key,label])=><div key={key}><h4>{label}</h4><div className="table-scroll"><table><thead><tr><th>School</th><th>Previous period<small>{view.previousFrom} to {view.previousTo}</small></th><th>Current period<small>{from} to {to}</small></th><th>Change</th></tr></thead><tbody>{portfolioComparison(view.level==='school'?(selected?[selected]:[]):visible,previousModel.schools).map(({current:s,previous:p})=><tr key={s.name}><td>{s.name}</td><td>{p?.[key]||0}</td><td>{s[key]}</td><td>{s[key]-(p?.[key]||0)}</td></tr>)}</tbody></table></div></div>)}
+   </section>}
    <div className="actions school360-downloads"><button className="button" disabled={!!busy||!(view.level==='portfolio'?visible.length:selected)} onClick={()=>run('Preparing summary PDF',()=>exportSummary('pdf'))}><Download size={16}/>Download {view.level==='portfolio'?'portfolio':'school'} PDF</button><button className="button" disabled={!!busy||!(view.level==='portfolio'?visible.length:selected)} onClick={()=>run('Preparing summary table',()=>exportSummary('csv'))}><Download size={16}/>Download table · CSV</button></div>
    {view.level==='portfolio'?<>
     <div className="report-summary-cards"><div><span>Schools in view</span><strong>{totals.schools}</strong></div><div><span>Teacher profiles</span><strong>{totals.teachers}</strong><small>Teachers counted within each school</small></div><div><span>Teachers with recorded usage</span><strong>{totals.withUsage} / {totals.teachers}</strong></div>{settings.sections.evidence&&<div><span>Unique uploaded files</span><strong>{totals.files}</strong></div>}</div>
@@ -68,7 +91,7 @@ export default function SchoolPortfolio({data,schoolFilter='',query='',from,to,s
       {evidence.length>20&&<div className="actions"><button className="button" disabled={evidencePage===1} onClick={()=>change({evidencePage:evidencePage-1})}>Previous</button><span>Page {evidencePage} of {Math.ceil(evidence.length/20)}</span><button className="button" disabled={evidencePage*20>=evidence.length} onClick={()=>change({evidencePage:evidencePage+1})}>Next</button></div>}
      </>}
     </section>
-    <section className="card"><h3>School report inclusions</h3>{settings.sections.evidence&&<label className="check-line"><input type="checkbox" checked={Boolean(view.exportEvidence)} onChange={e=>change({exportEvidence:e.target.checked})}/>Include teacher evidence links in the school PDF</label>}<label className="check-line"><input type="checkbox" checked={Boolean(view.includeObservations)} onChange={e=>change({includeObservations:e.target.checked})}/>Include consultant classroom observations</label><p className="hint">The portfolio PDF contains quantitative summaries only. School PDF evidence links follow preparation, audio, activity, writing and phonics order.</p></section>
+
     {view.includeObservations&&<section className="card"><h3>Consultant classroom observations</h3>{data.entries.filter(r=>r.kind==='observation'&&r.school===selected.name&&r.date>=from&&r.date<=to).map(r=><article className="conversation" key={r.id}><b>{r.date} · {r.teacher} · {r.subject}</b><p>{r.topic}</p><p><b>Strengths: </b>{r.strengths}</p><p><b>Areas for growth: </b>{r.improvements}</p><p><b>Agreed actions: </b>{r.actions}</p></article>)}{!data.entries.some(r=>r.kind==='observation'&&r.school===selected.name&&r.date>=from&&r.date<=to)&&<p>No consultant observations recorded in this period.</p>}</section>}
    </>}
   </>}

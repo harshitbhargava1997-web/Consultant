@@ -23,3 +23,8 @@ test('Teacher 360 opens the exact selected school-teacher profile and preserves 
  const html=renderToStaticMarkup(React.createElement(Teacher,props));assert.match(html,/<h2>Bina<\/h2>/);assert.ok(!html.includes('<h2>Asha</h2>'));
  const missing=renderToStaticMarkup(React.createElement(Teacher,{...props,initialTeacherKey:JSON.stringify(['Beta School','Asha'])}));assert.ok(!missing.includes('teacher-report'));
 });
+test('School 360 exposes independent PDF controls and reload guidance for stale comparison ranges',()=>{
+ const html=render({compareEnabled:true,previousFrom:'2026-10-01',previousTo:'2026-10-10'});
+ for(const label of ['PDF modules and inclusions','Compare two review periods','Load comparison','Load the selected previous period','Include preparation and evidence sections'])assert.ok(html.includes(label),label);
+ const school=render({level:'school',school:'Alpha School'});for(const label of ['School PDF file links','Audio recordings','Phonics evidence','Writing samples'])assert.ok(school.includes(label),label);
+});

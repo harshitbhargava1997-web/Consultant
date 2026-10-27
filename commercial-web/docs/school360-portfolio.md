@@ -30,3 +30,29 @@ Portfolio PDF/CSV exports contain quantitative summaries only. School PDFs add t
 - Production Next.js build passed; the final release build is also verified by Vercel.
 - Sample PDFs were rendered and visually inspected, including 28 long school names and ordered school evidence. Tables were split for readable durations; headings stay with their tables.
 - Browser interaction and mobile-device testing remain unverified: the available Playwright package had no browser binary, and its browser download returned an invalid archive. Temporary local QA routes were removed before release. No authenticated session or real school records were modified for testing.
+# PDF selections and period comparison
+
+School 360 now has its own PDF modules and inclusions panel. Usage modules
+(including Book), targets, individual preparation/evidence count columns, and
+school-level evidence file categories can be enabled independently. Consultant
+observations remain a separate opt-in. These choices live in the School 360 view
+and do not overwrite Teacher 360 defaults or delete source records. CSV remains
+the existing standard quantitative summary. File appendices remain school-only;
+the complete portfolio PDF is quantitative.
+
+Enable Compare two review periods, choose a previous non-overlapping date range,
+and load it through the authenticated portal endpoint. Changes to comparison dates
+invalidate the loaded comparison until reloaded; exports reject stale comparisons.
+The current school filters determine scope, and each school's previous records
+are matched within that scope. Missing previous records display zero recorded
+activity. Both screen and PDF show usage time, sessions, evidence counts and
+changes, with period dates under their column titles. Working-day counts accompany
+usage totals because different-length periods must not imply equal exposure.
+
+Verification: School 360 PDF tests extract generated PDFs and verify per-module,
+per-count and per-file-category exclusions, preserved defaults, missing previous
+activity, school isolation and rejection of overlapping periods. UI render tests
+cover controls and reload guidance. Synthetic PDF pages were visually reviewed.
+Authenticated browser interactions and real iPhone/Android checks require a signed-in
+session and have not been verified by these automated tests.
+
