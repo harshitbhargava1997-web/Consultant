@@ -12,3 +12,11 @@ test('both teacher portals use a period-scoped combined recording control withou
 test('stored file links separate preparation PDFs and audio without a grade/subject hierarchy',()=>{
  const Links=component('app/StoredFileLinks.jsx');const html=renderToStaticMarkup(React.createElement(Links,{files:[{id:'voice',category:'voice',url:'https://example.com/audio',name:'Reflection.wav'},{id:'plan',category:'lesson_plan',url:'https://example.com/plan',name:'Preparation.pdf'},{id:'activity',category:'activity',url:'https://example.com/activity',name:'Classroom.png'}]}));assert(html.indexOf('Lesson preparation PDFs')<html.indexOf('Audio recordings'));for(const name of ['plan','audio','activity'])assert(html.includes('example.com/'+name));assert.doesNotMatch(html,/Grade:|Subject:/);
 });
+test('topic dictation and closure reflection expose concise typed and voice inputs',()=>{
+ const Topic=component('app/TopicDictation.jsx'),Closure=component('app/AfterClassReflection.jsx');
+ const props={onChange(){},onRecording(){},onFile(){},value:''};
+ const topic=renderToStaticMarkup(React.createElement(Topic,props)),closure=renderToStaticMarkup(React.createElement(Closure,props));
+ assert.match(topic,/Dictate topic \/ lesson plan number/);assert.match(topic,/Hindi/);
+ for(const text of ['After-class reflection','What did students learn or achieve?','What went well in the classroom?','Who needs more support','dated reflection PDF'])assert(closure.includes(text),text);
+ assert.doesNotMatch(closure,/optional|Learning objective/);
+});

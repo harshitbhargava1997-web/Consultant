@@ -2,7 +2,7 @@ import {z} from 'zod';
 
 export const GRADES=['Nursery','LKG','UKG','Grade 1','Grade 2','Grade 3','Grade 4','Grade 5'];
 export const SUBJECTS=['Phonics / Literacy','Reading','Writing','English','Hindi'];
-export const CATEGORIES={lesson_plan:'Lesson preparation PDF',voice:'Voice reflection',activity:'Classroom activity',writing:'Student written work',phonics:'Phonics / literacy',portfolio:'Student portfolio',event_pictures:'Event pictures'};
+export const CATEGORIES={closure:'After-class reflection',lesson_plan:'Lesson preparation PDF',voice:'Voice reflection',activity:'Classroom activity',writing:'Student written work',phonics:'Phonics / literacy',portfolio:'Student portfolio',event_pictures:'Event pictures'};
 export const BUCKET='vision-implementation';
 export const today=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
 export const validDay=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s=>Number.isFinite(Date.parse(s))&&new Date(s).toISOString().slice(0,10)===s,'Choose a valid lesson date');

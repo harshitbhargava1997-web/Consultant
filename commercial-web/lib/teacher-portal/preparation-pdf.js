@@ -43,9 +43,10 @@ export async function preparationPdf(input, makeCanvas = () => document.createEl
             line(row, bold, size);
     } y += 14; }
     begin();
-    paragraph('LESSON PREPARATION', true, 38);
+    paragraph(input.heading || 'LESSON PREPARATION', true, 38);
     paragraph(input.school, true, 30);
     paragraph(input.teacher + ' | Planned lesson: ' + input.date);
+    if(input.conductedOn) paragraph('Taught on: ' + input.conductedOn);
     paragraph([input.grade, input.section, input.subject].filter(Boolean).join(' / '), true);
     paragraph(input.topic, true, 30);
     if (input.competencies?.length) {
@@ -66,7 +67,7 @@ export async function preparationPdf(input, makeCanvas = () => document.createEl
         paragraph('Tap a recording link to listen. An internet connection is required.', false, 23);
     }
     finish();
-    pdf.setProperties({ title: input.topic + ' - Lesson preparation', author: input.teacher });
+    pdf.setProperties({ title: input.topic + ' - ' + (input.heading || 'Lesson preparation'), author: input.teacher });
     return pdf.output('arraybuffer');
 }
 

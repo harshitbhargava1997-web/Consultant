@@ -59,7 +59,7 @@ export function createSchoolPortfolioPdf({schools,from,to,settings,detail=false,
   const school=schools[0];text('Teacher breakdown',13,true);
   table(['Teacher',...modules.map(i=>labels[i]),...(settings.sections.evidence&&options.counts?.files!==false?['Unique uploaded files']:[])],school.profiles.map(p=>[p.name,...modules.map(i=>`${duration(p.metrics[i].actual)}\n${sessions(p.metrics[i].logs.length)}`),...(settings.sections.evidence&&options.counts?.files!==false?[new Set(school.submissions.filter(r=>r.teacher===p.name).flatMap(r=>(r.files||[]).map(f=>f.url).filter(Boolean))).size]:[])]));
   if(includeEvidence&&settings.sections.evidence){
-   for(const category of ['preparation','audio','activity','writing','phonics','portfolio','events','other']){
+   for(const category of ['preparation','audio','closure','activity','writing','phonics','portfolio','events','other']){
     if(options.categories?.[category]===false)continue;
     const seen=new Set(),rows=[];
     for(const row of chronologicalRows(school.submissions))for(const file of row.files||[]){

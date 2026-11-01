@@ -1,3 +1,4 @@
+export const isClosureFile=f=>f.category==='closure'||/\/closure\//.test(f.url||'');
 export function chronologicalRows(rows=[]){
  return rows.map((row,index)=>({row,index})).sort((a,b)=>{
   const day=r=>String(r.date||r.implementation_date||r.planned_on||'');
@@ -8,10 +9,11 @@ export function chronologicalRows(rows=[]){
 }
 const column=f=>f.column||String(f.key||'').split(':')[0];
 export function splitStoredFiles(files=[]){return [
+ {label:'After-class reflections',files:chronologicalRows(files.filter(isClosureFile))},
  {label:'Lesson preparation PDFs',files:chronologicalRows(files.filter(f=>f.category==='lesson_plan'||column(f)==='Lesson_Plan_Picture'))},
  {label:'Audio recordings',files:chronologicalRows(files.filter(f=>f.category==='voice'||column(f)==='Voice_Note_Link'))},
- {label:'',files:chronologicalRows(files.filter(f=>!['lesson_plan','voice'].includes(f.category)&&!['Lesson_Plan_Picture','Voice_Note_Link'].includes(column(f))))}
+ {label:'',files:chronologicalRows(files.filter(f=>!isClosureFile(f)&&!['lesson_plan','voice'].includes(f.category)&&!['Lesson_Plan_Picture','Voice_Note_Link'].includes(column(f))))}
  ].filter(g=>g.files.length);}
 export function reportEvidenceGroups(profile){
- return [...profile.evidence.flatMap((e,i)=>i===2?splitStoredFiles(e.files).map(g=>({label:g.label||e.label,files:g.files})):[{label:e.label,files:chronologicalRows(e.files)}]),{label:'Event pictures',files:chronologicalRows(profile.events||[])}];
+ return [...profile.evidence.flatMap((e,i)=>i===2?splitStoredFiles(e.files).map(g=>({label:g.label||e.label,files:g.files})):[{label:e.label,files:chronologicalRows(e.files)}]),{label:'After-class reflections',files:chronologicalRows(profile.closures||[])},{label:'Event pictures',files:chronologicalRows(profile.events||[])}];
 }
