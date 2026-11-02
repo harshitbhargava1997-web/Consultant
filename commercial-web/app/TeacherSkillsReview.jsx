@@ -4,6 +4,7 @@ import {ArrowRight,ClipboardCheck,GraduationCap} from "lucide-react";
 import {ASSESSMENT_MODES,LEVELS,RATINGS,RATING_LABELS} from "../lib/supabase";
 import PhonicsSoundPicker,{PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload} from "./PhonicsSoundPicker";
 import TeacherReviewHistory from "./TeacherReviewHistory";
+import PatternGrid from './PatternGrid';
 import DolchGrid from './DolchGrid';
 import NurseryLetterGrid from "./NurseryLetterGrid";
 import LkgBlendingGrid from "./LkgBlendingGrid";
@@ -138,7 +139,7 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
     {skills.map(c=><div key={c.id} className="teacher-phonics-skill">
      <div className="skill"><div><small>{c.grade} · {c.code}</small><strong>{c.title}</strong>
       {c.description&&<p>{c.description}</p>}</div>
-      </div>{(byCompetency[c.id]||[]).some(w=>w.family==="sight-word")?<DolchGrid key={teacherId+c.id+assessmentMode} items={byCompetency[c.id]} value={soundRatings[c.id]} history={teacherSoundHistory} competencyId={c.id} mode={assessmentMode} disabled={busy} teacher={true} onChange={(next,overall)=>{setSoundRatings(v=>({...v,[c.id]:next}));setRatings(v=>({...v,[c.id]:overall}));}}/>:<><select aria-label={"Overall teacher rating for "+c.title} value={ratings[c.id]||"Not Assessed"}
+      </div>{(byCompetency[c.id]||[]).some(w=>w.family==="sight-word")?<DolchGrid key={teacherId+c.id+assessmentMode} items={byCompetency[c.id]} value={soundRatings[c.id]} history={teacherSoundHistory} competencyId={c.id} mode={assessmentMode} disabled={busy} teacher={true} onChange={(next,overall)=>{setSoundRatings(v=>({...v,[c.id]:next}));setRatings(v=>({...v,[c.id]:overall}));}}/>:(["UKG001","UKG002","UKG008"].includes(c.code)&&byCompetency[c.id]?.length)?<PatternGrid code={c.code} key={teacherId+c.id+assessmentMode} items={byCompetency[c.id]} value={soundRatings[c.id]} history={teacherSoundHistory} competencyId={c.id} mode={assessmentMode} disabled={busy} teacher={true} onChange={(next,overall)=>{setSoundRatings(v=>({...v,[c.id]:next}));setRatings(v=>({...v,[c.id]:overall}));}}/>:<><select aria-label={"Overall teacher rating for "+c.title} value={ratings[c.id]||"Not Assessed"}
        disabled={busy} onChange={e=>{
         setRatings(v=>({...v,[c.id]:e.target.value}));
         if(e.target.value==="Not Assessed")setSoundRatings(v=>({...v,[c.id]:{}}));

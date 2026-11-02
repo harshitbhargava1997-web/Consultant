@@ -5,6 +5,7 @@ import {BookOpen,CalendarDays,CheckCircle2,ClipboardCheck,Clock3,GraduationCap,R
 import {ASSESSMENT_MODES,LEVELS,RATINGS,RATING_LABELS,skillProgress} from "../lib/supabase";
 import PhonicsSoundPicker,{observationDimensionLabel,PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload,soundLabel} from "./PhonicsSoundPicker";
 import SoundProgressPanel from "./SoundProgressPanel";
+import PatternGrid from './PatternGrid';
 import DolchGrid from './DolchGrid';
 import NurseryLetterGrid from "./NurseryLetterGrid";
 import LkgBlendingGrid from "./LkgBlendingGrid";
@@ -332,7 +333,7 @@ export default function AssessorWorkspace({client,session,schoolId,classes,stude
           {c.description&&<p>{c.description}</p>}</div>
          {before&&<span className="assessor-prior">Last: {before.rating} · {formatDay(before.date)}</span>}
         </div>
-        {(phonicsByCompetency[c.id]||[]).some(w=>w.family==="sight-word")?<DolchGrid key={studentId+c.id+assessmentMode} items={phonicsByCompetency[c.id]} value={soundRatings[c.id]} history={soundHistory} competencyId={c.id} mode={assessmentMode} disabled={saving} teacher={false} onChange={(next,overall)=>{setSoundRatings(v=>({...v,[c.id]:next}));setRatings(v=>({...v,[c.id]:overall}));}}/>:<><div className="assessor-rate-group" role="group" aria-label={"Rating for "+c.title}>
+        {(phonicsByCompetency[c.id]||[]).some(w=>w.family==="sight-word")?<DolchGrid key={studentId+c.id+assessmentMode} items={phonicsByCompetency[c.id]} value={soundRatings[c.id]} history={soundHistory} competencyId={c.id} mode={assessmentMode} disabled={saving} teacher={false} onChange={(next,overall)=>{setSoundRatings(v=>({...v,[c.id]:next}));setRatings(v=>({...v,[c.id]:overall}));}}/>:(["UKG001","UKG002","UKG008"].includes(c.code)&&phonicsByCompetency[c.id]?.length)?<PatternGrid code={c.code} key={studentId+c.id+assessmentMode} items={phonicsByCompetency[c.id]} value={soundRatings[c.id]} history={soundHistory} competencyId={c.id} mode={assessmentMode} disabled={saving} teacher={false} onChange={(next,overall)=>{setSoundRatings(v=>({...v,[c.id]:next}));setRatings(v=>({...v,[c.id]:overall}));}}/>:<><div className="assessor-rate-group" role="group" aria-label={"Rating for "+c.title}>
          {RATINGS.map(r=><button type="button" key={r} onClick={()=>rate(c.id,r)} disabled={saving}
           aria-pressed={current===r} className={"assessor-rate "+(current===r?"assessor-selected":"")}>
           {RATING_LABELS[r]}</button>)}
