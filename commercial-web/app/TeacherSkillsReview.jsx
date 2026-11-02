@@ -4,6 +4,7 @@ import {ArrowRight,ClipboardCheck,GraduationCap} from "lucide-react";
 import {ASSESSMENT_MODES,LEVELS,RATINGS,RATING_LABELS} from "../lib/supabase";
 import PhonicsSoundPicker,{PhonicsStructurePreview,usePhonicsCatalog,soundDetailPayload} from "./PhonicsSoundPicker";
 import TeacherReviewHistory from "./TeacherReviewHistory";
+import DolchGrid from './DolchGrid';
 import NurseryLetterGrid from "./NurseryLetterGrid";
 import LkgBlendingGrid from "./LkgBlendingGrid";
 
@@ -137,18 +138,18 @@ export default function TeacherSkillsReview({client,schoolId,classes=[],members=
     {skills.map(c=><div key={c.id} className="teacher-phonics-skill">
      <div className="skill"><div><small>{c.grade} · {c.code}</small><strong>{c.title}</strong>
       {c.description&&<p>{c.description}</p>}</div>
-      <select aria-label={"Overall teacher rating for "+c.title} value={ratings[c.id]||"Not Assessed"}
+      </div>{(byCompetency[c.id]||[]).some(w=>w.family==="sight-word")?<DolchGrid key={teacherId+c.id+assessmentMode} items={byCompetency[c.id]} value={soundRatings[c.id]} history={teacherSoundHistory} competencyId={c.id} mode={assessmentMode} disabled={busy} teacher={true} onChange={(next,overall)=>{setSoundRatings(v=>({...v,[c.id]:next}));setRatings(v=>({...v,[c.id]:overall}));}}/>:<><select aria-label={"Overall teacher rating for "+c.title} value={ratings[c.id]||"Not Assessed"}
        disabled={busy} onChange={e=>{
         setRatings(v=>({...v,[c.id]:e.target.value}));
         if(e.target.value==="Not Assessed")setSoundRatings(v=>({...v,[c.id]:{}}));
-       }}>{RATINGS.map(r=><option key={r} value={r}>{RATING_LABELS[r]}</option>)}</select></div>
+       }}>{RATINGS.map(r=><option key={r} value={r}>{RATING_LABELS[r]}</option>)}</select>
      {(byCompetency[c.id]||[]).length>0&&(!ratings[c.id]||ratings[c.id]==="Not Assessed")&&
       <PhonicsStructurePreview items={byCompetency[c.id]} personLabel="teacher"/>}
      {ratings[c.id]&&ratings[c.id]!=="Not Assessed"&&(byCompetency[c.id]||[]).length>0&&
       <PhonicsSoundPicker items={byCompetency[c.id]} value={soundRatings[c.id]||{}}
        onChange={value=>setSoundRatings(v=>({...v,[c.id]:value}))}
-       disabled={busy} personLabel="teacher"/>}
-    </div>)}
+       disabled={busy} personLabel="teacher"/>}</>}
+</div>)}
     <label>Observed strengths, gaps and next steps<textarea rows={3} maxLength={4000}
      value={notes} onChange={e=>setNotes(e.target.value)}
      placeholder="e.g. teacher correctly models the /t/ sound with a physical action; revisit /θ/ blending"/></label>
