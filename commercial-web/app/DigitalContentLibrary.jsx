@@ -3,18 +3,20 @@ import {useEffect,useMemo,useState} from "react";
 import {BookOpen,Edit3,ExternalLink,Eye,FileText,Plus,Send,Users} from "lucide-react";
 import './content-shelves.css';
 import {LEVELS} from "../lib/supabase";
+import BookReader,{PageEditor,emptyPage} from './BookReader';
+import {readerSample} from '../lib/vision-book';
 import VcBlendingCourse from "./VcBlendingCourse";
 import {getVcItem} from "../lib/vcCourse";
 
 const GRADES=LEVELS.filter(grade=>grade==="Nursery"||grade==="LKG"||grade==="UKG"||/^Grade [1-5]$/.test(grade));
-const TYPES=[
+const TYPES=[{id:"book",label:"Digital book"},
  {id:"demonstration",label:"Demonstration"},{id:"lesson_plan",label:"Lesson plan"},
  {id:"activity",label:"Practice activity"},{id:"worksheet",label:"Worksheet"},
  {id:"audio",label:"Audio"},{id:"video",label:"Video"},{id:"external",label:"External resource"}
 ];
 const ROLE_LABELS={consultant:"Consultant",owner:"School Owner",principal:"Principal",coordinator:"Coordinator",teacher:"Teacher"};
 const ROLES=Object.keys(ROLE_LABELS);
-const blank=()=>({id:"",title:"",summary:"",grade:"Nursery",competencyId:"",contentType:"demonstration",
+const blank=()=>({bookPages:[emptyPage()],id:"",title:"",summary:"",grade:"Nursery",competencyId:"",contentType:"demonstration",
  objective:"",preparation:"",demonstration:"",practice:"",checkUnderstanding:"",resourceUrl:"",
  targetRoles:[...ROLES],sequence:0});
 const toggle=(list,value)=>list.includes(value)?list.filter(item=>item!==value):[...list,value];
@@ -24,6 +26,7 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
  const [grade,setGrade]=useState("Nursery"),[form,setForm]=useState(blank);
  const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
  const [shelf,setShelf]=useState(""),[format,setFormat]=useState("all");
+ const [bookId,setBookId]=useState("");
  const [courseItem,setCourseItem]=useState(null);
  const grades=useMemo(()=>isAdmin?GRADES:GRADES.filter(value=>allowedGrades.includes(value)),[allowedGrades,isAdmin]);
  const gradeKey=grades.join("|");
@@ -62,12 +65,14 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
   if(await execute("save",form))setForm({...blank(),grade,contentType:shelf==="plans"?"lesson_plan":"demonstration"});
  }
  function edit(item){
-  setForm({id:item.id,title:item.title,summary:item.summary||"",grade:item.grade,competencyId:item.competency_id||"",
+  setForm({bookPages:item.book_pages?.length?item.book_pages:[emptyPage()],id:item.id,title:item.title,summary:item.summary||"",grade:item.grade,competencyId:item.competency_id||"",
    contentType:item.content_type,objective:item.objective||"",preparation:item.preparation||"",
    demonstration:item.demonstration||"",practice:item.practice||"",checkUnderstanding:item.check_understanding||"",
    resourceUrl:item.resource_url||"",targetRoles:item.target_roles||[...ROLES],sequence:item.sequence||0});
   window.scrollTo({top:0,behavior:"smooth"});
  }
+ const selectedBook=gradeItems.find(x=>x.id===bookId&&x.content_type==="book")||(bookId===readerSample.id&&grade==="LKG"&&grades.includes(grade)?readerSample:null);
+ if(shelf==="library"&&selectedBook&&!loading)return <BookReader key={selectedBook.id} book={selectedBook} close={()=>setBookId("")}/>;
  if(!shelf)return <section aria-label="Digital content" className="dc-gateway"><span className="eyebrow">VISION LITERACY</span><h2>What do you need for class?</h2><div className="dc-doors">{[["library","Library","Find a demonstration, activity or worksheet.",BookOpen],["plans","Lesson Plans","Open a grade-wise plan to prepare and teach.",FileText]].map(([id,title,text,Icon])=><button key={id} type="button" className={"dc-door "+id} onClick={()=>navigate(id)}><span className="dc-picture" aria-hidden="true"><Icon size={56} strokeWidth={1.7}/></span><strong>{title}</strong><span>{text}</span><b>Open {title} →</b></button>)}</div></section>;
  return <div className="digital-content-library"><button type="button" className="btn outline" onClick={()=>navigate("")}>← Digital Content</button>
   <section className="panel digital-content-heading">
@@ -78,6 +83,7 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
    </div>
    {shelf==="library"&&<label className="dc-format">Resource format<select value={format} onChange={e=>{setFormat(e.target.value);setCourseItem(null);}}><option value="all">All resources</option>{TYPES.filter(t=>t.id!=="lesson_plan").map(t=><option key={t.id} value={t.id}>{t.label}</option>)}</select></label>}
   </section>
+  {shelf==="library"&&!loading&&grade==="LKG"&&grades.includes(grade)&&["all","book"].includes(format)&&<section className="panel"><small>VISION · READER SAMPLE</small><h3>{readerSample.title}</h3><button type="button" className="btn outline" onClick={()=>setBookId(readerSample.id)}>Try the sample book</button></section>}
   {message&&<div className="notice" role="status">{message}</div>}
   {!loading&&shelf==="library"&&format==="all"&&grade==="LKG"&&allGradeItems.some(item=>getVcItem(item))&&<section className="panel vc-course-entry">
    <h2>VC Blending Course · A → E → I → O → U</h2>
@@ -97,6 +103,7 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
     <label>Content title<input required minLength={4} maxLength={180} value={form.title} onChange={event=>setForm({...form,title:event.target.value})} placeholder="VC blending: modelling two sounds together"/></label>
     <label>Short summary<textarea rows={2} maxLength={1000} value={form.summary} onChange={event=>setForm({...form,summary:event.target.value})} placeholder="What this preparation helps the teacher demonstrate."/></label>
     <label>Linked competency<select value={form.competencyId} onChange={event=>setForm({...form,competencyId:event.target.value})}><option value="">General grade content</option>{gradeCompetencies.map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+    {form.contentType==="book"&&<PageEditor pages={form.bookPages} onChange={bookPages=>setForm({...form,bookPages})}/>}
     <div className="two-col">
      <label>Understand · objective<textarea rows={4} maxLength={3000} value={form.objective} onChange={event=>setForm({...form,objective:event.target.value})}/></label>
      <label>Prepare · materials and setup<textarea rows={4} maxLength={12000} value={form.preparation} onChange={event=>setForm({...form,preparation:event.target.value})}/></label>
@@ -118,7 +125,7 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
     const competency=competencies.find(value=>value.id===item.competency_id);
     return <article className="digital-content-card" key={item.id}>
      <div className="digital-content-card-head"><span>{TYPES.find(type=>type.id===item.content_type)?.label||"Content"}</span>{isAdmin&&<em className={item.status}>{item.status}</em>}</div>
-     <h3>{item.title}</h3>{item.summary&&<p>{item.summary}</p>}{competency&&<small>Competency: {competency.title}</small>}
+     <h3>{item.content_type==="book"?<button type="button" className="btn primary" onClick={()=>setBookId(item.id)}><BookOpen size={16}/> Open book: {item.title}</button>:item.title}</h3>{item.summary&&<p>{item.summary}</p>}{competency&&<small>Competency: {competency.title}</small>}
      <div className="digital-content-sections">
       {item.objective&&<details open><summary>Understand</summary><div>{item.objective}</div></details>}
       {item.preparation&&<details><summary>Prepare</summary><div>{item.preparation}</div></details>}

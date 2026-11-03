@@ -6,7 +6,7 @@ import {isConfirmedUser} from "../../../lib/auth";
 export const runtime="nodejs";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const GRADES=["Nursery","LKG","UKG","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5"];
-const TYPES=["demonstration","lesson_plan","activity","worksheet","audio","video","external"];
+const TYPES=["book","demonstration","lesson_plan","activity","worksheet","audio","video","external"];
 const ROLES=["consultant","owner","principal","coordinator","teacher"];
 const STATUSES=["draft","published","archived"];
 const send=(data,status=200)=>NextResponse.json(data,{status,headers:{"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
@@ -57,7 +57,7 @@ async function access(request,schoolId){
 
 async function loadContent(ctx){
  let query=ctx.admin.from("literacy_digital_content")
-  .select("id,title,summary,grade,competency_id,content_type,objective,preparation,demonstration,practice,check_understanding,resource_url,target_roles,status,sequence,published_at,created_at,updated_at")
+  .select("id,title,summary,grade,competency_id,content_type,book_pages,objective,preparation,demonstration,practice,check_understanding,resource_url,target_roles,status,sequence,published_at,created_at,updated_at")
   .order("sequence").order("created_at",{ascending:false}).limit(1000);
  if(!ctx.isAdmin){
   query=query.eq("status","published").contains("target_roles",[ctx.role]);
@@ -100,10 +100,16 @@ export async function POST(request){
     demonstration:clean(body.demonstration,12000),practice:clean(body.practice,12000),
     check_understanding:clean(body.checkUnderstanding,12000),resource_url:clean(body.resourceUrl,1500),
     target_roles:targetRoles,sequence,status:"draft",published_at:null,updated_at:new Date().toISOString()};
+   payload.book_pages=[];
+   if(type==="book"){
+    const pages=body.bookPages,asset=v=>typeof v==="string"&&v.length<=1500&&(/^https:\/\/[^\s<>"\\]+$/.test(v)||/^\/vision-reader\/[a-z0-9-]+\.(svg|mp4)$/.test(v));
+    if(!Array.isArray(pages)||!pages.length||pages.length>100||pages.some(p=>!p||![p.subject,p.topic].every(t=>typeof t==="string"&&t.trim()&&t.length<=140)||!asset(p.image)||(p.video&&!asset(p.video))))return send({error:"Each book page needs a subject, topic and valid page image link. Video links must also be valid."},400);
+    payload.book_pages=pages.map(p=>({subject:p.subject.trim(),topic:p.topic.trim(),image:p.image,video:p.video||""}));
+   }
    if(title.length<4||!GRADES.includes(grade)||!TYPES.includes(type)||!targetRoles.length||
       !targetRoles.every(role=>ROLES.includes(role))||!Number.isInteger(sequence)||sequence<0||sequence>10000||!validUrl(payload.resource_url))
     return send({error:"Provide a title, valid grade, format, audience, order and HTTPS resource link."},400);
-   if(!payload.objective&&!payload.preparation&&!payload.demonstration&&!payload.practice&&!payload.resource_url)
+   if(type!=="book"&&!payload.objective&&!payload.preparation&&!payload.demonstration&&!payload.practice&&!payload.resource_url)
     return send({error:"Add at least an objective, preparation, demonstration, practice activity or resource link."},400);
    if(competencyId){
     if(!UUID.test(competencyId))return send({error:"Invalid competency."},400);

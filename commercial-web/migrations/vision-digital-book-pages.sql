@@ -1,0 +1,3 @@
+alter table public.literacy_digital_content add column if not exists book_pages jsonb not null default '[]'::jsonb;
+alter table public.literacy_digital_content drop constraint literacy_digital_content_content_type_check;
+alter table public.literacy_digital_content add constraint literacy_digital_content_content_type_check check(content_type in ('book','demonstration','lesson_plan','activity','worksheet','audio','video','external'));

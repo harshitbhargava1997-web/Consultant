@@ -1,0 +1,1 @@
+export const readerSample={id:'vision-reader-example',title:'My First Blending Book',book_pages:[{subject:'Literacy',topic:'Blend a and t',image:'/vision-reader/blend.svg',video:'/vision-reader/blend.mp4'},{subject:'Literacy',topic:'Read the word',image:'/vision-reader/read.svg',video:''},{subject:'Writing',topic:'Trace the letters',image:'/vision-reader/trace.svg',video:''}]};
