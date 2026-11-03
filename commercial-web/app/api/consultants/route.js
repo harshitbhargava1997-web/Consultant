@@ -166,7 +166,7 @@ export async function POST(request){
     if(!user){
      if(!strong(password))return send({error:"New consultants need a 12–128 character initial password with uppercase, lowercase, number and symbol."},400);
      const {data,error}=await ctx.admin.auth.admin.createUser({
-      email,password,email_confirm:true,user_metadata:{full_name:name},app_metadata:{must_change_password:false}
+      email,password,email_confirm:true,user_metadata:{full_name:name},app_metadata:{must_change_password:true}
      });
      if(error)throw error;
      user=data.user;newAccount=true;

@@ -132,7 +132,7 @@ async function importPeople(ctx,rows){
     if(higherRoles?.length)throw Error("Mobile login is available only for teacher-only accounts.");
    }
    if(!user){
-    const identity={password,user_metadata:{full_name:name},app_metadata:{must_change_password:false}};
+    const identity={password,user_metadata:{full_name:name},app_metadata:{must_change_password:true}};
     if(email){identity.email=email;identity.email_confirm=true;}
     if(phone){identity.phone=phone;identity.phone_confirm=true;}
     const {data,error}=await ctx.admin.auth.admin.createUser(identity);

@@ -204,7 +204,7 @@ export async function POST(request) {
     }
     const authIdentity={password:initialPassword,
       user_metadata:{full_name:fullName},
-      app_metadata:{must_change_password:false}
+      app_metadata:{must_change_password:true}
     };
     if(email){authIdentity.email=email;authIdentity.email_confirm=true;}
     if(phone){authIdentity.phone=phone;authIdentity.phone_confirm=true;}

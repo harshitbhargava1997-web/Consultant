@@ -3,7 +3,8 @@ export function normalizePhone(value) {
   if(!raw)return "";
   const compact=raw.replace(/[\s()-]/g,"");
   if(/^\+[1-9]\d{7,14}$/.test(compact))return compact;
-  const digits=compact.replace(/\D/g,"");
+  if(!/^\d+$/.test(compact))return "";
+  const digits=compact;
   if(/^\d{10}$/.test(digits))return "+91"+digits;
   if(/^0\d{10}$/.test(digits))return "+91"+digits.slice(1);
   if(/^91\d{10}$/.test(digits))return "+"+digits;
