@@ -1,0 +1,21 @@
+'use client';
+import {useState,useEffect} from 'react';
+const labels={accountCreate:'Create login',accountEdit:'Edit school profile',accountLogin:'Change login ID',accountReset:'Reset password',accountRemove:'Remove school access'};
+export default function AccountSettings({session,schoolId,schoolName,manager,call}){
+ const [people,P]=useState([]),[roles,R]=useState([]),[id,I]=useState(''),[act,A]=useState('accountCreate'),[busy,B]=useState(false),[msg,M]=useState('');
+ const person=people.find(p=>p.user_id===id);
+ async function reload(){const d=await call('accountList',{schoolId});P(d.people);R(d.roles);}
+ useEffect(()=>{if(manager)reload().catch(e=>M(e.message));},[manager,schoolId]);
+ async function run(e,op){e.preventDefault();if(busy)return;const form=e.currentTarget,data=Object.fromEntries(new FormData(form));B(true);M('');try{await op(data,form);}catch(err){M(err.message);}finally{B(false);}}
+ async function self(d,f){if(d.password!==d.confirm)throw Error('New passwords must match.');const r=await fetch('/api/password-changed',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({password:d.password,currentPassword:d.current})});if(!r.ok)throw Error((await r.json()).error||'Password change failed.');f.reset();M('Your password has been changed.');}
+ async function save(d,f){if(d.password!==d.confirm)throw Error('Temporary passwords must match.');if(!window.confirm(labels[act]+' · '+(person?.display_name||d.name)+' · '+schoolName+'?'))return;delete d.confirm;await call(act,{schoolId,target:id,...d});f.reset();I('');A('accountCreate');await reload();M(act==='accountRemove'?'School membership removed.':act==='accountReset'?'Temporary password set. Share it privately.':'Account details saved.');}
+ const pw=(label,name,old=false)=><label>{label}<input name={name} required type="password" minLength={old?1:12} maxLength={old?undefined:128} autoComplete={old?'current-password':'new-password'}/></label>;
+ return <div className="stack"><section className="panel"><h2>Change my password</h2><form className="stack" onSubmit={e=>run(e,self)}>{pw('Current password','current',true)}{pw('New password','password')}{pw('Confirm new password','confirm')}<button disabled={busy} className="btn primary">Change my password</button></form></section>
+ {manager&&<section className="panel"><h2>School accounts · {schoolName}</h2><fieldset disabled={busy||!roles.length}><label>School member<select value={id} onChange={e=>{I(e.target.value);A(e.target.value?'accountEdit':'accountCreate');M('');}}><option value="">Create a new school login</option>{people.map(p=><option value={p.user_id} key={p.user_id}>{p.display_name} · {p.role} · {p.user_id.slice(-6)}</option>)}</select></label>
+ {person&&<label>Choose action<select value={act} onChange={e=>A(e.target.value)}>{Object.entries(labels).filter(([k])=>k!=='accountCreate').map(([k,l])=><option key={k} value={k}>{l}</option>)}</select></label>}
+ <form className="stack" key={id+act} onSubmit={e=>run(e,save)}>
+ {['accountEdit','accountCreate'].includes(act)&&<><label>Full name<input name="name" required minLength={2} maxLength={160} defaultValue={person?.display_name||''}/></label><label>School role<select name="role" defaultValue={person?.role||'teacher'}>{roles.map(r=><option key={r}>{r}</option>)}</select></label></>}
+ {['accountCreate','accountLogin'].includes(act)&&<><label>Login email<input name="email" type="email"/></label>{(!person||person.role==='teacher')&&<label>Teacher mobile number<input name="mobile" type="tel" placeholder="+91…"/></label>}<small>For school leaders, enter an email. Teachers may use an email or mobile number.</small></>}
+ {['accountCreate','accountReset'].includes(act)&&<><small>Use 12–128 characters including uppercase, lowercase, a number and a symbol. The user will choose a personal password at sign-in.</small>{pw('Temporary password','password')}{pw('Confirm temporary password','confirm')}</>}
+ {act==='accountRemove'&&<p>Remove this person’s membership in {schoolName}. Their login and previous assessment records are retained.</p>}<button className="btn primary">{labels[act]}</button></form></fieldset></section>}{msg&&<p role="status" className="notice">{msg}</p>}</div>;
+}

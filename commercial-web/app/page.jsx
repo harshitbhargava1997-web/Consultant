@@ -2,6 +2,7 @@
 import {useEffect,useMemo,useState} from "react";
 import dynamic from "next/dynamic";
 import RoleHome from './RoleHome';
+import AccountSettings from "./AccountSettings";
 import OverviewTotals from "./OverviewTotals";
 import {browserClient,LEVELS,RATINGS,MANAGERS,skillProgress,parseCsv} from "../lib/supabase";
 const BulkWorkspace=dynamic(()=>import("./BulkWorkspace"),{loading:()=> <section className="panel">Opening workspace…</section>});
@@ -37,6 +38,7 @@ const navigation=[
  {id:"implementation",label:"Teacher Portal",icon:FileUp,school:true},
  {id:"school-success",label:"School Success folder",icon:GraduationCap,admin:true},
  {id:"implementation-history",label:"Implementation history",icon:ChartNoAxesCombined,school:true},
+ {id:"accounts",label:"Account settings",icon:ShieldCheck},
  {id:"observations",label:"Classroom observations",icon:Eye,school:true}
 ];
 const formatGrade=(g)=>LEVELS.indexOf(g);
@@ -359,7 +361,7 @@ export default function Home(){
   if(n.id==="permissions")return identity.admin;
   if(n.id==="training")return identity.admin||!!schoolId&&
    (can("digital_content.access")||can("training.access")||can("training.complete")||can("training.deliver")||can("training.review"));
-  if(n.id==="overview")return true;
+  if(n.id==="overview"||n.id==="accounts")return true;
   if(n.id==="users")return identity.admin||!!schoolId&&
    (can("users.manage")||can("classes.view")||can("classes.manage")||can("classes.import")||
     can("staff.import")||can("students.import")||can("students.manage")||
@@ -396,6 +398,7 @@ export default function Home(){
   </Box>
   {identity.admin&&<Box title="Register a school"><form onSubmit={addSchool} className="stack"><label>School name<input required maxLength={180} value={newSchool} onChange={e=>setNewSchool(e.target.value)} placeholder="Full registered school name"/></label><Btn kind="primary" type="submit" disabled={busy}><Plus size={16}/> Create school</Btn></form></Box>}
  </div>}
+ {page==="accounts"&&<AccountSettings key={(schoolId||"")+session.user.id+role} session={session} schoolId={schoolId} schoolName={school?.name} manager={!!schoolId&&(identity.admin||(["owner","principal","consultant"].includes(role)&&can("users.manage")))} call={callAdmin}/>}
  {page==="users"&&(identity.admin||schoolId)&&
   (can("users.manage")||can("classes.view")||can("classes.manage")||can("classes.import")||
    can("teachers.assign")||can("staff.import")||can("students.manage")||

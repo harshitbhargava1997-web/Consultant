@@ -13,7 +13,13 @@ export async function POST(request){
  const admin=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
  const {data:{user},error}=await admin.auth.getUser(token);
  if(error||!user)return NextResponse.json({error:"Unauthorized"},{status:401});
- if(!user.app_metadata?.must_change_password)return NextResponse.json({error:"Initial password change is not required."},{status:400});
+ if(!user.app_metadata?.must_change_password){
+  if(!body.currentPassword||typeof body.currentPassword!=='string')return NextResponse.json({error:"Enter your current password."},{status:400});
+  const verifier=createClient(url,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+  const proof=await verifier.auth.signInWithPassword({...(user.email?{email:user.email}:{phone:user.phone}),password:body.currentPassword});
+  if(proof.error||proof.data.user?.id!==user.id)return NextResponse.json({error:"Current password could not be verified."},{status:403});
+  await verifier.auth.signOut({scope:"local"});
+ }
  const {error:updateError}=await admin.auth.admin.updateUserById(user.id,{
   password,app_metadata:{...user.app_metadata,must_change_password:false}
  });

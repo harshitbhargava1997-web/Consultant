@@ -69,6 +69,48 @@ export async function POST(request) {
   if(ctx.error)return response({error:ctx.error},ctx.status);
   if(ctx.user.app_metadata?.must_change_password)return response({error:"Change your initial password first."},403);
   const body=await request.json();
+  if(['accountList','accountEdit','accountLogin','accountRemove','accountReset','accountCreate'].includes(body.action)){
+   const db=adminClient(),schoolId=String(body.schoolId||''),id=String(body.target||'');
+   const valid=id=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+   const read=async q=>{const {data,error}=await q;if(error)throw Error('School account lookup failed');return data;};
+   if(!valid(schoolId)||!await read(db.from('literacy_schools').select('id').eq('id',schoolId).is('archived_at',null).maybeSingle()))return response({error:'Select an active school.'},400);
+   const member=()=>db.from('literacy_memberships');
+   let role='admin';
+   if(!ctx.isAdmin){
+    const [own,assignment]=await Promise.all([read(member().select('role').eq('school_id',schoolId).eq('user_id',ctx.user.id).maybeSingle()),read(db.from('literacy_consultant_assignments').select('school_id').eq('school_id',schoolId).eq('consultant_user_id',ctx.user.id).maybeSingle())]);
+    role=assignment?'consultant':own?.role;
+    if(!['owner','principal','consultant'].includes(role)||!(await read(db.from('literacy_role_permissions').select('enabled').eq('role',role).eq('feature','users.manage').maybeSingle()))?.enabled)return response({error:'School account management is not enabled for your role.'},403);
+   }
+   const roles=role==='principal'?['coordinator','teacher']:role==='owner'?['principal','coordinator','teacher']:['owner','principal','coordinator','teacher'];
+   if(body.action==='accountList')return response({roles,people:await read(member().select('user_id,display_name,role').eq('school_id',schoolId).in('role',roles).neq('user_id',ctx.user.id).order('display_name'))});
+   const name=String(body.name||'').trim(),email=String(body.email||'').trim().toLowerCase(),phone=normalizePhone(String(body.mobile||'').trim()),pass=body.password;
+   const strong=typeof pass==='string'&&pass.length>=12&&pass.length<=128&&/[A-Z]/.test(pass)&&/[a-z]/.test(pass)&&/[0-9]/.test(pass)&&/[^a-zA-Z0-9]/.test(pass);
+   if(['accountEdit','accountCreate'].includes(body.action)&&(name.length<2||name.length>160||!roles.includes(body.role)))return response({error:'Check the full name and permitted role.'},400);
+   if(['accountCreate','accountReset'].includes(body.action)&&!strong)return response({error:'Use 12–128 characters with upper and lower case, a number and a symbol.'},400);
+   if(['accountCreate','accountLogin'].includes(body.action)&&((!email&&!phone)||(email&&!isEmail(email))||(body.mobile&&!phone)))return response({error:'Enter a valid email or teacher mobile number.'},400);
+   if(body.action==='accountCreate'){
+    if(phone&&body.role!=='teacher')return response({error:'Mobile login is for teachers only.'},400);
+    const made=await db.auth.admin.createUser({...(email?{email,email_confirm:true}:{}),...(phone?{phone,phone_confirm:true}:{}),password:pass,user_metadata:{full_name:name},app_metadata:{must_change_password:true}});
+    if(made.error)return response({error:'Cannot create login. The login may already exist.'},409);
+    const saved=await member().insert({school_id:schoolId,user_id:made.data.user.id,role:body.role,display_name:name});
+    if(saved.error){await db.auth.admin.deleteUser(made.data.user.id);return response({error:'School assignment failed.'},409);}return response({ok:true});
+   }
+   if(!valid(id)||id===ctx.user.id)return response({error:'Choose another school member.'},403);
+   const [target,platform,consultant]=await Promise.all([read(member().select('role').eq('school_id',schoolId).eq('user_id',id).maybeSingle()),read(db.from('literacy_platform_admins').select('user_id').eq('user_id',id).maybeSingle()),read(db.from('literacy_consultants').select('user_id').eq('user_id',id).maybeSingle())]);
+   if(!target||!roles.includes(target.role)||platform||consultant)return response({error:'This account is outside your school management permissions.'},403);
+   const scope=q=>q.eq('school_id',schoolId).eq('user_id',id).eq('role',target.role);
+   if(body.action==='accountRemove'){await read(scope(member().delete()).select('user_id').single());return response({ok:true});}
+   if(body.action==='accountEdit'){
+    if(body.role!=='teacher'&&body.role!==target.role){const auth=await db.auth.admin.getUserById(id);if(auth.error||!auth.data.user.email||auth.data.user.phone)return response({error:'Leadership accounts require an email-only login.'},400);}
+    await read(scope(member().update({display_name:name,role:body.role})).select('user_id').single());return response({ok:true});
+   }
+   const others=await read(member().select('role').eq('user_id',id).neq('school_id',schoolId));
+   if(others.length&&!ctx.isAdmin)return response({error:'This login is used at multiple schools. Ask the platform admin to change its credentials.'},403);
+   if(phone&&(target.role!=='teacher'||others.some(r=>r.role!=='teacher')))return response({error:'Mobile login is for teacher-only accounts.'},400);
+   const patch=body.action==='accountReset'?{password:pass,app_metadata:{must_change_password:true}}:{...(email?{email,email_confirm:true}:{}),...(phone?{phone,phone_confirm:true}:{})};
+   const changed=await db.auth.admin.updateUserById(id,patch);
+   return changed.error?response({error:'Login change failed. Check the details and try again.'},409):response({ok:true});
+  }
   // Creating a school is reserved exclusively for the Platform Super Admin.
   if(body.action==="createSchool" && !ctx.isAdmin)
    return response({error:"Only the Platform Super Admin may create schools."},403);
@@ -169,7 +211,7 @@ export async function POST(request) {
     const {data,error}=await admin.auth.admin.createUser(authIdentity);
     if(error)throw error;
     existing=data.user;
-   }else if(role==="teacher"&&((email&&!existing.email)||(phone&&!existing.phone))){
+   }else if(ctx.isAdmin&&role==="teacher"&&((email&&!existing.email)||(phone&&!existing.phone))){
     const identityUpdate={};
     if(email&&!existing.email){identityUpdate.email=email;identityUpdate.email_confirm=true;}
     if(phone&&!existing.phone){identityUpdate.phone=phone;identityUpdate.phone_confirm=true;}
