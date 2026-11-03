@@ -57,7 +57,7 @@ async function access(request,schoolId){
 
 async function loadContent(ctx){
  let query=ctx.admin.from("literacy_digital_content")
-  .select("id,title,summary,grade,competency_id,content_type,book_pages,objective,preparation,demonstration,practice,check_understanding,resource_url,target_roles,status,sequence,published_at,created_at,updated_at")
+  .select("id,title,summary,grade,competency_id,content_type,book_pages,delivery,objective,preparation,demonstration,practice,check_understanding,resource_url,target_roles,status,sequence,published_at,created_at,updated_at")
   .order("sequence").order("created_at",{ascending:false}).limit(1000);
  if(!ctx.isAdmin){
   query=query.eq("status","published").contains("target_roles",[ctx.role]);
@@ -100,6 +100,13 @@ export async function POST(request){
     demonstration:clean(body.demonstration,12000),practice:clean(body.practice,12000),
     check_understanding:clean(body.checkUnderstanding,12000),resource_url:clean(body.resourceUrl,1500),
     target_roles:targetRoles,sequence,status:"draft",published_at:null,updated_at:new Date().toISOString()};
+   payload.delivery={};
+   if(type==="lesson_plan"){
+    const d=body.delivery||{},bookId=d.bookId||'',week=Number(d.week||0),day=Number(d.day||0);
+    if((week||day)&&(!Number.isInteger(week)||week<1||week>52||!Number.isInteger(day)||day<1||day>7))return send({error:"Enter both a week (1–52) and day (1–7)."},400);
+    if(bookId){if(!UUID.test(bookId))return send({error:"Invalid book."},400);const check=await ctx.admin.from("literacy_digital_content").select("id").eq("id",bookId).eq("content_type","book").eq("grade",grade).eq("status","published").maybeSingle();if(check.error)throw check.error;if(!check.data)return send({error:"Select a published book for this grade."},400);}
+    payload.delivery={bookId,...(week?{week,day}:{})};
+   }
    payload.book_pages=[];
    if(type==="book"){
     const pages=body.bookPages,asset=v=>typeof v==="string"&&v.length<=1500&&(/^https:\/\/[^\s<>"\\]+$/.test(v)||/^\/vision-reader\/[a-z0-9-]+\.(svg|mp4)$/.test(v));

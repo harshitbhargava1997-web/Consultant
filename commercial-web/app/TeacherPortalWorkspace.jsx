@@ -21,7 +21,7 @@ function Review({lesson,onReview,busy}){
  const [status,setStatus]=useState(latestReview(lesson)?.status||'reviewed'),[feedback,setFeedback]=useState(latestReview(lesson)?.feedback||'');
  return <form className="teacher-evidence" onSubmit={e=>{e.preventDefault();void onReview(lesson,status,feedback);}}><h3>Coordinator / school leader review</h3><div className="form-grid"><label className="field">Review status<select value={status} onChange={e=>setStatus(e.target.value)}><option value="reviewed">Reviewed</option><option value="needs_follow_up">Needs follow-up</option></select></label><label className="field">Feedback<textarea maxLength={4000} required={status==='needs_follow_up'} value={feedback} onChange={e=>setFeedback(e.target.value)}/></label></div><button className="button" disabled={!!busy}>Save review</button></form>;
 }
-export default function TeacherPortalWorkspace({session,schoolId='',publicToken='',onOpenContent}){
+export default function TeacherPortalWorkspace({session,schoolId='',publicToken='',deliveryDraft,consumeDraft,onOpenContent}){
  const storage=useMemo(()=>browserClient(),[]);
  const [teacherId,setTeacher]=useState(''),[info,setInfo]=useState(null),[loading,setLoading]=useState(true),[error,setError]=useState(''),[busy,setBusy]=useState('');
  const [tab,setTab]=useState('prepare'),[date,setDate]=useState(today()),[periods,setPeriods]=useState(()=>[period()]),[submissionId,setSubmissionId]=useState(()=>crypto.randomUUID()),[recordings,setRecordings]=useState([]),[receipt,setReceipt]=useState(null);
@@ -36,6 +36,11 @@ export default function TeacherPortalWorkspace({session,schoolId='',publicToken=
  useEffect(()=>{let active=true;setLoading(true);setInfo(null);setError('');request().then(value=>{if(active){setInfo(value);if(!teacherId&&value.teacherId)setTeacher(value.teacherId);}}).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[request,teacherId]);
  useEffect(()=>{if(!info||loadedInitial.current)return;const p=new URLSearchParams(location.search),id=p.get('lesson');if(id){if(p.get('teacherId')&&info.teacherId!==p.get('teacherId'))return;const selected=info.lessons.find(l=>l.id===id);if(selected){setTeacher(selected.teacher_user_id);setLesson(selected);setTab('evidence');setConducted(selected.planned_on<=today()?selected.planned_on:today());}else{void request({action:'lesson',id}).then(({lesson:value})=>{setLesson(value);setTab('evidence');setConducted(value.planned_on<=today()?value.planned_on:today());}).catch(e=>setError(e.message));}}loadedInitial.current=true;},[info,request]);
  const teacher=info?.teachers.find(t=>t.id===(teacherId||info.teacherId));
+ useEffect(()=>{if(!deliveryDraft||!teacher||!info?.canSubmit)return;const validClass=info.classes.some(c=>c.id===deliveryDraft.classId);
+ if(!validClass){setError("This class is not assigned to the selected teacher.");return;}
+ const ids=info.competencies.some(c=>c.id===deliveryDraft.competencyId)?[deliveryDraft.competencyId]:[];
+ setPeriods([{...period(),classId:deliveryDraft.classId,topic:(deliveryDraft.topic+' · Week '+deliveryDraft.week+' Day '+deliveryDraft.day+' · '+deliveryDraft.book).slice(0,1000),competencyIds:ids}]);setTab('prepare');consumeDraft?.();
+ },[deliveryDraft,info,teacher?.id]);
  const canPrepare=!!teacher&&info?.canSubmit;
  function selectTeacher(id){setTeacher(id);setPeriods([period()]);setSubmissionId(crypto.randomUUID());setReceipt(null);setLesson(null);setMatches(null);setPending({});setReflections({});setTab('prepare');started.current=Date.now();}
  function update(id,key,value){setPeriods(rows=>rows.map(p=>p.id===id?{...p,[key]:value}:p));}

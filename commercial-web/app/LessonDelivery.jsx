@@ -1,0 +1,24 @@
+'use client';
+import {useRef,useState} from 'react';
+export function deliveryBooks(grade,items){
+ const books=items.filter(i=>i.grade===grade&&i.content_type==='book'&&i.status==='published').map(b=>({...b,plans:[]}));
+ const general={id:'general',title:grade+' literacy collection',plans:[]};
+ const plans=items.filter(i=>i.grade===grade&&i.content_type==='lesson_plan'&&i.status==='published').sort((a,b)=>a.sequence-b.sequence||a.title.localeCompare(b.title));
+ for(const p of plans){const key=p.delivery?.bookId;if(!key)general.plans.push(p);else books.find(b=>b.id===key)?.plans.push(p);}
+ if(general.plans.length)books.push(general);
+ return books.map(b=>({...b,plans:b.plans.map((p,i)=>({...p,week:p.delivery?.week||1+Math.floor(i/5),day:p.delivery?.day||1+i%5})).sort((a,b)=>a.week-b.week||a.day-b.day)}));
+}
+export default function LessonDelivery({grade,items,classes,onPrepare}){
+ const reader=useRef(null),[zoom,Z]=useState(100);
+ const [bookId,B]=useState(''),[planId,P]=useState(''),[section,C]=useState(''),[step,S]=useState('books');
+ const sections=classes.filter(c=>c.grade===grade),cls=sections.find(c=>c.id===section)||sections[0],books=deliveryBooks(grade,items),book=books.find(b=>b.id===bookId),plan=book?.plans.find(p=>p.id===planId);
+ const rows=p=>[['Learning objective',p.objective],['Materials and preparation',p.preparation],['Teacher demonstration',p.demonstration],['Student practice',p.practice],['Check understanding',p.check_understanding]].filter(x=>x[1]);
+ return <section className="panel"><p className="eyebrow">LESSON DELIVERY · {grade}{cls?' · '+cls.section:''}</p>
+ {step==='books'||!book?<><h2>Choose your book</h2>{sections.length>0&&<label>Class section<select value={cls?.id||''} onChange={e=>C(e.target.value)}>{sections.map(c=><option key={c.id} value={c.id}>{c.section} · {c.academic_year}</option>)}</select></label>}
+ <div className="dc-doors">{books.map(b=><button key={b.id} type="button" className="dc-door plans" onClick={()=>{B(b.id);S('overview')}}><small>{b.id==='general'?'GRADE COLLECTION':'DIGITAL BOOK'}</small><strong>{b.title}</strong><span>{b.plans.length} published plans</span><b>Open syllabus overview →</b></button>)}</div>{!books.length&&<p>No published books or lesson plans for this grade yet.</p>}</>:
+ <><button type="button" className="btn outline" onClick={()=>S(step==='day'?'planner':step==='planner'?'overview':'books')}>← {step==='day'?'Day-wise planner':step==='planner'?'Syllabus overview':'Books'}</button><h2>{book.title}</h2>
+ {step==='overview'?<><h3>Syllabus overview</h3><p>{book.plans.length} published lesson plans · {new Set(book.plans.map(p=>p.week)).size} weeks</p>{book.plans.map(p=><p key={p.id}><strong>Week {p.week} · Day {p.day}: {p.title}</strong><br/>{p.objective||p.summary}</p>)}{!book.plans.length?<p>No day plans are linked to this book yet.</p>:<button type="button" className="btn primary" onClick={()=>S('planner')}>Open day-wise planner →</button>}</>:
+ step==='planner'||!plan?<><h3>Day-wise planner</h3>{book.plans.some(p=>!p.delivery?.day)&&<p className="helper">Plans without a published week and day follow their display order, five per week.</p>}{book.plans.map(p=><button type="button" className="vr-topic" key={p.id} onClick={()=>{P(p.id);S('day')}}>Week {p.week} · Day {p.day} — {p.title}</button>)}</>:
+ <article ref={reader} style={{background:"white",padding:"1rem",overflow:"auto"}}><div className="vr-tools"><label>Text size<select value={zoom} onChange={e=>Z(Number(e.target.value))}>{[100,125,150].map(v=><option key={v} value={v}>{v}%</option>)}</select></label>{typeof document!=="undefined"&&document.fullscreenEnabled&&<button type="button" onClick={()=>{const op=document.fullscreenElement?document.exitFullscreen():reader.current?.requestFullscreen();op?.catch(()=>{});}}>Toggle full screen</button>}</div><div style={{fontSize:zoom+"%"}}><small>Week {plan.week} · Day {plan.day}</small><h3>{plan.title}</h3><p>{plan.summary}</p>{rows(plan).map(([label,body])=><section key={label}><h4>{label}</h4><p style={{whiteSpace:'pre-wrap'}}>{body}</p></section>)}{plan.resource_url&&<p><a className="btn outline" href={plan.resource_url} target="_blank" rel="noopener noreferrer">Open lesson resource</a></p>}
+ </div>{onPrepare&&cls&&<><button type="button" className="btn primary" onClick={()=>onPrepare({classId:cls.id,grade,topic:plan.title,competencyId:plan.competency_id,week:plan.week,day:plan.day,book:book.title})}>Prepare and reflect in Teacher Portal →</button><p className="helper">Save your preparation first. After class, reopen it by teacher and date to add your reflection.</p></>}</article>}</>}</section>;
+}

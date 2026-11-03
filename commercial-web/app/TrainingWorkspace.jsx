@@ -31,7 +31,7 @@ async function api(session,schoolId,action,fields={}){
 }
 function toggle(list,value){return list.includes(value)?list.filter(x=>x!==value):[...list,value];}
 export default function TrainingWorkspace({
- session,client,schoolId,schoolName,schools=[],competencies=[],isAdmin=false,grants=[]
+ session,client,schoolId,schoolName,deliveryClasses=[],onPrepare,schools=[],competencies=[],isAdmin=false,grants=[]
 }){
  const can=key=>isAdmin||grants.includes(key);
  const hasDigitalContentAccess=can("digital_content.access");
@@ -150,7 +150,7 @@ export default function TrainingWorkspace({
  const schoolParticipants=(data.review||[]).filter(p=>
   p.name.toLowerCase().includes(reviewFilter.toLowerCase())||p.role.includes(reviewFilter.toLowerCase()));
  return <div className="training-module">
-  {hasDigitalContentAccess&&<DigitalContentLibrary key={(schoolId||"")+session.user.id} session={session} schoolId={schoolId} competencies={competencies} isAdmin={isAdmin}/>}
+  {hasDigitalContentAccess&&<DigitalContentLibrary deliveryClasses={deliveryClasses} onPrepare={onPrepare} key={(schoolId||"")+session.user.id} session={session} schoolId={schoolId} competencies={competencies} isAdmin={isAdmin}/>}
   {hasProgrammeAccess&&<details className="dc-programmes" key={String(hasDigitalContentAccess)} open={!hasDigitalContentAccess||undefined}><summary>Professional learning and training</summary>
   {hasProgrammeAccess&&<section className="panel">
    <div className="panel-head"><h2><GraduationCap size={20}/> Professional Learning</h2>

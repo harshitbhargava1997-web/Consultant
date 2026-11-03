@@ -1,0 +1,1 @@
+alter table public.literacy_digital_content add column if not exists delivery jsonb not null default '{}'::jsonb;

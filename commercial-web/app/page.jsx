@@ -54,6 +54,7 @@ export default function Home(){
  const [session,setSession]=useState(null),[checked,setChecked]=useState(false);
  const [identity,setIdentity]=useState({admin:false,isConsultant:false,consultantSchools:[],memberships:[],schools:[]});
  const [schoolId,setSchoolId]=useState(""),[page,setPage]=useState("overview");
+ const [deliveryDraft,setDeliveryDraft]=useState(null);
  const [assessmentView,setAssessmentView]=useState("structure");
  const [roleGrants,setRoleGrants]=useState([]);
  const [roleGrantsByRole,setRoleGrantsByRole]=useState({});
@@ -417,7 +418,7 @@ export default function Home(){
    isConsultant={can("consultants.log")}/>}
 
  {page==="training"&&(identity.admin||identity.isConsultant||schoolId)&&
-  <TrainingWorkspace session={session} client={client} schoolId={schoolId}
+  <TrainingWorkspace deliveryClasses={visibleClasses} onPrepare={schoolId&&can("implementation.submit")&&(role==="teacher"||identity.admin)?draft=>{setDeliveryDraft({...draft,schoolId,userId:session.user.id});setPage("implementation");window.scrollTo(0,0);}:null} session={session} client={client} schoolId={schoolId}
    schoolName={school?.name||"Selected school"} schools={identity.schools}
    competencies={competencies} grants={roleGrants} isAdmin={identity.admin}/>}
  {page==="assessment-structure"&&schoolId&&
@@ -470,7 +471,7 @@ export default function Home(){
  {page==="implementation-history"&&schoolId&&(can("implementation.view")||can("implementation.review"))&&<ImplementationWorkspace client={client} session={session} schoolId={schoolId} schoolName={school?.name||"Selected school"} competencies={competencies} isAdmin={identity.admin} grants={roleGrants} readOnly/>}
  {page==="implementation"&&schoolId&&
    (can("implementation.view")||can("implementation.submit")||can("implementation.review"))&&
-   <TeacherPortalWorkspace key={schoolId} session={session} schoolId={schoolId}
+   <TeacherPortalWorkspace deliveryDraft={deliveryDraft?.schoolId===schoolId&&deliveryDraft.userId===session.user.id?deliveryDraft:null} consumeDraft={()=>setDeliveryDraft(null)} key={schoolId} session={session} schoolId={schoolId}
      onOpenContent={()=>window.open('/?workspace=training&schoolId='+encodeURIComponent(schoolId),'_blank','noopener,noreferrer')}/>}
  {page==="observations"&&can("observations.view")&&
    <Box title="Classroom observations"><Empty title="Historical observation integration is being prepared" detail="The existing Streamlit observation workflow remains operational. Observation rubric and legacy record migration are separate from Teacher Implementation evidence."/></Box>}
