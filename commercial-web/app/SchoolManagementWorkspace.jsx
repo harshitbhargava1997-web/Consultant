@@ -8,6 +8,7 @@ import {ConsultantManagement} from "./ConsultantWorkspace";
 import {LEVELS} from "../lib/supabase";
 
 const tabs=[
+ {id:"accounts",label:"School accounts",icon:Users},
  {id:"leaders",label:"School leadership",icon:Users},
  {id:"consultants",label:"Consultants",icon:Users},
  {id:"classes",label:"Classes",icon:BookMarked},
@@ -18,17 +19,18 @@ function firstClass(classes){return classes.length?classes[0].id:"";}
 function displayClass(c){return [c.grade,c.section,c.academic_year].join(" · ");}
 export default function SchoolManagementWorkspace({
  client,session,schoolId,schoolName,schools=[],classes=[],students=[],members=[],teacherClasses=[],
- grants=[],isAdmin=false,canManageAllRoles=false,onChanged
+ schoolAccounts=null,grants=[],isAdmin=false,canManageAllRoles=false,onChanged
 }){
  const can=feature=>isAdmin||grants.includes(feature);
  const availableTabs=tabs.filter(t=>{
+  if(t.id==="accounts")return !!schoolAccounts;
   if(t.id==="leaders"||t.id==="consultants")return isAdmin;
   if(!schoolId)return false;
   return t.id==="classes"?(can("classes.view")||can("classes.manage")||can("classes.import")):
    t.id==="teachers"?(can("users.manage")||can("teachers.assign")||can("staff.import")):
     (can("classes.view")||can("students.manage")||can("students.import"));
  });
- const [tab,setTab]=useState(isAdmin?"leaders":"classes"),[expandedBulk,setExpandedBulk]=useState("");
+ const [tab,setTab]=useState(availableTabs[0]?.id||"classes"),[expandedBulk,setExpandedBulk]=useState("");
  const [busy,setBusy]=useState(false),[notice,setNotice]=useState("");
  const [classForm,setClassForm]=useState({grade:"Nursery",section:"A",academic_year:"2026-27"});
  const [staff,setStaff]=useState({name:"",email:"",mobile:"",role:"teacher",initialPassword:"",confirmPassword:""});
@@ -171,6 +173,7 @@ export default function SchoolManagementWorkspace({
    </div>
   </section>
   {notice&&<div className="notice" role="status">{notice}</div>}
+  {tab==="accounts"&&schoolAccounts}
   {isAdmin&&tab==="leaders"&&<SuperAdminStakeholders
    session={session} schools={schools} selectedSchoolId={schoolId} onChanged={reload}/>}
   {isAdmin&&tab==="consultants"&&<ConsultantManagement session={session} schools={schools} onChanged={reload}/>}

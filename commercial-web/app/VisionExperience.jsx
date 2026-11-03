@@ -11,8 +11,8 @@ export const guide={
  'implementation-history':['Find lesson evidence','Look up earlier preparations and classroom submissions.'],
  observations:['Review classroom practice','Explore classroom observations and feedback.'],
  schools:['Manage schools','Find a school or update its details.'],
- users:['Find people and classes','Open the school directory to work with staff, students and classes.'],
- accounts:['Manage a login','Change your password or manage school accounts you have permission to edit.'],
+ users:['Find people and classes','Manage school logins, staff, students and classes.'],
+ accounts:['Manage a login','Change your own sign-in password.'],
  permissions:['Set role access','Choose which tools each stakeholder role can use.'],
  consultant:['Support a school','Open support tools for your assigned schools.'],
  'school-success':['Open School Success','Continue to the separate school implementation workspace.']

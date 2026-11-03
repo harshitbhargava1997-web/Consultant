@@ -401,12 +401,12 @@ export default function Home(){
   </Box>
   {identity.admin&&<Box title="Register a school"><form onSubmit={addSchool} className="stack"><label>School name<input required maxLength={180} value={newSchool} onChange={e=>setNewSchool(e.target.value)} placeholder="Full registered school name"/></label><Btn kind="primary" type="submit" disabled={busy}><Plus size={16}/> Create school</Btn></form></Box>}
  </div>}
- {page==="accounts"&&<AccountSettings key={(schoolId||"")+session.user.id+role} session={session} schoolId={schoolId} schoolName={school?.name} manager={!!schoolId&&(identity.admin||(["owner","principal","consultant"].includes(role)&&can("users.manage")))} call={callAdmin}/>}
+ {page==="accounts"&&<AccountSettings key={(schoolId||"")+session.user.id+role} session={session} schoolId={schoolId} schoolName={school?.name} manager={false}/>}
  {page==="users"&&(identity.admin||schoolId)&&
   (can("users.manage")||can("classes.view")||can("classes.manage")||can("classes.import")||
    can("teachers.assign")||can("staff.import")||can("students.manage")||
    can("students.import")||can("data.export"))&&
-  <SchoolManagementWorkspace client={client} session={session} schoolId={schoolId}
+  <SchoolManagementWorkspace schoolAccounts={!!schoolId&&(identity.admin||(["owner","principal","consultant"].includes(role)&&can("users.manage")))?<AccountSettings key={schoolId+session.user.id+role} session={session} schoolId={schoolId} schoolName={school?.name} manager call={callAdmin} onChanged={refresh}/>:null} client={client} session={session} schoolId={schoolId}
    schoolName={school?.name||"Selected school"} schools={identity.schools} classes={visibleClasses}
    students={students.filter(s=>visibleClasses.some(c=>c.id===s.class_id))}
    members={members} teacherClasses={teacherClasses}
