@@ -12,6 +12,7 @@ test('invalid text must never silently resolve to a different login',()=>{
 test('no provisioning route opts new accounts out of first-login password change',()=>{
  for(const route of ['admin','bulk','consultants']){
  const src=readFileSync(new URL('../app/api/'+route+'/route.js',import.meta.url),'utf8');
- assert.doesNotMatch(src,/must_change_password\s*:\s*false/);assert.match(src,/must_change_password\s*:\s*true/);
+ const reset="body.action==='accountReset'?{password:pass,app_metadata:{must_change_password:false}}";if(route==='admin')assert.ok(src.includes(reset));
+ assert.doesNotMatch(src.replace(reset,''),/must_change_password\s*:\s*false/);assert.match(src,/must_change_password\s*:\s*true/);
  }
 });

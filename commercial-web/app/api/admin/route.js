@@ -69,7 +69,7 @@ export async function POST(request) {
   if(ctx.error)return response({error:ctx.error},ctx.status);
   if(ctx.user.app_metadata?.must_change_password)return response({error:"Change your initial password first."},403);
   const body=await request.json();
-  if(['accountList','accountEdit','accountLogin','accountRemove','accountReset','accountCreate'].includes(body.action)){
+  if(['accountList','accountDetails','accountEdit','accountLogin','accountRemove','accountReset','accountCreate'].includes(body.action)){
    const db=adminClient(),schoolId=String(body.schoolId||''),id=String(body.target||'');
    const valid=id=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
    const read=async q=>{const {data,error}=await q;if(error)throw Error('School account lookup failed');return data;};
@@ -98,6 +98,11 @@ export async function POST(request) {
    if(!valid(id)||id===ctx.user.id)return response({error:'Choose another school member.'},403);
    const [target,platform,consultant]=await Promise.all([read(member().select('role').eq('school_id',schoolId).eq('user_id',id).maybeSingle()),read(db.from('literacy_platform_admins').select('user_id').eq('user_id',id).maybeSingle()),read(db.from('literacy_consultants').select('user_id').eq('user_id',id).maybeSingle())]);
    if(!target||!roles.includes(target.role)||platform||consultant)return response({error:'This account is outside your school management permissions.'},403);
+   if(body.action==='accountDetails'){
+    const {data,error}=await db.auth.admin.getUserById(id);
+    if(error||!data?.user)return response({error:'Unable to load login details.'},503);
+    return response({account:{id,email:data.user.email||null,mobile:data.user.phone||null}});
+   }
    const scope=q=>q.eq('school_id',schoolId).eq('user_id',id).eq('role',target.role);
    if(body.action==='accountRemove'){await read(scope(member().delete()).select('user_id').single());return response({ok:true});}
    if(body.action==='accountEdit'){
@@ -107,7 +112,7 @@ export async function POST(request) {
    const others=await read(member().select('role').eq('user_id',id).neq('school_id',schoolId));
    if(others.length&&!ctx.isAdmin)return response({error:'This login is used at multiple schools. Ask the platform admin to change its credentials.'},403);
    if(phone&&(target.role!=='teacher'||others.some(r=>r.role!=='teacher')))return response({error:'Mobile login is for teacher-only accounts.'},400);
-   const patch=body.action==='accountReset'?{password:pass,app_metadata:{must_change_password:true}}:{...(email?{email,email_confirm:true}:{}),...(phone?{phone,phone_confirm:true}:{})};
+   const patch=body.action==='accountReset'?{password:pass,app_metadata:{must_change_password:false}}:{...(email?{email,email_confirm:true}:{}),...(phone?{phone,phone_confirm:true}:{})};
    const changed=await db.auth.admin.updateUserById(id,patch);
    return changed.error?response({error:'Login change failed. Check the details and try again.'},409):response({ok:true});
   }
