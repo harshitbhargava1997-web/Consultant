@@ -1,13 +1,14 @@
 "use client";
 import {useEffect,useMemo,useState} from "react";
 import {BookOpen,Edit3,ExternalLink,Eye,FileText,Plus,Send,Users} from "lucide-react";
+import './content-shelves.css';
 import {LEVELS} from "../lib/supabase";
 import VcBlendingCourse from "./VcBlendingCourse";
 import {getVcItem} from "../lib/vcCourse";
 
 const GRADES=LEVELS.filter(grade=>grade==="Nursery"||grade==="LKG"||grade==="UKG"||/^Grade [1-5]$/.test(grade));
 const TYPES=[
- {id:"demonstration",label:"Demonstration"},{id:"lesson_plan",label:"Lesson preparation"},
+ {id:"demonstration",label:"Demonstration"},{id:"lesson_plan",label:"Lesson plan"},
  {id:"activity",label:"Practice activity"},{id:"worksheet",label:"Worksheet"},
  {id:"audio",label:"Audio"},{id:"video",label:"Video"},{id:"external",label:"External resource"}
 ];
@@ -22,10 +23,13 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
  const [items,setItems]=useState([]),[allowedGrades,setAllowedGrades]=useState(GRADES);
  const [grade,setGrade]=useState("Nursery"),[form,setForm]=useState(blank);
  const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
+ const [shelf,setShelf]=useState(""),[format,setFormat]=useState("all");
  const [courseItem,setCourseItem]=useState(null);
  const grades=useMemo(()=>isAdmin?GRADES:GRADES.filter(value=>allowedGrades.includes(value)),[allowedGrades,isAdmin]);
  const gradeKey=grades.join("|");
- const gradeItems=items.filter(item=>item.grade===grade&&item.status!=="archived");
+ const allGradeItems=items.filter(item=>item.grade===grade&&item.status!=="archived");
+ const gradeItems=allGradeItems.filter(i=>shelf==="plans"?i.content_type==="lesson_plan":i.content_type!=="lesson_plan"&&(format==="all"||i.content_type===format));
+ function navigate(dest){setShelf(dest);setFormat("all");setCourseItem(null);setForm({...blank(),grade,contentType:dest==="plans"?"lesson_plan":"demonstration"});}
  const gradeCompetencies=competencies.filter(item=>item.grade===form.grade&&item.active!==false);
  async function load(){
   setLoading(true);setMessage("");
@@ -55,7 +59,7 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
  }
  async function save(event){
   event.preventDefault();
-  if(await execute("save",form))setForm(blank());
+  if(await execute("save",form))setForm({...blank(),grade,contentType:shelf==="plans"?"lesson_plan":"demonstration"});
  }
  function edit(item){
   setForm({id:item.id,title:item.title,summary:item.summary||"",grade:item.grade,competencyId:item.competency_id||"",
@@ -64,21 +68,23 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
    resourceUrl:item.resource_url||"",targetRoles:item.target_roles||[...ROLES],sequence:item.sequence||0});
   window.scrollTo({top:0,behavior:"smooth"});
  }
- return <div className="digital-content-library">
+ if(!shelf)return <section aria-label="Digital content" className="dc-gateway"><span className="eyebrow">VISION LITERACY</span><h2>What do you need for class?</h2><div className="dc-doors">{[["library","Library","Find a demonstration, activity or worksheet.",BookOpen],["plans","Lesson Plans","Open a grade-wise plan to prepare and teach.",FileText]].map(([id,title,text,Icon])=><button key={id} type="button" className={"dc-door "+id} onClick={()=>navigate(id)}><span className="dc-picture" aria-hidden="true"><Icon size={56} strokeWidth={1.7}/></span><strong>{title}</strong><span>{text}</span><b>Open {title} →</b></button>)}</div></section>;
+ return <div className="digital-content-library"><button type="button" className="btn outline" onClick={()=>navigate("")}>← Digital Content</button>
   <section className="panel digital-content-heading">
-   <div className="panel-head"><h2><BookOpen size={20}/> Grade-wise Digital Content Library</h2><span className="eyebrow">CLASSROOM PREPARATION</span></div>
-   <p className="helper">Select a grade to access published demonstrations, lesson preparation, practice resources and checks for understanding linked to the literacy progression.</p>
+   <div className="panel-head"><h2><BookOpen size={20}/> {shelf==="plans"?"Lesson Plans":"Library"}</h2><span className="eyebrow">CLASSROOM PREPARATION</span></div>
+   <p className="helper">{shelf==="plans"?"Choose a grade to see its lesson plans. Plans for a grade can be used across its sections.":"Choose a grade and resource format to find something to use in class."}</p>
    <div className="digital-grade-tabs" role="group" aria-label="Select digital content grade">
-    {grades.map(value=><button type="button" key={value} className={grade===value?"active":""} aria-pressed={grade===value} onClick={()=>setGrade(value)}>{value}</button>)}
+    {grades.map(value=><button type="button" key={value} className={grade===value?"active":""} aria-pressed={grade===value} onClick={()=>{setGrade(value);if(!form.id)setForm(f=>({...f,grade:value,competencyId:""}));}}>{value}</button>)}
    </div>
+   {shelf==="library"&&<label className="dc-format">Resource format<select value={format} onChange={e=>{setFormat(e.target.value);setCourseItem(null);}}><option value="all">All resources</option>{TYPES.filter(t=>t.id!=="lesson_plan").map(t=><option key={t.id} value={t.id}>{t.label}</option>)}</select></label>}
   </section>
   {message&&<div className="notice" role="status">{message}</div>}
-  {!loading&&grade==="LKG"&&gradeItems.some(item=>getVcItem(item))&&<section className="panel vc-course-entry">
+  {!loading&&shelf==="library"&&format==="all"&&grade==="LKG"&&allGradeItems.some(item=>getVcItem(item))&&<section className="panel vc-course-entry">
    <h2>VC Blending Course · A → E → I → O → U</h2>
    <p>Open the vowel units for preparation, interactive blending, printable worksheets and review inside Vision.</p>
-   <button type="button" className="btn primary" onClick={()=>setCourseItem(gradeItems.find(item=>getVcItem(item)))}>Open VC course</button>
+   <button type="button" className="btn primary" onClick={()=>setCourseItem(allGradeItems.find(item=>getVcItem(item)))}>Open VC course</button>
   </section>}
-  {!loading&&courseItem&&gradeItems.some(item=>item.id===courseItem.id)&&<VcBlendingCourse key={courseItem.id} items={gradeItems.filter(item=>getVcItem(item))} initialItem={courseItem} isAdmin={isAdmin} onClose={()=>setCourseItem(null)}/>}
+  {!loading&&courseItem&&allGradeItems.some(item=>item.id===courseItem.id)&&<VcBlendingCourse key={courseItem.id} items={allGradeItems.filter(item=>getVcItem(item))} initialItem={courseItem} isAdmin={isAdmin} onClose={()=>setCourseItem(null)}/>}
   {isAdmin&&<section className="panel digital-content-publisher">
    <div className="panel-head"><h2><Plus size={18}/> {form.id?"Edit digital content":"Create digital content"}</h2><span className="eyebrow">SUPER ADMIN PUBLISHING</span></div>
    <p className="helper">Saving creates a draft. Review it in the library below, then publish it to the selected stakeholder roles.</p>
@@ -104,10 +110,10 @@ export default function DigitalContentLibrary({session,schoolId,competencies=[],
    </form>
   </section>}
   <section className="panel">
-   <div className="panel-head"><h2><Eye size={18}/> {grade} preparation</h2><span className="eyebrow">{gradeItems.length} ITEMS</span></div>
+   <div className="panel-head"><h2><Eye size={18}/> {grade} · {shelf==="plans"?"Lesson plans":"Library resources"}</h2><span className="eyebrow">{gradeItems.length} ITEMS</span></div>
    {loading&&<p className="helper">Loading digital content…</p>}
    {!loading&&!grades.length&&<p className="helper">No assigned class grades are available for this teacher account.</p>}
-   {!loading&&grades.length&&!gradeItems.length&&<p className="helper">No digital content has been published for {grade} yet.</p>}
+   {!loading&&grades.length&&!gradeItems.length&&<p className="helper">No {shelf==="plans"?"lesson plans":"matching library resources"} available for {grade}.</p>}
    <div className="digital-content-grid">{gradeItems.map(item=>{
     const competency=competencies.find(value=>value.id===item.competency_id);
     return <article className="digital-content-card" key={item.id}>

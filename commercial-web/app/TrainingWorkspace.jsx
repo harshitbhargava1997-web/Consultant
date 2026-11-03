@@ -150,9 +150,10 @@ export default function TrainingWorkspace({
  const schoolParticipants=(data.review||[]).filter(p=>
   p.name.toLowerCase().includes(reviewFilter.toLowerCase())||p.role.includes(reviewFilter.toLowerCase()));
  return <div className="training-module">
-  {hasDigitalContentAccess&&<DigitalContentLibrary session={session} schoolId={schoolId} competencies={competencies} isAdmin={isAdmin}/>}
+  {hasDigitalContentAccess&&<DigitalContentLibrary key={(schoolId||"")+session.user.id} session={session} schoolId={schoolId} competencies={competencies} isAdmin={isAdmin}/>}
+  {hasProgrammeAccess&&<details className="dc-programmes" key={String(hasDigitalContentAccess)} open={!hasDigitalContentAccess||undefined}><summary>Professional learning and training</summary>
   {hasProgrammeAccess&&<section className="panel">
-   <div className="panel-head"><h2><GraduationCap size={20}/> Digital Content & Professional Learning</h2>
+   <div className="panel-head"><h2><GraduationCap size={20}/> Professional Learning</h2>
     <span className="eyebrow">{isAdmin?"CONTENT DEPLOYMENT":"LEARNING WORKSPACE"}</span></div>
    <p className="helper">Access assigned learning material, practise with exercises, earn certificates and connect professional-learning evidence with students' literacy assessment progress.</p>
    <div className="training-stats">
@@ -378,5 +379,6 @@ export default function TrainingWorkspace({
     </tr>)}</tbody></table></div>
    {!schoolParticipants.length&&<p className="helper">No matching staff members or training records.</p>}
   </section>}
+ </details>}
  </div>;
 }
