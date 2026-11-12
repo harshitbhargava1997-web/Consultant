@@ -59,7 +59,7 @@ export default function VoiceReflection({ disabled, onChange, onRecording, onFil
         return; setTextOnly(false); setStarting(true); callbacks.current.onRecording(true); setError(''); setSpeechFailed(false); setSpeechStatus('Requesting microphone…'); setInterim(''); try {
         const w = window, Constructor = w.SpeechRecognition || w.webkitSpeechRecognition;
         if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined')
-            throw Error('Voice recording is unavailable in this browser. Type your reflection and attach a voice note below.');
+            throw Error('Voice recording is unavailable in this browser. Type your reflection or use text-only dictation.');
         const audio = await navigator.mediaDevices.getUserMedia({ audio: {echoCancellation:true,noiseSuppression:true,autoGainControl:true} });
         if(!alive.current){audio.getTracks().forEach(t=>t.stop());return;}
         stream.current = audio;
