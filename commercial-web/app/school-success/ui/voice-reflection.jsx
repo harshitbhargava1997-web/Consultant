@@ -6,6 +6,7 @@ import { formatReflection, reflectionPrompts, reflectionSectionLimit } from '@/l
 export default function VoiceReflection({ disabled, onChange, onRecording, onFile, prompts = reflectionPrompts, title = '1. Lesson planning & reflection', description, format = formatReflection }) {
     const [parts, setParts] = useState({}), [target, setTarget] = useState(prompts[0][0]), [language, setLanguage] = useState('en-IN'), [recording, setRecording] = useState(false), [interim, setInterim] = useState(''), [error, setError] = useState(''), [starting, setStarting] = useState(false), [supported, setSupported] = useState(null);
     const [speechStatus,setSpeechStatus]=useState(''),[speechFailed,setSpeechFailed]=useState(false),[finishing,setFinishing]=useState(false);
+    const [textOnly,setTextOnly]=useState(false);
     const retrySpeech=useRef(null),stopping=useRef(false);
     const values = useRef(parts), recognizer = useRef(null), callbacks = useRef({ onChange, onRecording, onFile }), media = useRef(null), stream = useRef(null), speechSession = useRef(null), alive = useRef(true);
     callbacks.current = { onChange, onRecording, onFile };
@@ -20,9 +21,42 @@ export default function VoiceReflection({ disabled, onChange, onRecording, onFil
             media.current.stop();
     } stream.current?.getTracks().forEach(t => t.stop()); }; }, []);
     function publish(key, text) { const next = { ...values.current, [key]: text }; values.current = next; setParts(next); callbacks.current.onChange(format(next), next.materials || ''); }
-    async function stop(){if(stopping.current)return;stopping.current=true;setFinishing(true);setSpeechStatus('Finishing transcription…');await speechSession.current?.finish();speechSession.current?.dispose();setInterim('');if(media.current?.state==='recording')media.current.stop();else{stopping.current=false;setFinishing(false);}}
+    async function stop(){if(stopping.current)return;stopping.current=true;setFinishing(true);setSpeechStatus('Finishing transcription…');await speechSession.current?.finish();speechSession.current?.dispose();setInterim('');if(media.current?.state==='recording')media.current.stop();else{stopping.current=false;setFinishing(false);setRecording(false);setSpeechStatus('Stopped — review your text.');callbacks.current.onRecording(false);}}
+    function startTextOnly() {
+        if (starting || recording) return;
+        const Constructor = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!Constructor) { setError('Dictation is unavailable. Use the keyboard microphone.'); return; }
+        setTextOnly(true); setError(''); setSpeechFailed(false); setInterim('');
+        stopping.current = false;
+        const key = target;
+        const accumulator = speechText(values.current[key] || '');
+        const recognition = new Constructor();
+        recognizer.current = recognition;
+        recognition.lang = language;
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.onresult = event => {
+            const result = accumulator.read(event.results);
+            publish(key, result.text.slice(0, reflectionSectionLimit));
+            setInterim(result.interim);
+            setSpeechStatus('Receiving text');
+        };
+        setRecording(true); callbacks.current.onRecording(true);
+        speechSession.current?.dispose();
+        speechSession.current = attachSpeechSession(recognition, {
+            active: () => alive.current && !stopping.current,
+            onCycle: () => accumulator.cycle(),
+            onState: setSpeechStatus,
+            onUnavailable: reason => {
+                setError(speechErrorMessage(reason)); setSpeechStatus('Unavailable');
+                setRecording(false); callbacks.current.onRecording(false);
+                speechSession.current?.dispose();
+            }
+        });
+        speechSession.current.start();
+    }
     async function start() { if (starting || recording)
-        return; setStarting(true); callbacks.current.onRecording(true); setError(''); setSpeechFailed(false); setSpeechStatus('Requesting microphone…'); setInterim(''); try {
+        return; setTextOnly(false); setStarting(true); callbacks.current.onRecording(true); setError(''); setSpeechFailed(false); setSpeechStatus('Requesting microphone…'); setInterim(''); try {
         const w = window, Constructor = w.SpeechRecognition || w.webkitSpeechRecognition;
         if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined')
             throw Error('Voice recording is unavailable in this browser. Type your reflection and attach a voice note below.');
@@ -51,7 +85,7 @@ export default function VoiceReflection({ disabled, onChange, onRecording, onFil
             speechSession.current?.dispose();setSpeechFailed(false);setError('');
             const accumulator=speechText(values.current[key]||'');
             const r=new Constructor();recognizer.current=r;r.lang=language;r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
-            r.onresult=event=>{const result=accumulator.read(event.results);publish(key,result.text.slice(0,reflectionSectionLimit));setInterim(result.interim);};
+            r.onresult=event=>{const result=accumulator.read(event.results);publish(key,result.text.slice(0,reflectionSectionLimit));setInterim(result.interim);setSpeechStatus('Receiving text');};
             speechSession.current=attachSpeechSession(r,{active:()=>alive.current&&recorder.state==='recording',onUnavailable:unavailable,onState:setSpeechStatus,onCycle:()=>accumulator.cycle()});
             speechSession.current.start();
         };
@@ -71,6 +105,6 @@ export default function VoiceReflection({ disabled, onChange, onRecording, onFil
     finally {
         setStarting(false);
     } }
-    return <div className="teacher-evidence"><h3>{title}</h3><p className="hint">{description || 'Prepare for your lesson by describing what you will teach, why, the materials you will use and how you will check learning. Choose each section to dictate or write your planning notes, then review the text before submitting.'}</p><div className="form-grid"><label className="field"><span>Speaking language</span><select disabled={recording || starting} value={language} onChange={e => setLanguage(e.target.value)}><option value="en-IN">English (India)</option><option value="hi-IN">Hindi</option></select></label><label className="field"><span>Reflection section</span><select disabled={recording || starting} value={target} onChange={e => setTarget(e.target.value)}>{prompts.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></div><button className="button primary" type="button" disabled={starting || finishing || disabled && !recording} onClick={() => recording ? stop() : start()}>{recording ? <Square size={16}/> : <Mic size={16}/>} {finishing?'Saving recording…':starting?'Opening microphone…':recording ? 'Stop voice reflection' : 'Start voice reflection'}</button>{recording && <p role="status">{speechStatus} {interim}</p>}{recording&&speechFailed&&!finishing&&supported&&<button type="button" className="button" onClick={()=>retrySpeech.current?.()}>Retry transcription</button>}{supported === false && <p className="hint">Live transcription is unavailable here. Tap a field and use your phone keyboard’s microphone, or type your reflection.</p>}{error && <p className="negative" role="alert">{error}</p>}<p className="hint">For mobile use, open this link directly in Chrome, allow microphone access, select English or Hindi, and keep this page visible while speaking. Browser transcription needs a working speech service and may require internet. Your recording and transcribed text are saved together. Review the filled section before submitting; your saved reflection will include your reviewed text.</p>{prompts.map(([key, label]) => <label className="field" key={key}><span>{label}</span><textarea rows={2} maxLength={reflectionSectionLimit} disabled={recording || starting} value={parts[key] || ''} onChange={e => publish(key, e.target.value)} placeholder={key === 'objective' ? 'What should students learn, and why?' : key === 'materials' ? 'Which teaching-learning materials, books, digital content or physical resources will you use?' : key === 'teacher' ? 'How will you teach? Which resources will you use?' : key === 'student' ? 'What will students do?' : key === 'practice' ? 'Course Book / Workbook pages, classwork and homework' : key === 'review' ? 'How will you check learning? What needs to happen next?' : label}/></label>)}<details><summary>Preview the consolidated reflection</summary><p style={{ whiteSpace: 'pre-wrap' }}>{format(parts) || 'Your reflection will appear here as you speak or type.'}</p></details></div>;
+    return <div className="teacher-evidence"><h3>{title}</h3><p className="hint">{description || 'Prepare for your lesson by describing what you will teach, why, the materials you will use and how you will check learning. Choose each section to dictate or write your planning notes, then review the text before submitting.'}</p><div className="form-grid"><label className="field"><span>Speaking language</span><select disabled={recording || starting} value={language} onChange={e => setLanguage(e.target.value)}><option value="en-IN">English (India)</option><option value="hi-IN">Hindi</option></select></label><label className="field"><span>Reflection section</span><select disabled={recording || starting} value={target} onChange={e => setTarget(e.target.value)}>{prompts.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></div><button className="button primary" type="button" disabled={starting || finishing || disabled && !recording} onClick={() => recording ? stop() : start()}>{recording ? <Square size={16}/> : <Mic size={16}/>} {finishing?'Saving recording…':starting?'Opening microphone…':recording ? (textOnly ? 'Stop reflection dictation' : 'Stop voice reflection') : 'Start voice reflection'}</button>{!recording && <button type="button" className="button" disabled={disabled || starting || finishing || supported === false} onClick={startTextOnly}>Dictate reflection text only</button>}<div role="status" aria-live="polite"><p>Audio recording: {textOnly ? 'Off — text dictation selected' : finishing ? 'Saving audio…' : recording ? 'Recording' : starting ? 'Requesting microphone…' : 'Stopped'}</p><p>Transcription: {speechStatus || 'Ready'} {interim}</p></div>{recording&&!textOnly&&speechFailed&&!finishing&&supported&&<button type="button" className="button" onClick={()=>retrySpeech.current?.()}>Retry transcription</button>}{supported === false && <p className="hint">Live transcription is unavailable here. Tap a field and use your phone keyboard’s microphone, or type your reflection.</p>}{error && <p className="negative" role="alert">{error}</p>}<p className="hint">For mobile use, open this link directly in Chrome, allow microphone access, select English or Hindi, and keep this page visible while speaking. Browser transcription needs a working speech service and may require internet. Your recording and transcribed text are saved together. Review the filled section before submitting; your saved reflection will include your reviewed text.</p>{prompts.map(([key, label]) => <label className="field" key={key}><span>{label}</span><textarea rows={2} maxLength={reflectionSectionLimit} disabled={recording || starting} value={parts[key] || ''} onChange={e => publish(key, e.target.value)} placeholder={key === 'objective' ? 'What should students learn, and why?' : key === 'materials' ? 'Which teaching-learning materials, books, digital content or physical resources will you use?' : key === 'teacher' ? 'How will you teach? Which resources will you use?' : key === 'student' ? 'What will students do?' : key === 'practice' ? 'Course Book / Workbook pages, classwork and homework' : key === 'review' ? 'How will you check learning? What needs to happen next?' : label}/></label>)}<details><summary>Preview the consolidated reflection</summary><p style={{ whiteSpace: 'pre-wrap' }}>{format(parts) || 'Your reflection will appear here as you speak or type.'}</p></details></div>;
 }
 
