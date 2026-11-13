@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import os
 import sqlite3
+import shutil
 import threading
 import time
 import uuid
@@ -11,8 +12,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
-MAX_BYTES = 25 * 1024 * 1024
-RETENTION = 7 * 86400
+MAX_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "5")) * 1024 * 1024
+RETENTION = 2 * 86400
 
 
 class Jobs:
@@ -46,10 +47,12 @@ class Jobs:
                 if (previous['owner'], previous['digest'], previous['language']) != (owner, digest, language):
                     raise HTTPException(409, 'Recording identity already used')
                 return self.public(previous)
-            if db.execute("SELECT COUNT(*) FROM jobs WHERE state IN ('queued','processing')").fetchone()[0] >= 30:
+            if db.execute("SELECT COUNT(*) FROM jobs WHERE state IN ('queued','processing')").fetchone()[0] >= 10:
                 raise HTTPException(429, 'Queue full. Keep the recording and retry later.')
             if db.execute("SELECT COUNT(*) FROM jobs WHERE owner=? AND state IN ('queued','processing')", (owner,)).fetchone()[0] >= 5:
                 raise HTTPException(429, 'Please wait for your pending recordings.')
+            if shutil.disk_usage(self.root).free < len(audio) + 30 * 1024 * 1024:
+                raise HTTPException(507, 'Storage full. Keep the recording and retry later.')
             path = self.root / (job_id + '.audio')
             path.write_bytes(audio)
             try:
@@ -81,10 +84,10 @@ class Jobs:
             # Decode once with a duration bound before invoking the model.
             from faster_whisper.audio import decode_audio
             samples = decode_audio(str(self.root / (row['id'] + '.audio')), sampling_rate=16000)
-            if len(samples) > 16000 * 600:
-                raise ValueError('Recording exceeds ten minutes')
+            if len(samples) > 16000 * 120:
+                raise ValueError('Recording exceeds two minutes')
             segments, _ = model.transcribe(samples, language=row['language'], task='transcribe',
-                                            vad_filter=True, beam_size=5, condition_on_previous_text=False)
+                                            vad_filter=True, beam_size=1, condition_on_previous_text=False)
             text = ' '.join(segment.text.strip() for segment in segments).strip()
             with self.db() as db:
                 db.execute("UPDATE jobs SET state='completed', text=? WHERE id=?", (text, row['id']))
@@ -122,8 +125,8 @@ def create_app(model_factory=None):
             model = model_factory()
         else:
             from faster_whisper import WhisperModel
-            model = WhisperModel(os.environ.get('WHISPER_MODEL', 'small'), device='cpu', compute_type='int8',
-                                 cpu_threads=int(os.environ.get('CPU_THREADS', '2')),
+            model = WhisperModel(os.environ.get('WHISPER_MODEL', 'base'), device='cpu', compute_type='int8',
+                                 cpu_threads=int(os.environ.get('CPU_THREADS', '1')),
                                  download_root=str(jobs.root / 'models'))
         stop = threading.Event()
         def run():
@@ -160,7 +163,7 @@ def create_app(model_factory=None):
         audio = bytearray()
         async for chunk in request.stream():
             if len(audio) + len(chunk) > MAX_BYTES:
-                raise HTTPException(413, 'Recording exceeds 25 MB')
+                raise HTTPException(413, 'Recording exceeds upload limit')
             audio.extend(chunk)
         if not audio:
             raise HTTPException(400, 'Empty recording')
