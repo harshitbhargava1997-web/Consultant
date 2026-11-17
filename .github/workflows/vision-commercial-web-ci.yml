@@ -1,0 +1,51 @@
+name: Vision Portal — tests and build
+
+on:
+  pull_request:
+    branches:
+      - commercial-staging
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vision-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Unit tests and Next.js build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: commercial-web
+        shell: bash
+
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      CI: "true"
+
+    steps:
+      - name: Check out the proposed changes
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: commercial-web/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run offline unit and regression tests
+        run: node --test tests/*.test.mjs tests/*.test.cjs
+
+      - name: Build Next.js application
+        run: npm run build
