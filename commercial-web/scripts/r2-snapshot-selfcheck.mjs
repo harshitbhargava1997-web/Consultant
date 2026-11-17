@@ -8,8 +8,12 @@
 //
 // Needs the Production School Success settings (Supabase service role for the stored R2 settings,
 // SCHOOL_SUCCESS_SIGNING_KEY, SCHOOL_SUCCESS_TRANSFER_KEY). Refuses to run without --write-synthetic.
-//   node scripts/r2-snapshot-selfcheck.mjs --write-synthetic [--probe]
+//   node scripts/r2-snapshot-selfcheck.mjs --write-synthetic [--probe] [--next-route-context]
+// --next-route-context runs everything through Next.js's patched fetch inside a route-handler context,
+// i.e. the same fetch behaviour as the deployed /api routes.
 import {AwsClient} from 'aws4fetch';
+import {createRequire} from 'node:module';
+import {AsyncLocalStorage} from 'node:async_hooks';
 import {env} from '../lib/school-success/environment.js';
 import {localDatabase} from '../lib/school-success/database.js';
 import {loadR2Config,r2Request,r2Diagnostics,describeR2,r2UploadsConfigured} from '../lib/school-success/r2-evidence.js';
@@ -52,7 +56,10 @@ async function main(){
   const header=new AwsClient({accessKeyId:config.R2_ACCESS_KEY_ID,secretAccessKey:config.R2_SECRET_ACCESS_KEY,service:'s3',region:'auto'});
   const objectUrl=key=>new URL(config.R2_ENDPOINT_URL).origin+'/'+encodeURIComponent(config.R2_BUCKET_NAME)+'/'+key.split('/').map(encodeURIComponent).join('/');
   let o=await fresh();await report('HEAD:query-signed-absent',await r2Request(config,o.key,'HEAD'));
-  o=await fresh();await report('PUT:query-signed+if-none-match (production request)',await r2Request(config,o.key,'PUT',o.body,{'Content-Type':'application/octet-stream','If-None-Match':'*'}));
+  // The request exactly as deployed in 88871b8 (signed Request object passed to fetch).
+  const deployedShape=async(key,body)=>{const signed=await header.sign(objectUrl(key),{method:'PUT',headers:{'Content-Type':'application/octet-stream','If-None-Match':'*','x-amz-content-sha256':'UNSIGNED-PAYLOAD'},body,aws:{signQuery:true},duplex:'half'});return fetch(signed,{signal:AbortSignal.timeout(120000)});};
+  o=await fresh();await report('PUT:deployed-88871b8-request-shape',await deployedShape(o.key,o.body));
+  o=await fresh();await report('PUT:fixed-r2Request+if-none-match',await r2Request(config,o.key,'PUT',o.body,{'Content-Type':'application/octet-stream','If-None-Match':'*'}));
   o=await fresh();await report('PUT:query-signed-no-condition',await r2Request(config,o.key,'PUT',o.body,{'Content-Type':'application/octet-stream'}));
   o=await fresh();await report('PUT:header-signed+if-none-match',await header.fetch(objectUrl(o.key),{method:'PUT',body:o.body,headers:{'Content-Type':'application/octet-stream','If-None-Match':'*'}}));
   o=await fresh();await report('PUT:header-signed-no-condition',await header.fetch(objectUrl(o.key),{method:'PUT',body:o.body,headers:{'Content-Type':'application/octet-stream'}}));
@@ -87,5 +94,17 @@ async function main(){
  check('public-url-ciphertext-only',!plain.includes('%PDF')&&!plain.includes('Synthetic R2 self-check')&&!plain.includes(scope.teacher),{publicStatus:pub?pub.status:'unreachable',bytes:pubBytes.length});
 }
 
-main().then(()=>{const pass=results.length>0&&results.every(Boolean);console.log('SELFCHECK RESULT '+(pass?'PASS':'FAIL'));process.exitCode=pass?0:1;})
+async function run(){
+ if(!args.has('--next-route-context'))return main();
+ globalThis.AsyncLocalStorage=AsyncLocalStorage;
+ const require=createRequire(import.meta.url);
+ const {createPatchedFetcher}=require('next/dist/server/lib/patch-fetch.js');
+ const {workAsyncStorage}=require('next/dist/server/app-render/work-async-storage.external.js');
+ const {workUnitAsyncStorage}=require('next/dist/server/app-render/work-unit-async-storage.external.js');
+ globalThis.fetch=createPatchedFetcher(globalThis.fetch,{workAsyncStorage,workUnitAsyncStorage});
+ out('fetch-context',{nextPatchedFetch:true,routeHandler:'/api/school-success/report-snapshots'});
+ const store={route:'/api/school-success/report-snapshots',page:'/api/school-success/report-snapshots/route',isDraftMode:false,isStaticGeneration:false,nextFetchId:1,pendingRevalidates:{},incrementalCache:undefined};
+ return workAsyncStorage.run(store,()=>workUnitAsyncStorage.run({type:'request',implicitTags:{tags:[]}},main));
+}
+run().then(()=>{const pass=results.length>0&&results.every(Boolean);console.log('SELFCHECK RESULT '+(pass?'PASS':'FAIL'));process.exitCode=pass?0:1;})
  .catch(e=>{out('fatal',{error:String(e?.message||e).replace(/^\d+:/,'').slice(0,300)});console.log('SELFCHECK RESULT FAIL');process.exitCode=1;});
