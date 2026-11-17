@@ -5,7 +5,11 @@ import { autoTable } from 'jspdf-autotable';
 import { includedMetric } from './reports.js';
 import {reportEvidenceGroups} from '../report-sequence.js';
 import {formatReportDuration as duration} from './report-units.js';
-export function createReportPdf(profiles, from, to, settings, comparison) {
+// Files that belong in lesson documentation rather than the usage report: generated preparation PDFs,
+// audio recordings and after-class reflections. They are not deleted; they stay in lesson records.
+export const LESSON_DOCUMENTATION_ONLY = ['Lesson preparation PDFs', 'Audio recordings', 'After-class reflections'];
+// options.lessonDocs(profile) -> [{grade, section, subject, lessons, url}] adds the lesson-documentation summary.
+export function createReportPdf(profiles, from, to, settings, comparison, options = {}) {
     if (!profiles.length)
         throw Error('Select at least one teacher');
     const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
@@ -26,10 +30,10 @@ export function createReportPdf(profiles, from, to, settings, comparison) {
         text(line, 16, y, 9, '#51616a');
         y += 4.5;
     } y += 3; };
-    const table = (head, body, links) => { if (!body.length) {
+    const table = (head, body, links, linkColumn = 0, columnStyles) => { if (!body.length) {
         paragraph('No records in this review period.');
         return;
-    } room(20); autoTable(doc, { startY: y, head: [head], body: body.length ? body : [['No records in this review period', ...head.slice(1).map(() => '')]], margin: { left: 16, right: 16, top: 22, bottom: 20 }, styles: { font: 'Report', fontSize: 8, cellPadding: 2.6, textColor: '#243e48', overflow: 'linebreak' }, headStyles: { fillColor: navy, textColor: '#ffffff', fontStyle: 'bold' }, alternateRowStyles: { fillColor: '#f1f7f6' }, rowPageBreak: 'avoid', didDrawCell: data => { if (links && data.section === 'body' && data.column.index === 0 && links[data.row.index])
+    } room(20); autoTable(doc, { startY: y, head: [head], body: body.length ? body : [['No records in this review period', ...head.slice(1).map(() => '')]], margin: { left: 16, right: 16, top: 22, bottom: 20 }, styles: { font: 'Report', fontSize: 8, cellPadding: 2.6, textColor: '#243e48', overflow: 'linebreak' }, headStyles: { fillColor: navy, textColor: '#ffffff', fontStyle: 'bold' }, alternateRowStyles: { fillColor: '#f1f7f6' }, ...(columnStyles ? { columnStyles } : {}), rowPageBreak: 'avoid', didParseCell: data => { if (linkColumn && data.section === 'body' && data.column.index === linkColumn) { data.cell.styles.textColor = teal; data.cell.styles.fontStyle = 'bold'; } }, didDrawCell: data => { if (links && data.section === 'body' && data.column.index === linkColumn && links[data.row.index])
             doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: links[data.row.index] }); } }); y = doc.lastAutoTable.finalY + 9; };
     const banner = (kicker, title, subtitle) => { doc.setFillColor(navy); doc.rect(0, 0, 210, 8, 'F'); text('ONELERN  /  SCHOOL SUCCESS', 16, 19, 9, teal, true); text(kicker.toUpperCase(), 16, 32, 9, '#647780', true); doc.setFont('Report', 'bold'); doc.setFontSize(23); const lines = doc.splitTextToSize(title, 178); text(lines, 16, 43, 23, navy, true); y = 45 + lines.length * 8; paragraph(subtitle); doc.setDrawColor('#c6ded9'); doc.line(16, y, 194, y); y += 10; };
     const usageKpis = [0, 1, 2, 3].filter(i => settings.quantitative && settings.daily[i] > 0 && includedMetric(i, settings));
@@ -79,6 +83,15 @@ export function createReportPdf(profiles, from, to, settings, comparison) {
                 heading('Lesson preparation - consolidated report');
                 table(['Activity', 'Sessions', 'Preparation time'], [['Lesson preparation', p.metrics[0].logs.length, duration(p.metrics[0].actual)]]);
             }
+            if (options.lessonDocs) {
+                const groups = options.lessonDocs(p) || [];
+                heading('Lesson documentation');
+                if (!groups.length) paragraph('No lesson plans or classroom evidence were recorded in this review period.');
+                else {
+                    paragraph('Lessons are grouped by class, section and subject. Each link opens the matching lesson documentation for this teacher and period (sign-in required), with plans, evidence, reflections and review, and a PDF download.');
+                    table(['Class / section', 'Subject', 'Reporting period', 'Lessons documented', 'Lesson documentation'], groups.map(g => [[g.grade, g.section && g.section !== 'Not Applicable' ? 'Section\u00a0' + g.section : ''].filter(Boolean).join('\n') || '—', g.subject || '—', from === to ? from : from + ' to ' + to, String(g.lessons), 'Open lesson documentation\u00a0↗'].map(String)), groups.map(g => g.url), 4, { 0: { cellWidth: 32 }, 1: { cellWidth: 29 }, 2: { cellWidth: 29 }, 3: { cellWidth: 30, halign: 'center' }, 4: { cellWidth: 58 } });
+                }
+            }
             heading('Book / chapter breakdown');
             table(['Book / chapter', 'Grade', 'Subject', 'Sessions', 'Time'], p.books.map(b => [b.title, b.grade || '—', b.subject || '—', b.sessions, duration(b.minutes)]));
             for (const i of [2, 3]) {
@@ -96,7 +109,7 @@ export function createReportPdf(profiles, from, to, settings, comparison) {
                 const fileOrder=['Lesson preparation PDFs','Audio recordings','Activity files','Writing samples','Phonics evidence'];
                 const order=label=>{const i=fileOrder.indexOf(label);return i<0?fileOrder.length:i;};
                 for (const e of reportEvidenceGroups(p).sort((a,b)=>order(a.label)-order(b.label)))
-                    if (e.files.length && (e.label !== 'After-class reflections' || settings.sections.closure !== false)) {
+                    if (e.files.length && !LESSON_DOCUMENTATION_ONLY.includes(e.label)) {
                         heading(e.label);
                         table(['Open evidence', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => ['Open file ' + (i + 1), f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]), e.files.map(f => f.url));
                     }

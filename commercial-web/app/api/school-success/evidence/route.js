@@ -5,6 +5,8 @@ import { gateway, publicBase } from '@/lib/school-success/live';
 import { scopedSubmission, evidencePlan, submissionRecords } from '@/lib/school-success/teacher-submissions';
 import { seal, unseal, r2UploadsConfigured, r2Request, loadR2Config } from '@/lib/school-success/r2-evidence';
 import { assertResumeAccess, lessonFromRows, assertEvidenceMatches } from '@/lib/school-success/lesson-workflow';
+import { reflectionInputSchema, planReflectionDocuments, storeReflectionDocuments, attachReflectionText, reflectionFetcher, sha256Hex } from '@/lib/school-success/reflection-text';
+import { submissionSchema } from '@/lib/school-success/teacher-submissions';
 async function handlerPOST(req) {
     try {
         checkOrigin(req);
@@ -33,13 +35,30 @@ async function handlerPOST(req) {
         if (body.action === 'resume') {
             const grant = await resumeGrant(body.resume);
             const data = await gateway({ action: 'readLesson', id: grant.id, school: grant.school, teacher: grant.teacher, actor: a.email });
-            return Response.json(lessonFromRows(data.rows), { headers: { 'Cache-Control': 'no-store' } });
+            const lesson = lessonFromRows(data.rows);
+            // Show saved written reflections as text in the selected lesson (never raw JSON).
+            await attachReflectionText([{ kind: 'submission', files: lesson.files }], reflectionFetcher({ base: publicBase(), get: (key, url) => r2UploadsConfigured(config) ? r2Request(config, key, 'GET') : fetch(url, { signal: AbortSignal.timeout(8000) }) }));
+            // Recorded feedback stays visible to School Success administrators, as in the earlier feed.
+            if (a.role === 'admin') {
+                const ids = data.rows.map(r => String(r.id)), reviews = await gateway({ action: 'readLessonReviews', ids });
+                lesson.feedback = (reviews.rows || []).filter(r => ids.includes(String(r.record_id)) && r.feedback).map(r => ({ periodId: data.rows.find(row => String(row.id) === String(r.record_id)).lesson_period_id, text: r.feedback, date: r.updated_at }));
+            }
+            return Response.json(lesson, { headers: { 'Cache-Control': 'no-store' } });
         }
         if (body.action === 'prepare') {
             const mode = body.mode || 'legacy';
             if (!['legacy', 'preparation', 'evidence'].includes(mode))
                 throw Error('Choose preparation or classroom evidence');
-            const submission = scopedSubmission(body.submission, a), files = evidencePlan(submission);
+            let submission = scopedSubmission(body.submission, a);
+            // JSON evidence is written only by the server (written reflections); browsers cannot upload it.
+            if (submission.files.some(f => /\.json$/i.test(f.name)))
+                throw Error('Use PDF, photo, video or audio evidence files');
+            const reflectionInput = body.reflections == null ? [] : reflectionInputSchema.parse(body.reflections);
+            if (reflectionInput.some(r => !submission.periods.some(p => p.id === r.periodId)))
+                throw Error('403:Reflection must belong to a class period of this lesson');
+            if (reflectionInput.length && mode !== 'evidence')
+                throw Error('Add after-class reflections with classroom evidence.');
+            let files = evidencePlan(submission);
             if (files.length && !r2UploadsConfigured(config))
                 throw Error('503:File uploads require the R2 upload secrets. You can save a lesson reflection without files.');
             if (mode === 'preparation' && submission.files.some(f => !['voice', 'lesson_plan'].includes(f.category)))
@@ -68,15 +87,50 @@ async function handlerPOST(req) {
                     return Response.json(mode === 'preparation' ? await resumeReceipt(submission, existing) : existing);
                 }
             }
+            // Written after-class reflections: built deterministically here and rebuilt and verified at commit.
+            let reflectionDocs = [];
+            if (reflectionInput.length) {
+                if (!r2UploadsConfigured(config))
+                    throw Error('503:Saving written reflections requires the R2 upload secrets.');
+                const planned = await planReflectionDocuments({ submission, reflections: reflectionInput, updateId: body.updateId, conductedOn: body.conductedOn, evidencePlan, submissionSchema });
+                submission = planned.submission; reflectionDocs = planned.docs; files = planned.uploads;
+            }
             const exp = Date.now() + 60 * 60 * 1000;
-            return Response.json({ token: await seal({ kind: 'plan', email: a.email, exp, submission, mode, ...(mode === 'evidence' ? { resume: body.resume, version: body.version, updateId: body.updateId, conductedOn: body.conductedOn } : {}) }, signer), files: await Promise.all(files.map(async (file) => ({ id: file.id, token: await seal({ kind: 'file', email: a.email, exp, ...file }, signer) }))) });
+            // Bounded plan token: hashes only. The browser resends the submission and reflections at commit.
+            const sealedPlan = { kind: 'plan', v: 2, email: a.email, exp, mode, submissionId: submission.id, school: submission.school, teacher: submission.teacher, submissionHash: await sha256Hex(JSON.stringify(submission)),
+                ...(mode === 'evidence' ? { resume: body.resume, version: body.version, updateId: body.updateId, conductedOn: body.conductedOn, reflections: reflectionDocs.map(({ id, periodId, sha256, size }) => ({ id, periodId, sha256, size })) } : {}) };
+            return Response.json({ token: await seal(sealedPlan, signer), files: await Promise.all(files.map(async (file) => ({ id: file.id, token: await seal({ kind: 'file', email: a.email, exp, ...file }, signer) }))) });
         }
         if (body.action === 'commit') {
             const plan = await unseal(body.token, signer);
             if (plan.kind !== 'plan' || plan.email !== a.email)
                 throw Error('403:Submission access denied');
-            const submission = scopedSubmission(plan.submission, a);
-            if (submission.school !== plan.submission.school || submission.teacher !== plan.submission.teacher)
+            let submission, reflectionDocs = [];
+            if (plan.v === 2) {
+                // Rebuild the exact prepared submission from the resent body and verify it against the sealed hash.
+                const base = scopedSubmission(body.submission, a);
+                if (base.files.some(f => /\.json$/i.test(f.name)))
+                    throw Error('Use PDF, photo, video or audio evidence files');
+                if (plan.mode === 'evidence') {
+                    const planned = await planReflectionDocuments({ submission: base, reflections: body.reflections ?? [], updateId: plan.updateId, conductedOn: plan.conductedOn, evidencePlan, submissionSchema });
+                    submission = planned.submission; reflectionDocs = planned.docs;
+                }
+                else {
+                    if (Array.isArray(body.reflections) && body.reflections.length)
+                        throw Error('Add after-class reflections with classroom evidence.');
+                    submission = base;
+                }
+                const sealed = plan.reflections || [];
+                if (await sha256Hex(JSON.stringify(submission)) !== plan.submissionHash || submission.id !== plan.submissionId || reflectionDocs.length !== sealed.length || reflectionDocs.some(d => !sealed.some(x => x.id === d.id && x.periodId === d.periodId && x.sha256 === d.sha256 && x.size === d.size)))
+                    throw Error('409:This submission changed after it was prepared. Submit it again.');
+            }
+            else {
+                // Plans sealed before this release carried the submission (no written reflections).
+                if (!plan.submission || plan.reflections?.length)
+                    throw Error('409:This submission was prepared by an earlier version. Submit it again.');
+                submission = scopedSubmission(plan.submission, a);
+            }
+            if (submission.school !== (plan.school ?? plan.submission?.school) || submission.teacher !== (plan.teacher ?? plan.submission?.teacher))
                 throw Error('403:Teacher selection changed. Reopen the original lesson.');
             if (plan.mode === 'evidence') {
                 const grant = await resumeGrant(plan.resume);
@@ -84,6 +138,8 @@ async function handlerPOST(req) {
                     throw Error('403:Lesson access denied');
             }
             const files = evidencePlan(submission);
+            // Accepted reflection content is immutable: content-addressed keys, no overwrite (see storeReflectionDocuments).
+            await storeReflectionDocuments(reflectionDocs, { put: (key, text, headers) => r2Request(config, key, 'PUT', text, headers), head: key => r2Request(config, key, 'HEAD') });
             for (const file of files) {
                 const r = await r2Request(config, file.key, 'HEAD');
                 if (!r.ok || Number(r.headers.get('content-length')) !== file.size)

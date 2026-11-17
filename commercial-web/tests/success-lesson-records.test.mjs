@@ -45,7 +45,7 @@ test('multiple audio recordings stay labelled under the correct lesson',async()=
  const lessons=buildLessonRecords(await load(),from,to),asha=byId(lessons,'101'),hindi=byId(lessons,'102');
  assert.deepEqual(asha.audio.map(f=>[f.label,f.url.split('/').pop()]),[['Lesson preparation recording 1','v1.wav'],['Lesson preparation recording 2','v2.wav']]);
  assert.deepEqual(hindi.audio.map(f=>[f.label,f.url.split('/').pop()]),[['Lesson preparation recording','h1.wav']]);
- assert.deepEqual(asha.reflections.map(f=>[f.label,f.kind]),[['After-class reflection','PDF'],['After-class reflection recording','Audio']]);
+ assert.deepEqual(asha.reflections.map(f=>[f.label,f.kind,Boolean(f.legacy)]),[['Earlier after-class reflection (saved PDF)','PDF',true],['After-class reflection recording','Audio',false]]);
  assert.ok(!asha.audio.some(f=>/closure/.test(f.url)),'reflection audio stays with reflections');
 });
 
@@ -77,7 +77,9 @@ test('school, teacher, class and subject filters never cross schools',async()=>{
  assert.deepEqual(filterLessons(lessons,{teacher:JSON.stringify(['Beta School','Asha'])}).map(l=>l.recordId),['201']);
  assert.deepEqual(filterLessons(lessons,{grade:'Grade 2'}).map(l=>l.recordId),['150','101','201']);
  assert.deepEqual(filterLessons(lessons,{school:'Alpha School',grade:'Grade 2',subject:'English'}).map(l=>l.recordId),['101']);
- assert.deepEqual(lessonFilterOptions(alphaAsha),{grades:['Grade 2','Grade 3'],subjects:['English','Hindi','Mathematics']});
+ assert.deepEqual(lessonFilterOptions(alphaAsha),{grades:['Grade 2','Grade 3'],sections:['A','B'],subjects:['English','Hindi','Mathematics']});
+ assert.deepEqual(filterLessons(lessons,{school:'Alpha School',grade:'Grade 2',section:'A'}).map(l=>l.recordId),['150','101']);
+ assert.deepEqual(filterLessons(lessons,{school:'Alpha School',section:'B'}).map(l=>l.recordId),['102']);
  assert.equal(buildLessonRecords(await load(),'2026-09-01','2026-09-01').map(l=>l.recordId).join(),'80');
 });
 

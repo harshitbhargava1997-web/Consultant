@@ -3,7 +3,8 @@ import {useEffect,useRef,useState} from 'react';
 import {Mic,Square} from 'lucide-react';
 import {formatReflection,reflectionPrompts,reflectionSectionLimit} from '@/lib/school-success/teacher-flow';
 
-export default function ReflectionEditor({disabled,uploadsEnabled=true,combinedFile,onChange,onFile,onRecording,prompts=reflectionPrompts,format=formatReflection,kind='planning'}){
+// audio=false hides the optional recording block (School Success after-class evidence); default keeps it.
+export default function ReflectionEditor({disabled,uploadsEnabled=true,combinedFile,onChange,onFile,onRecording,prompts=reflectionPrompts,format=formatReflection,kind='planning',audio=true}){
  const afterClass=kind==='closure',saveAction=afterClass?'Submit classroom evidence':'Save lesson preparation';
  const [parts,setParts]=useState({}),[phase,setPhase]=useState('idle'),[error,setError]=useState(''),[seconds,setSeconds]=useState(0),[preview,setPreview]=useState('');
  const callbacks=useRef({onChange,onFile,onRecording}),values=useRef({}),recorder=useRef(null),stream=useRef(null),alive=useRef(true),active=useRef(false);
@@ -77,7 +78,7 @@ export default function ReflectionEditor({disabled,uploadsEnabled=true,combinedF
    {prompts.map(([key,label])=><label className="field" key={key}><span>{label}</span><textarea rows={3} maxLength={reflectionSectionLimit} disabled={disabled||locked} value={parts[key]||''} onChange={e=>publish(key,e.target.value)} placeholder={afterClass?label:key==='objective'?'What should students learn, and why?':key==='materials'?'Which books, teaching materials or other resources will you use?':key==='teacher'?'How will you teach?':key==='student'?'What will students do?':key==='practice'?'Course Book / Workbook pages, classwork and homework':'How will you check learning? What needs to happen next?'}/></label>)}
    <details><summary>{afterClass?'Preview the after-class reflection':'Preview the lesson planning notes'}</summary><p style={{whiteSpace:'pre-wrap'}}>{format(parts)||'Your notes will appear here as you fill in the fields.'}</p></details>
   </div>
-  <div className="teacher-evidence"><h3>{afterClass?'Audio reflection on your class (optional)':'2. Audio reflection on your lesson plan (optional)'}</h3>
+  {audio&&<div className="teacher-evidence"><h3>{afterClass?'Audio reflection on your class (optional)':'2. Audio reflection on your lesson plan (optional)'}</h3>
    <p className="hint">{afterClass?'Reflect in your own language on the learning outcome, what went well and your remedial plan for students who need support.':'After completing the fields, reflect on your plan in your own language: what you will teach, how you will teach it and how you will check learning.'} This saves your voice without converting it to text.</p>
    <p className="hint">Finish keyboard dictation before recording. Keep this page open while speaking.</p>
    <button className="button primary" type="button" disabled={phase==='starting'||phase==='saving'||!recording&&(disabled||!uploadsEnabled)} onClick={()=>recording?stop():void start()}>{recording?<Square size={16}/>:<Mic size={16}/>} {phase==='starting'?'Opening microphone…':phase==='saving'?'Attaching recording…':recording?'Stop recording':combinedFile?'Record again':'Record audio reflection'}</button>
@@ -86,6 +87,6 @@ export default function ReflectionEditor({disabled,uploadsEnabled=true,combinedF
    {!uploadsEnabled&&<p className="hint">Audio uploads are unavailable. You can still complete the text fields.</p>}
    {error&&<p className="negative" role="alert">{error}</p>}
    {combinedFile&&<><p className="hint">Listen before saving. Recording again replaces this draft’s audio after the new recording finishes successfully.</p>{preview&&<audio aria-label={afterClass?'After-class audio reflection':'Lesson planning audio reflection'} controls preload="metadata" src={preview} style={{width:'100%'}}/>}</>}
-  </div>
+  </div>}
  </>;
 }

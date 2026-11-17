@@ -1,7 +1,8 @@
 import { AwsClient } from 'aws4fetch';
 export const r2UploadsConfigured = (c) => Boolean(c.R2_ACCESS_KEY_ID && c.R2_SECRET_ACCESS_KEY && c.R2_ENDPOINT_URL && c.R2_BUCKET_NAME && c.R2_PUBLIC_BASE_URL);
 const encoder = new TextEncoder();
-const encode = (bytes) => btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+// Chunked: spreading a large byte array into String.fromCharCode overflows the call stack.
+const encode = (bytes) => { let binary = ''; for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', ''); };
 const decode = (text) => Uint8Array.from(atob(text.replaceAll('-', '+').replaceAll('_', '/')), x => x.charCodeAt(0));
 async function signingKey(secret) { if (!secret)
     throw Error('503:Submission signing is not configured'); return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']); }

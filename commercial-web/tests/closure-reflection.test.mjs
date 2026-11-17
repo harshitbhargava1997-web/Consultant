@@ -35,15 +35,17 @@ import {execFileSync} from 'node:child_process';
 import {createReportPdf} from '../lib/school-success/report-pdf.js';
 import {createSchoolPortfolioPdf} from '../lib/school-success/school-portfolio-pdf.js';
 import {buildSchoolPortfolio} from '../lib/school-success/school-portfolio.js';
-test('Teacher and School 360 PDF controls omit closure headings and links when disabled',()=>{
+test('Teacher 360 usage PDFs leave reflections to lesson documentation; School 360 closure control still applies',()=>{
  const entries=[{id,kind:'submission',school:'School',teacher:'Teacher',date:'2026-11-01',grade:'LKG',subject:'English',topic:'VC blending',files:[{column:'Video_Evidence_1',url:'https://storage.example/closure/file.pdf'}]}];
  const settings=structuredClone(defaultReportSettings),profiles=buildProfiles(entries,[],'2026-11-01','2026-11-01',settings);
  const dir=mkdtempSync(join(tmpdir(),'closure-'));
  const extract=pdf=>{const path=join(dir,'report.pdf');writeFileSync(path,Buffer.from(pdf.output('arraybuffer')));return execFileSync('pdftotext',[path,'-'],{encoding:'utf8'});};
  try{
- assert.match(extract(createReportPdf(profiles,'2026-11-01','2026-11-01',settings)),/After-class reflections/);
+ // Usage PDFs no longer list after-class reflection files, whatever the saved closure setting.
+ assert.doesNotMatch(extract(createReportPdf(profiles,'2026-11-01','2026-11-01',settings)),/After-class reflections/);
  settings.sections.closure=false;
  assert.doesNotMatch(extract(createReportPdf(profiles,'2026-11-01','2026-11-01',settings)),/After-class reflections/);
+ settings.sections.closure=true;
  const model=buildSchoolPortfolio({entries,roster:[{school:'School',name:'Teacher'}],reportSettings:settings},'2026-11-01','2026-11-01');
  const options={...model,from:'2026-11-01',to:'2026-11-01',detail:true,includeEvidence:true};
  assert.match(extract(createSchoolPortfolioPdf(options)),/After-class reflections/);

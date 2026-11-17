@@ -23,6 +23,7 @@ const TeacherPortalWorkspace=dynamic(()=>import("./TeacherPortalWorkspace"),{loa
 const CurriculumEditor=dynamic(()=>import("./CurriculumEditor"),{loading:()=> <section className="panel">Opening workspace…</section>});
 const ConsultantWorkspace=dynamic(()=>import("./ConsultantWorkspace"),{loading:()=> <section className="panel">Opening consultant workspace…</section>});
 import {isEmail,loginLabel,normalizePhone} from "../lib/auth";
+import {safeReturnPath} from "../lib/return-path";
 import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNoAxesCombined,
  BookMarked,Eye,Menu,X,LogOut,Plus,Trash2,Search,ChevronRight,RefreshCw,LockKeyhole,
  CircleCheck,ArrowRight,AlertCircle,GraduationCap,FileUp} from "lucide-react";
@@ -114,6 +115,13 @@ export default function Home(){
   const {data:{subscription}}=client.auth.onAuthStateChange((_event,s)=>{if(mounted)setSession(s||null);});
   return ()=>{mounted=false;subscription.unsubscribe();};
  },[client]);
+ // After sign-in, continue to an allow-listed same-origin page requested via ?next= (e.g. a School
+ // Success lesson-documentation link). Access is still checked by that page's own APIs.
+ useEffect(()=>{
+  if(!session||session.user?.app_metadata?.must_change_password)return;
+  const next=safeReturnPath(new URLSearchParams(window.location.search).get('next'),window.location.origin);
+  if(next)window.location.replace(next);
+ },[session]);
  useEffect(()=>{
   if(!session||!client){setIdentity({admin:false,isConsultant:false,consultantSchools:[],memberships:[],schools:[]});setSuccessAccess(false);setRoleGrantsByRole({});setOverview({totals:null,loading:false,error:""});setArchivedSchools([]);setSchoolId("");return;}
   let alive=true;

@@ -16,3 +16,16 @@
 .success-app .sidebar .brand small{color:var(--muted)}
 .success-app .sidebar-bottom{display:block;padding:0;border-top:0}
 .success-app .sidebar .profile{color:var(--ink)}
+.success-app .teacher-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:24px}
+.success-app .teacher-action{display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;background:white;border:1px solid var(--line);border-radius:12px;padding:22px;color:var(--ink);min-height:120px}
+.success-app .teacher-action svg{color:var(--green);margin-bottom:6px}
+.success-app .teacher-action b{font-family:Manrope,sans-serif;font-size:17px}
+.success-app .teacher-action span{font-size:12px;color:var(--muted);line-height:1.5}
+.success-app .teacher-action:hover{border-color:#b9d2c3;background:#fafcf9}
+.success-app .teacher-action.selected{border:2px solid var(--green);background:var(--mint);padding:21px}
+.success-app .saved-reflections h4,.success-app .teacher-period h4{font-size:12px;margin:16px 0 8px;color:#2e694f}
+.success-app .saved-reflection{border:1px solid var(--line);border-left:3px solid var(--green);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:white}
+.success-app .saved-reflection>b{display:block;font-size:12px;color:var(--green);margin-bottom:4px}
+.success-app .saved-reflection span{display:block;font-size:11px;font-weight:650;color:var(--muted);margin-top:8px}
+.success-app .saved-reflection p{white-space:pre-wrap;margin:4px 0 0;color:var(--ink);font-size:13px;overflow-wrap:anywhere}
+@media(max-width:650px){.success-app .teacher-actions{grid-template-columns:1fr}}
