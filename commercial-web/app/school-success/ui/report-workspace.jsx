@@ -1,14 +1,14 @@
 'use client';
 import {successFetch} from '@/lib/school-success/client';
 import { reportDirectorySource } from '@/lib/school-success/directory';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, SlidersHorizontal, FileText, CheckCircle, Users, Calendar, ArrowUpRight } from 'lucide-react';
 import { buildProfiles, defaultReportSettings, reportSettingsSchema, reportRows, moduleLabels, evidenceNames } from '@/lib/school-success/reports';
 import {reportEvidenceGroups} from '@/lib/report-sequence';
 import {formatReportDuration as duration} from '@/lib/school-success/report-units';
 import { compareProfiles } from '@/lib/school-success/report-comparison';
-import { buildLessonRecords, lessonDocumentationGroups } from '@/lib/school-success/lesson-records';
-import { lessonDocumentationUrl } from '@/lib/school-success/lesson-links';
+import { isImageUrl } from '@/lib/school-success/lesson-records';
+import { buildDocumentationLinks, documentationGroups, groupLessons, storeSnapshot } from '@/lib/school-success/lesson-snapshots';
 import dynamic from 'next/dynamic';
 const LessonRecords = dynamic(() => import('./lesson-records'), { loading: () => <section className="card">Loading lesson records…</section> });
 const n = (v) => v.toLocaleString('en-IN', { maximumFractionDigits: 1 });
@@ -38,14 +38,24 @@ export default function ReportWorkspace({ data, school, from, to, setFrom, setTo
     } };
     const toggle = (key, value) => setSettings(s => ({ ...s, [key]: value }));
     // Lesson-documentation groups per teacher, using the same period rules as the Teacher Lesson PDF.
-    function lessonDocsOption() {
-        const source = reportDirectorySource(data, data.directory?.archives || [], includeArchived), byTeacher = new Map();
-        for (const g of lessonDocumentationGroups(buildLessonRecords(source.entries, from, to))) {
-            const url = lessonDocumentationUrl(window.location.origin, { school: g.school, teacher: g.teacher, grade: g.grade, section: g.section, subject: g.subject, from, to, includeArchived });
-            if (!byTeacher.has(g.teacherKey)) byTeacher.set(g.teacherKey, []);
-            byTeacher.get(g.teacherKey).push({ ...g, url });
-        }
-        return { lessonDocs: p => byTeacher.get(p.key) || [] };
+    // Snapshot links already stored for this loaded data; repeat exports reuse them instead of duplicating.
+    const snapshotCache = useRef(new Map());
+    useEffect(() => { snapshotCache.current = new Map(); }, [data]);
+    // Renders and stores the matching Teacher Lesson Documentation PDF for every teacher/class/section/subject
+    // group, then returns links for the usage PDF. Throws (no report) if any group cannot be stored.
+    async function lessonDocsOption(teacherKeys) {
+        const source = reportDirectorySource(data, data.directory?.archives || [], includeArchived), generatedAt = new Date().toISOString();
+        const { lessons, groups } = documentationGroups(source.entries, from, to, teacherKeys);
+        if (!groups.length) return { lessonDocs: () => [] };
+        const [{ createLessonDocumentationPdf }, { canvasRaster, loadLessonFont, loadEvidenceImages }] = await Promise.all([import('@/lib/school-success/lesson-report-pdf'), import('@/lib/school-success/lesson-pdf-assets')]);
+        try { await loadLessonFont(); } catch { /* device fonts still shape Hindi */ }
+        const wanted = [...new Set(groups.flatMap(g => groupLessons(lessons, g)).flatMap(l => ['activities', 'writing', 'additional'].flatMap(k => l[k].filter(f => isImageUrl(f.url)).slice(0, 6).map(f => f.url))))];
+        const images = wanted.length ? await loadEvidenceImages(wanted, { limit: 150, onProgress: (done, total) => setBusy(`Adding photos to lesson documentation ${done} of ${total}`) }) : new Map(), raster = canvasRaster();
+        const render = async (subset, { thumbnailsPerSection }) => { await new Promise(resolve => setTimeout(resolve, 0)); return new Uint8Array(createLessonDocumentationPdf({ kind: 'teacher', lessons: subset, from, to, raster, generatedAt: new Date(generatedAt), images: thumbnailsPerSection ? images : new Map(), thumbnailsPerSection: thumbnailsPerSection || 6 }).output('arraybuffer')); };
+        const links = await buildDocumentationLinks({ entries: source.entries, from, to, teacherKeys, includeArchived, generatedAt, render, cache: snapshotCache.current,
+            store: async (bytes, scope) => { const stored = await storeSnapshot(successFetch, bytes, scope); return { url: new URL(stored.url, window.location.origin).href }; },
+            onProgress: ({ done, total }) => setBusy(`Preparing lesson documentation PDFs ${done} of ${total}`) });
+        return { lessonDocs: p => links.get(p.key) || [] };
     }
     async function exportReport(kind) {
         if (compareEnabled && !comparison)
@@ -71,7 +81,7 @@ export default function ReportWorkspace({ data, school, from, to, setFrom, setTo
             return;
         }
         const { createReportPdf } = await import('@/lib/school-success/report-pdf');
-        const pdfOptions = lessonDocsOption();
+        const pdfOptions = await lessonDocsOption((kind === 'single' ? [active] : scoped).map(p => p.key));
         if (kind === 'zip') {
             const { zipSync } = await import('fflate');
             const files = {};
