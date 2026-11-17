@@ -100,3 +100,22 @@ test('scope guards reject mixed teachers, mixed schools and oversized PDFs',asyn
  const many=Array.from({length:MAX_LESSONS_PER_PDF+1},(_,i)=>({...lessons[0],key:'k'+i,recordId:String(i)}));
  assert.throws(()=>createLessonDocumentationPdf({kind:'teacher',lessons:many,from,to}),/Narrow/);
 });
+
+test('very long school, teacher and class names wrap on the cover and shorten in the running header',async()=>{
+ const lessons=await lessonsP,school='Shri Saraswati Vidya Mandir Higher Secondary School and Junior College, Bhopal (Madhya Pradesh) — Campus II',teacher='Dr. Annapurna Venkataraghavan Subramaniam-Chaturvedi';
+ const list=filterLessons(lessons,{teacher:asha}).map(l=>({...l,school,teacher,teacherKey:'long',grade:'Grade 5 (Integrated Bilingual Section)',subject:'Environmental Studies (EVS) and General Knowledge'}));
+ const {text,doc}=await make('teacher',{lessons:list});
+ const flat=text.replace(/\s+/g,' ');
+ assert.ok(flat.includes('Annapurna Venkataraghavan Subramaniam-Chaturvedi'),'teacher name kept whole on the cover');
+ assert.ok(flat.includes('Campus II'),'school name not cut on the cover');
+ assert.match(text,/…/,'running header is shortened with an ellipsis');
+ assert.equal(text.split('\f').filter(p=>p.trim()).length,doc.getNumberOfPages());
+});
+
+test('every line of a canvas-wrapped mixed Hindi–English paragraph is drawn by the canvas, so widths agree',async()=>{
+ const lessons=await lessonsP,base=lessons.find(l=>l.recordId==='150'),latinLine='https://example.test/a-very-long-unbroken-worksheet-reference.pdf';
+ const mixed={...base,plan:{fields:[{key:'practice',label:'Practice / classwork',text:'अभ्यास पुस्तिका पृष्ठ 22\n'+latinLine}],notes:''}};
+ const {raster,text}=await make('lesson',{lessons:[mixed]});
+ assert.ok(raster.calls.includes(latinLine),'Latin-only line from a mixed paragraph is rasterised');
+ assert.ok(!text.includes('a-very-long-unbroken'),'and not also written as PDF text');
+});

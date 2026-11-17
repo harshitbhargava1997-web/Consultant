@@ -73,3 +73,7 @@
 @media print{.lesson-records .lr-downloads,.lesson-records .lr-lesson-actions,.lesson-records .lr-pager{display:none}}
 .card .lesson-records>.card:first-child{border:0;padding:12px 0 0}
 .card .lesson-records{margin-top:12px}
+.lesson-records .lr-outside{background:#f8f1e3;color:#8a5a12;border-radius:8px;padding:10px 12px;font-size:12px;margin:10px 0 0}
+.lesson-records .lr-badge.outside{background:#f8f1e3;color:#8a5a12}
+.lesson-records .lr-lesson-actions{gap:10px;flex-wrap:wrap}
+.lesson-records .lr-meta b,.lesson-records .lr-title small{overflow-wrap:anywhere}

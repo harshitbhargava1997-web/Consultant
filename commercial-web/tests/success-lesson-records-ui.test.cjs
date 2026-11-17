@@ -46,3 +46,11 @@ test('School 360 school detail offers the Lesson records tab without changing ex
  assert.match(html,/Teachers<\/button>/);assert.match(html,/Evidence flow<\/button>/);assert.match(html,/Lesson records<\/button>/);
  assert.match(html,/Teacher breakdown/,'teachers tab remains the default');
 });
+
+test('a lesson with items outside the period says so and offers the complete history PDF',async()=>{
+ const {data,from,to}=await fixture(),{buildLessonRecords}=await import('../lib/school-success/lesson-records.js');
+ const lesson={...buildLessonRecords(data.entries,from,to).find(l=>l.recordId==='101'),outsidePeriodFiles:2,reviewOutsidePeriod:false};
+ const html=renderToStaticMarkup(React.createElement(ui.LessonCard,{lesson,number:1,showTeacher:false,busy:false,onDownload(){},onDownloadHistory(){},defaultOpen:true}));
+ assert.match(html,/Outside this reporting period: 2 files for this lesson are not shown here/);
+ assert.match(html,/More outside period/);assert.match(html,/Lesson PDF · this period/);assert.match(html,/Complete history PDF/);
+});

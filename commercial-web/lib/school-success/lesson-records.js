@@ -6,6 +6,7 @@
 // consultant observations (which carry no lesson identity) to lessons.
 import {fileCategory,lessonIdentity} from './school-portfolio.js';
 import {teacherKey} from './reports.js';
+import {chronologicalRows} from '../report-sequence.js';
 
 // Labels written by formatReflection() in teacher-flow.js. Only these exact
 // heading lines are treated as structure; anything else stays as written text.
@@ -69,19 +70,41 @@ function fileSection(file){
 }
 const additionalLabels={remedial:'Remedial plan / support',phonics:'Phonics / literacy evidence',portfolio:'Student portfolio',events:'Event picture',other:'Other file'};
 
-function lessonFromEntries(rows){
- const first=rows[0],files=new Map();
- for(const row of rows)for(const file of row.files||[]){
-  const url=safeUrl(file.url);
-  if(!url||files.has(url))continue; // one file is counted once per lesson, however often it is re-sent
-  files.set(url,{url,key:file.key||url,column:file.column||'',category:fileCategory(file),section:fileSection(file),addedOn:row.date||'',stage:row.feedStage||'',eventId:row.evidenceEventId||''});
+// Reporting scope:
+//  'period' (default) — evidence files and the Academic Review appear only when they were
+//     submitted/recorded within the selected dates, matching the period-scoped School 360° and
+//     Teacher 360° counts. The lesson plan text is the lesson itself and is always shown.
+//  'all' — complete lesson history: every stored file and the current review, whatever the date.
+// Labels are numbered on the complete history so "Classroom activity 3" is the same file in both.
+export const REPORT_SCOPES=['period','all'];
+export const istDay=iso=>{const t=new Date(iso).getTime();return Number.isFinite(t)?new Date(t+330*60000).toISOString().slice(0,10):'';};
+function lessonFromEntries(rows,{from,to,scope='period'}){
+ const ordered=chronologicalRows(rows),first=ordered[0],files=new Map(),inRange=d=>Boolean(d)&&d>=from&&d<=to;
+ for(const row of ordered)for(const file of row.files||[]){
+  const url=safeUrl(file.url);if(!url)continue;
+  // One file is counted once per lesson, however often it is re-sent; keep every date it was sent.
+  const known=files.get(url);
+  if(known){if(row.date&&!known.dates.includes(row.date))known.dates.push(row.date);continue;}
+  files.set(url,{url,key:file.key||url,column:file.column||'',category:fileCategory(file),section:fileSection(file),addedOn:row.date||'',dates:row.date?[row.date]:[],stage:row.feedStage||'',eventId:row.evidenceEventId||''});
  }
  const all=[...files.values()],pick=section=>all.filter(f=>f.section===section);
  const label=(list,name)=>list.map((f,i)=>({...f,kind:mediaKind(f.url),label:name(f,i,list)}));
  const reflections=pick('reflections'),reflectionAudio=reflections.filter(f=>isAudioUrl(f.url)),reflectionDocs=reflections.filter(f=>!isAudioUrl(f.url));
- const conducted=rows.map(r=>clean(r.conductedOn)).filter(Boolean).sort().at(-1)||'';
+ const keep=f=>scope==='all'||f.dates.some(inRange);
+ const scoped=list=>list.filter(keep);
+ const sections={
+  planFiles:label(pick('plan'),(f,i,l)=>(isImageUrl(f.url)?'Lesson plan photo':'Lesson plan document')+(l.length>1?' '+(i+1):'')),
+  activities:label(pick('activities'),(f,i)=>'Classroom activity '+(i+1)),
+  writing:label(pick('writing'),(f,i)=>'Written work sample '+(i+1)),
+  audio:label(pick('audio'),(f,i,l)=>'Lesson preparation recording'+(l.length>1?' '+(i+1):'')),
+  reflections:[...label(reflectionDocs,(f,i,l)=>'After-class reflection'+(l.length>1?' '+(i+1):'')),...label(reflectionAudio,(f,i,l)=>'After-class reflection recording'+(l.length>1?' '+(i+1):''))],
+  additional:label(pick('additional'),(f,i,l)=>{const same=l.filter(x=>x.category===f.category);return (additionalLabels[f.category]||'Other file')+(same.length>1?' '+(same.indexOf(f)+1):'');})
+ };
+ // Period view: the taught date comes only from in-period activity, so later uploads do not leak in.
+ const conducted=rows.filter(r=>scope==='all'||inRange(r.date)).map(r=>clean(r.conductedOn)).filter(Boolean).sort().at(-1)||'';
  const prepared=utcStamp(rows.map(r=>r.preparationSavedAt).find(Boolean)),submitted=utcStamp(rows.map(r=>r.lessonSubmittedAt).find(Boolean));
- const review=rows.map(r=>clean(r.review)).find(Boolean)||'',reviewedAt=clean(rows.map(r=>r.reviewedAt||r.version).find(Boolean));
+ const review=rows.map(r=>clean(r.review)).find(Boolean)||'',reviewedAt=utcStamp(clean(rows.map(r=>r.reviewedAt||r.version).find(Boolean)));
+ const reviewInScope=Boolean(review)&&(scope==='all'||inRange(istDay(reviewedAt)));
  const plan=parseLessonPlan(first.reflection,first.materials);
  const firstDate=rows.map(r=>r.date).filter(Boolean).sort()[0]||'';
  return {
@@ -90,14 +113,11 @@ function lessonFromEntries(rows){
   grade:clean(first.grade),section:clean(first.section),subject:clean(first.subject),topic:clean(first.topic)||'Classroom practice',
   plannedDate:clean(first.plannedDate),conductedOn:conducted,submittedAt:prepared||submitted,firstDate,
   hasPreparation:rows.some(r=>r.stage==='preparation_saved'||r.feedStage==='Lesson preparation'),
-  plan,
-  planFiles:label(pick('plan'),(f,i,l)=>(isImageUrl(f.url)?'Lesson plan photo':'Lesson plan document')+(l.length>1?' '+(i+1):'')),
-  activities:label(pick('activities'),(f,i)=>'Classroom activity '+(i+1)),
-  writing:label(pick('writing'),(f,i)=>'Written work sample '+(i+1)),
-  audio:label(pick('audio'),(f,i,l)=>'Lesson preparation recording'+(l.length>1?' '+(i+1):'')),
-  reflections:[...label(reflectionDocs,(f,i,l)=>'After-class reflection'+(l.length>1?' '+(i+1):'')),...label(reflectionAudio,(f,i,l)=>'After-class reflection recording'+(l.length>1?' '+(i+1):''))],
-  additional:label(pick('additional'),(f,i,l)=>{const same=l.filter(x=>x.category===f.category);return (additionalLabels[f.category]||'Other file')+(same.length>1?' '+(same.indexOf(f)+1):'');}),
-  feedback:review?{label:'Academic Review',text:review,date:utcStamp(reviewedAt)}:null
+  scope,period:{from,to},plan,
+  ...Object.fromEntries(Object.entries(sections).map(([key,list])=>[key,scoped(list)])),
+  outsidePeriodFiles:scope==='all'?0:all.filter(f=>!keep(f)).length,
+  reviewOutsidePeriod:Boolean(review)&&!reviewInScope,
+  feedback:reviewInScope?{label:'Academic Review',text:review,date:reviewedAt}:null
  };
 }
 
@@ -108,7 +128,9 @@ export function compareLessons(a,b){
 }
 
 // entries: mapLive entries already limited by server access scope and the report directory source.
-export function buildLessonRecords(entries,from,to){
+// A lesson is included when any of its activity (preparation or evidence) falls in the period.
+export function buildLessonRecords(entries,from,to,{scope='period'}={}){
+ if(!REPORT_SCOPES.includes(scope))throw Error('Unknown lesson report scope');
  const submissions=(entries||[]).filter(r=>r.kind==='submission'&&r.school&&r.teacher);
  const groups=new Map();
  for(const row of submissions){const key=lessonKeyOf(row);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row);}
@@ -116,7 +138,7 @@ export function buildLessonRecords(entries,from,to){
  for(const rows of groups.values()){
   const inPeriod=rows.filter(r=>r.date>=from&&r.date<=to);
   if(!inPeriod.length)continue;
-  const lesson=lessonFromEntries(rows);
+  const lesson=lessonFromEntries(rows,{from,to,scope});
   lesson.planSubmittedInPeriod=inPeriod.some(r=>r.stage==='preparation_saved'||r.feedStage==='Lesson preparation');
   lessons.push(lesson);
  }

@@ -21,6 +21,10 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  if(kind==='lesson'&&lessons.length!==1)throw Error('Choose one lesson for an individual lesson PDF.');
  if(kind==='teacher'&&new Set(lessons.map(l=>l.teacherKey)).size!==1)throw Error('Choose one teacher for a teacher lesson PDF.');
  if(kind==='school'&&new Set(lessons.map(l=>l.school)).size!==1)throw Error('Choose one school for a school lesson PDF.');
+ const scope=lessons[0].scope||'period';
+ // Consolidated reports are period snapshots; complete history is offered per lesson only.
+ if(lessons.some(l=>(l.scope||'period')!==scope))throw Error('Lessons must share one reporting scope.');
+ if(kind!=='lesson'&&scope!=='period')throw Error('Consolidated lesson reports cover the selected period only.');
  const on=key=>sections[key]!==false;
  const doc=new jsPDF({unit:'mm',format:'a4',compress:true});
  doc.addFileToVFS('Report-Regular.ttf',regularFont);doc.addFont('Report-Regular.ttf','Report','normal');
@@ -33,16 +37,20 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
 
  // ---------- text primitives ----------
  const font=(size,bold=false,color=palette.ink)=>{doc.setFont('Report',bold?'bold':'normal');doc.setFontSize(size);doc.setTextColor(color);doc.setCharSpace(0);};
+ // Lines wrapped by the canvas are also drawn by it, so measurement and drawing always agree.
+ const rasterLines=new Set();
  const wrap=(value,width,size,bold=false)=>{
   const text=String(value??'').replace(/\r\n?/g,'\n');
-  if(raster&&hasDevanagari(text))return raster.wrap(text,width,size,bold);
+  if(raster&&hasDevanagari(text)){const lines=raster.wrap(text,width,size,bold);lines.forEach(l=>rasterLines.add(l));return lines;}
   font(size,bold);return text.split('\n').flatMap(p=>p.trim()?doc.splitTextToSize(p,width):['']);
  };
  const textWidth=(value,size,bold=false)=>{if(raster&&hasDevanagari(value))return raster.width(String(value),size,bold);font(size,bold);return doc.getTextWidth(String(value));};
+ // Single-line text that must not overflow (running header): shorten with an ellipsis.
+ const fit=(value,width,size,bold=false)=>{let text=String(value??'');if(textWidth(text,size,bold)<=width)return text;const chars=Array.from(text);while(chars.length>1&&textWidth(chars.join('').trimEnd()+'…',size,bold)>width)chars.pop();return chars.join('').trimEnd()+'…';};
  function drawLine(line,x,top,size,{bold=false,color=palette.ink,align='left',spacing=0}={}){
   if(state.dry||!line)return;
   const h=lineHeight(size);
-  if(raster&&hasDevanagari(line)){
+  if(raster&&(hasDevanagari(line)||rasterLines.has(line))){
    const img=raster.line(line,size,bold,color);
    const left=align==='right'?x-img.width:align==='center'?x-img.width/2:x;
    doc.addImage(img.data,'PNG',left,top,img.width,h,undefined,'FAST');return;
@@ -56,7 +64,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   if(state.dry)return;
   font(7.5,false,palette.faint);
   const label=title+'  ·  ';drawLine(label,M,9.5,7.5,{color:palette.faint});
-  drawLine(context,M+textWidth(label,7.5),9.5,7.5,{color:palette.muted});
+  const offset=textWidth(label,7.5);drawLine(fit(context,W-offset,7.5),M+offset,9.5,7.5,{color:palette.muted});
   doc.setDrawColor(palette.hair);doc.setLineWidth(0.2);doc.line(M,16,PAGE_W-M,16);
  }
  function newPage(withHeader=true){
@@ -190,6 +198,10 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   rect(M,state.y,W,h,palette.tint,2);
   items.forEach(([label],i)=>{const x=xs[i];drawLine(label.toUpperCase(),x,state.y+3,6.8,{bold:true,color:palette.muted,spacing:0.3});lines[i].forEach((line,k)=>drawLine(line,x,state.y+3+lineHeight(6.8)+0.6+k*lineHeight(8.8),8.8,{bold:true,color:palette.navy}));if(i&&!state.dry){doc.setDrawColor(palette.hair);doc.setLineWidth(0.2);doc.line(x-3,state.y+3,x-3,state.y+h-3);}});
   state.y+=h+3;
+  if(scope==='period'&&(lesson.outsidePeriodFiles||lesson.reviewOutsidePeriod)){
+   const parts=[lesson.outsidePeriodFiles?plural(lesson.outsidePeriodFiles,'file'):'',lesson.reviewOutsidePeriod?'the Academic Review':''].filter(Boolean).join(' and ');
+   paragraph(`Outside this reporting period: ${parts} for this lesson ${lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'was':'were'} recorded outside ${periodText(from,to)} and ${lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'is':'are'} not shown. The complete lesson history PDF includes ${lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'it':'them'}.`,{size:8.2,color:palette.amber,after:2});
+  }
  }
  function lessonBody(lesson){
   const visible=visibleLessonSections(lesson,sections);
@@ -215,7 +227,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   const head=()=>{let x=M;ensure(9);cols.forEach(c=>{drawLine(c.label.toUpperCase(),c.align==='right'?x+c.w:c.align==='center'?x+c.w/2:x,state.y,6.4,{bold:true,color:palette.muted,align:c.align});x+=c.w+1.5;});state.y+=lineHeight(6.4)+1.4;rule(state.y,palette.navy,0.3);state.y+=1.6;};
   head();let n=0,headPage=state.page;
   for(const group of groups){
-   if(group.label){ensure(18);if(state.page!==headPage){head();headPage=state.page;}state.y+=1.5;drawLine(group.label,M,state.y,8.6,{bold:true,color:palette.teal});state.y+=lineHeight(8.6)+1;}
+   if(group.label){ensure(18);if(state.page!==headPage){head();headPage=state.page;}state.y+=1.5;for(const line of wrap(group.label,W,8.6,true)){drawLine(line,M,state.y,8.6,{bold:true,color:palette.teal});state.y+=lineHeight(8.6);}state.y+=1;}
    for(const lesson of group.lessons){
     n++;
     const topic=wrap(lesson.topic,cols[2].w,8.6,true),detail=kind==='school'?[]:wrap(classLine(lesson),cols[2].w,7.4);
@@ -246,19 +258,19 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  // ---------- cover ----------
  const summary=lessonSummary(lessons);
  function cover(){
-  const bandH=kind==='lesson'?44:70;
+  const subtitle=kind==='lesson'?[first.teacher,first.school].join('  ·  '):kind==='teacher'?first.teacher:first.school;
+  const subSize=kind==='lesson'?10.5:15,subLines=wrap(subtitle,W,subSize).slice(0,4);
+  const scopeLine=kind==='lesson'?(scope==='all'?'Complete lesson history  ·  as of '+formatStamp(generatedAt.toISOString()).split(',')[0]:'Reporting period  ·  '+periodText(from,to)):periodText(from,to);
+  const top=kind==='lesson'?13:22,titleSize=kind==='lesson'?19:25;
+  const bandH=Math.max(kind==='lesson'?44:70,top+8+lineHeight(titleSize)+(kind==='lesson'?1:2)+subLines.length*lineHeight(subSize)+1.5+lineHeight(10.5)+(kind==='lesson'?7:12));
   rect(0,0,PAGE_W,bandH,palette.navy,0);
   if(!state.dry){doc.setFillColor(palette.teal);doc.rect(0,bandH,PAGE_W,1.2,'F');}
-  state.y=kind==='lesson'?13:22;
+  state.y=top;
   drawLine('SCHOOL SUCCESS  ·  LESSON DOCUMENTATION',M,state.y,7.8,{bold:true,color:palette.tealSoft,spacing:0.5});state.y+=8;
-  if(kind==='lesson'){
-   drawLine(title,M,state.y,19,{bold:true,color:'#ffffff'});state.y+=lineHeight(19)+1;
-   drawLine([first.teacher,first.school].join('  ·  '),M,state.y,10.5,{color:'#d5e6e3'});
-   state.y=bandH+9;return;
-  }
-  drawLine(title,M,state.y,25,{bold:true,color:'#ffffff'});state.y+=lineHeight(25)+2;
-  drawLine(kind==='teacher'?first.teacher:first.school,M,state.y,15,{color:'#ffffff'});state.y+=lineHeight(15)+1.5;
-  drawLine(periodText(from,to),M,state.y,10.5,{color:'#c4dcd8'});
+  drawLine(title,M,state.y,titleSize,{bold:true,color:'#ffffff'});state.y+=lineHeight(titleSize)+(kind==='lesson'?1:2);
+  for(const line of subLines){drawLine(line,M,state.y,subSize,{color:kind==='lesson'?'#d5e6e3':'#ffffff'});state.y+=lineHeight(subSize);}
+  state.y+=1.5;drawLine(scopeLine,M,state.y,kind==='lesson'?8.6:10.5,{color:'#c4dcd8',bold:kind==='lesson'});
+  if(kind==='lesson'){state.y=bandH+9;return;}
   state.y=bandH+12;
   const classes=[...new Set(lessons.map(l=>l.grade).filter(Boolean))],subjects=[...new Set(lessons.map(l=>l.subject).filter(Boolean))];
   metaGrid([['School',first.school],[kind==='teacher'?'Teacher':'Teachers',kind==='teacher'?first.teacher:plural(summary.teachers,'teacher')],['Reporting period',periodText(from,to)],['Generated',formatStamp(generatedAt.toISOString())],['Classes',classes.join(', ')||'—'],['Subjects',subjects.join(', ')||'—']]);
@@ -267,7 +279,8 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   state.y+=3;kicker('About this report');
   const included=['Lesson plan',...[['activities','classroom activities'],['writing','student written work'],['audio','audio recordings'],['reflections','teacher reflections'],['feedback','Academic Review'],['additional','further evidence']].filter(([k])=>on(k)).map(([,l])=>l)];
   for(const note of [
-   'Lessons appear in the order they were first submitted. Evidence added later stays with its original lesson and does not change that order.',
+   `Reporting period ${periodText(from,to)}: evidence files, recordings, reflections and Academic Review appear only when they were submitted or recorded in this period, matching School 360° and Teacher 360° counts. Lesson plan details are shown in full for every lesson with activity in the period.`,
+   'Lessons appear in the order they were first submitted. Evidence added later stays with its original lesson and does not change that order. Lessons with items outside the period say so; the complete history is available as an individual lesson PDF.',
    'Each file is listed once under the lesson it was uploaded for. Links open the original stored evidence and need an internet connection.',
    'Counts describe what was submitted. They are not ratings of teaching quality.',
    'Included sections: '+included.join(', ')+'.'
@@ -284,7 +297,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
    kicker('Teacher overview');state.y+=1;
    const groups=groupLessons(lessons)[0].teachers;
    const optional=[['activities','Activity','activities'],['writing','Writing','writing'],['audio','Audio','audio'],['reflections','Reflections','reflections']].filter(([k])=>on(k));
-   overviewTable(['Teacher','Lessons','Plans',...optional.map(([,l])=>l),...(on('feedback')?['Reviewed']:[])],groups.map(t=>{const s=lessonSummary(t.lessons);return [t.teacher,s.lessons,s.plansSubmitted,...optional.map(([,,k])=>s[k]),...(on('feedback')?[s.reviewed]:[])];}),(()=>{const n=2+optional.length+(on('feedback')?1:0),w=18.5;return [W-n*w-n*1.5,...Array(n).fill(w)];})());
+   overviewTable(['Teacher','Lessons','Plans',...optional.map(([,l])=>l),...(on('feedback')?['Reviewed']:[])],groups.map(t=>{const s=lessonSummary(t.lessons);return [t.teacher,s.lessons,s.plansSubmitted,...optional.map(([,,k])=>s[k]),...(on('feedback')?[s.reviewed]:[])];}),(()=>{const n=2+optional.length+(on('feedback')?1:0),w=15.5;return [W-n*w-n*1.5,...Array(n).fill(w)];})());
    kicker('Class and subject breakdown');state.y+=1;
    const cs=[['activities','Activity'],['writing','Writing'],['audio','Audio']].filter(([k])=>on(k));
    overviewTable(['Class','Subject','Lessons','Teachers',...cs.map(([,l])=>l)],classSubjectBreakdown(lessons).map(r=>[r.grade||'—',r.subject||'—',r.lessons,r.teachers,...cs.map(([k])=>r[k])]),(()=>{const n=2+cs.length,w=17;const rest=W-n*w-(n+1)*1.5;return [rest*0.42,rest*0.58,...Array(n).fill(w)];})(),2);
@@ -304,7 +317,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   ordered.forEach((lesson,i)=>{
    newPage();pages.set(lesson.key,state.page);
    const divider=kind==='school'&&lesson.teacherKey!==currentTeacher;
-   if(divider){currentTeacher=lesson.teacherKey;kicker('Teacher',M,palette.muted);drawLine(lesson.teacher,M,state.y,13,{bold:true,color:palette.teal});state.y+=lineHeight(13)+1;rule(state.y,palette.teal,0.4);state.y+=5;}
+   if(divider){currentTeacher=lesson.teacherKey;kicker('Teacher',M,palette.muted);for(const line of wrap(lesson.teacher,W,13,true)){drawLine(line,M,state.y,13,{bold:true,color:palette.teal});state.y+=lineHeight(13);}state.y+=1;rule(state.y,palette.teal,0.4);state.y+=5;}
    lessonHeader(lesson,i,ordered.length,divider);lessonBody(lesson);
   });
   Object.assign(state,{page:indexStart,y:TOP,reuse:true});doc.setPage(indexStart);

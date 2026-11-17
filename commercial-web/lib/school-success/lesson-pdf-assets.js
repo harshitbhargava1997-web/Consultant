@@ -2,11 +2,18 @@
 // canvas, and optional evidence thumbnails. Images are fetched from the same stored URLs the
 // user can already open; nothing is uploaded, cached server-side or made public here.
 const PT=0.3528;
-const FONT_STACK='LessonHindi, "Noto Sans Devanagari", sans-serif';
+// Latin glyphs come from the same DejaVu Sans the PDF text uses; Devanagari falls back to Noto.
+const FONT_STACK='LessonReportSans, LessonHindi, "Noto Sans Devanagari", sans-serif';
 let fontReady=null;
 export function loadLessonFont(){
  if(typeof document==='undefined'||typeof FontFace==='undefined')return Promise.resolve();
- if(!fontReady)fontReady=(async()=>{const face=new FontFace('LessonHindi','url(/fonts/Lesson-Devanagari.ttf)');await face.load();document.fonts.add(face);await document.fonts.ready;})().catch(error=>{fontReady=null;throw error;});
+ if(!fontReady)fontReady=(async()=>{
+  const {regularFont,boldFont}=await import('./report-fonts.js');
+  const bytes=b64=>Uint8Array.from(atob(b64),c=>c.charCodeAt(0)).buffer;
+  const faces=[new FontFace('LessonHindi','url(/fonts/Lesson-Devanagari.ttf)'),new FontFace('LessonReportSans',bytes(regularFont),{weight:'400'}),new FontFace('LessonReportSans',bytes(boldFont),{weight:'700'})];
+  for(const face of await Promise.all(faces.map(f=>f.load())))document.fonts.add(face);
+  await document.fonts.ready;
+ })().catch(error=>{fontReady=null;throw error;});
  return fontReady;
 }
 // Draws text with the browser's shaping engine and returns PNG lines sized in millimetres.
@@ -14,6 +21,8 @@ export function canvasRaster(makeCanvas=()=>document.createElement('canvas'),pxP
  const measureCanvas=makeCanvas(),measure=measureCanvas.getContext('2d'),cache=new Map();
  const css=(size,bold)=>`${bold?'700':'400'} ${size*PT*pxPerMm}px ${FONT_STACK}`;
  const width=(text,size,bold)=>{measure.font=css(size,bold);return measure.measureText(text).width/pxPerMm;};
+ const graphemes=text=>typeof Intl!=='undefined'&&Intl.Segmenter?[...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(text)].map(x=>x.segment):Array.from(text);
+ function breakWord(token,maxWidth,size,bold){const parts=[];let part='';for(const g of graphemes(token)){if(part&&width(part+g,size,bold)>maxWidth){parts.push(part);part=g;}else part+=g;}if(part)parts.push(part);return parts;}
  return {
   width,
   wrap(text,maxWidth,size,bold){
@@ -21,9 +30,12 @@ export function canvasRaster(makeCanvas=()=>document.createElement('canvas'),pxP
    for(const paragraph of String(text).split('\n')){
     if(!paragraph.trim()){lines.push('');continue;}
     let row='';
-    for(const word of paragraph.split(/\s+/).filter(Boolean)){
-     const trial=row?row+' '+word:word;
-     if(row&&width(trial,size,bold)>maxWidth){lines.push(row);row=word;}else row=trial;
+    for(const token of paragraph.split(/\s+/).filter(Boolean)){
+     // An unbroken token wider than the line is split between grapheme clusters, never inside one.
+     for(const word of width(token,size,bold)>maxWidth?breakWord(token,maxWidth,size,bold):[token]){
+      const trial=row?row+' '+word:word;
+      if(row&&width(trial,size,bold)>maxWidth){lines.push(row);row=word;}else row=trial;
+     }
     }
     if(row)lines.push(row);
    }

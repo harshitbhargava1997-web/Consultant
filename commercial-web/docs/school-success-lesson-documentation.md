@@ -19,6 +19,20 @@
 
 Existing Teacher 360°, School 360°, KPI, comparison, combined/ZIP PDFs, workbook and CSV exports are unchanged.
 
+## Reporting period rule (review round 1)
+
+Consolidated PDFs and the on-screen view are **snapshots of the selected period**. This matches the period-scoped Teacher 360° and School 360° counts.
+
+- **Which lessons appear:** a lesson is included when any of its activity (preparation or a classroom-evidence upload) falls in the period, using the same IST dates as the School 360° evidence flow.
+- **Files:** a file appears only if it was submitted on an in-period date. A file re-sent inside the period counts once and keeps its original date.
+- **Academic Review:** appears only if it was recorded in the period. The "taught" date also comes only from in-period activity.
+- **Lesson plan text:** always shown, because it is the lesson itself.
+- **Disclosure:** a lesson with files or a review outside the period says so on screen ("More outside period") and in the PDF, giving how many were left out.
+- **Complete history:** **Complete history PDF** is offered per lesson. It is labelled "Complete lesson history · as of <date>" and includes every stored file and the current review.
+  - Consolidated reports cannot be built in complete-history mode.
+  - File labels are numbered on the full history, so "Classroom activity 3" is the same file in both views.
+- **Agreement with existing reports:** tests assert that period counts equal School 360°'s *Unique files* and *Prepared lessons*, and Teacher 360°'s activity and writing counts.
+
 ## Data rules (code-grounded)
 
 - **Lesson identity:**
@@ -77,6 +91,35 @@ This release creates no new links and does not widen access: users only see less
 - followed by a staged plan to stop public bucket reads.
 
 That plan would need care for previously shared PDFs and for the original standalone site.
+
+## Verification — review round 1
+
+- New `tests/success-lesson-period-scope.test.mjs` covers:
+  - evidence and a review after the period;
+  - IST midnight boundaries at both ends;
+  - a lesson prepared before the period;
+  - a lesson entirely outside the period;
+  - a file re-sent inside the period;
+  - stable labels across both views;
+  - agreement with School 360°/Teacher 360° counts;
+  - PDF captions and links.
+- Further new tests cover:
+  - long names wrapping on the cover;
+  - running-header ellipsis;
+  - every line of a canvas-wrapped mixed-script paragraph being drawn by the canvas;
+  - the outside-period note and the complete-history button.
+- Visual edge cases were generated in Chromium and inspected:
+  - a 120-character school name;
+  - a 75-character teacher name;
+  - a Hindi teacher name;
+  - long class and subject labels;
+  - mixed Hindi–English paragraphs;
+  - an unbroken 100-character URL;
+  - period vs complete-history PDFs of the same lesson.
+- Fixed after inspection:
+  - a long teacher name breaking mid-word in the overview table;
+  - an out-of-period "Taught" date showing in the period view;
+  - a Latin-only line from a mixed paragraph overflowing the margin. Canvas and PDF text now measure with the same DejaVu font for Latin.
 
 ## Verification
 

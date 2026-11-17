@@ -22,7 +22,10 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
  const [filters,setFilters]=useState({teacher:'',grade:'',subject:''}),[sections,setSections]=useState(defaultLessonSections),[embed,setEmbed]=useState(true);
  const [page,setPage]=useState(1),[busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const fresh=data.period?.from===from&&data.period?.to===to;
- const all=useMemo(()=>{const source=reportDirectorySource(data,data.directory?.archives||[],includeArchived);return buildLessonRecords(source.entries,from,to);},[data,from,to,includeArchived]);
+ const source=useMemo(()=>reportDirectorySource(data,data.directory?.archives||[],includeArchived),[data,includeArchived]);
+ // Period view (default) and complete per-lesson history, built from the same authorised data.
+ const all=useMemo(()=>buildLessonRecords(source.entries,from,to),[source,from,to]);
+ const history=useMemo(()=>new Map(buildLessonRecords(source.entries,from,to,{scope:'all'}).map(l=>[l.key,l])),[source,from,to]);
  const scoped=useMemo(()=>filterLessons(all,{school,teacher:teacherKey}),[all,school,teacherKey]);
  const teachers=useMemo(()=>[...new Map(scoped.map(l=>[l.teacherKey,l.teacher])).entries()].sort((a,b)=>a[1].localeCompare(b[1])),[scoped]);
  const options=lessonFilterOptions(scoped);
@@ -44,7 +47,7 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
    const images=wanted.length?await loadEvidenceImages(wanted,{limit:kind==='lesson'?36:150,onProgress:(done,total)=>setBusy(`Adding photos ${done} of ${total}`)}):new Map();
    setBusy('Laying out the PDF');await new Promise(resolve=>setTimeout(resolve,0));
    const doc=createLessonDocumentationPdf({kind,lessons:list,from,to,sections,images,raster:canvasRaster()});
-   const first=list[0],name=kind==='lesson'?`Lesson_${safeName(first.teacher,'Teacher')}_${first.plannedDate||first.firstDate||from}_${safeName(first.recordId,'record')}`:kind==='teacher'?`Teacher_Lessons_${safeName(first.teacher,'Teacher')}_${from}_${to}`:`School_Lessons_${safeName(first.school,'School')}_${from}_${to}`;
+   const first=list[0],name=kind==='lesson'?`Lesson_${safeName(first.teacher,'Teacher')}_${first.plannedDate||first.firstDate||from}_${safeName(first.recordId,'record')}${first.scope==='all'?'_complete_history':''}`:kind==='teacher'?`Teacher_Lessons_${safeName(first.teacher,'Teacher')}_${from}_${to}`:`School_Lessons_${safeName(first.school,'School')}_${from}_${to}`;
    save(doc.output('blob'),name+'.pdf');
    const missing=new Set(wanted).size-images.size;
    if(missing>0)setNotice(n=>[n,missing===1?'1 photo is included as a link because it could not be loaded for the PDF.':`${missing} photos are included as links because they could not be loaded for the PDF.`].filter(Boolean).join(' '));
@@ -55,7 +58,7 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
  if(!fresh)return <section className="card lesson-records-stale" role="status"><p>Apply the selected period to review lesson records. Loaded period: {data.period?.from} to {data.period?.to}.</p></section>;
  return <div className="lesson-records">
   <section className="card">
-   <div className="lr-head"><div><span className="eyebrow">LESSON DOCUMENTATION</span><h2>{mode==='school'?'Lesson records · '+school:'Lesson records'+(teacherName?' · '+teacherName:'')}</h2><p>Each lesson with its plan, classroom activities, written work, recordings, reflections and Academic Review, in the order it was first submitted.</p></div><BookOpen size={24}/></div>
+   <div className="lr-head"><div><span className="eyebrow">LESSON DOCUMENTATION</span><h2>{mode==='school'?'Lesson records · '+school:'Lesson records'+(teacherName?' · '+teacherName:'')}</h2><p>Each lesson with its plan, classroom activities, written work, recordings, reflections and Academic Review, in the order it was first submitted. Evidence and reviews are limited to {formatDay(from)} – {formatDay(to)}; each lesson also offers its complete history.</p></div><BookOpen size={24}/></div>
    <div className="lr-filters">
     {mode==='school'&&<label className="field"><span>Teacher</span><select value={filters.teacher} onChange={e=>setFilter('teacher',e.target.value)}><option value="">All teachers</option>{teachers.map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>}
     <label className="field"><span>Class</span><select value={filters.grade} onChange={e=>setFilter('grade',e.target.value)}><option value="">All classes</option>{options.grades.map(g=><option key={g}>{g}</option>)}</select></label>
@@ -78,7 +81,7 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
    <div><strong>{summary.reviewed}</strong><span>With Academic Review</span></div>
   </div>
   {!lessons.length?<section className="card empty"><h3>No lessons in this view</h3><p>No lesson records were submitted for the selected period and filters.</p></section>:<>
-   <div className="lr-list">{lessons.slice((current-1)*PAGE,current*PAGE).map((lesson,i)=><LessonCard key={lesson.key} lesson={lesson} number={(current-1)*PAGE+i+1} showTeacher={mode==='school'} busy={!!busy} onDownload={()=>download('lesson',[lesson])}/>)}</div>
+   <div className="lr-list">{lessons.slice((current-1)*PAGE,current*PAGE).map((lesson,i)=><LessonCard key={lesson.key} lesson={lesson} number={(current-1)*PAGE+i+1} showTeacher={mode==='school'} busy={!!busy} onDownload={()=>download('lesson',[lesson])} onDownloadHistory={history.has(lesson.key)?()=>download('lesson',[history.get(lesson.key)]):null}/>)}</div>
    {pages>1&&<div className="lr-pager"><button className="button" disabled={current===1} onClick={()=>setPage(current-1)}>Previous</button><span>Page {current} of {pages}</span><button className="button" disabled={current===pages} onClick={()=>setPage(current+1)}>Next</button></div>}
   </>}
  </div>;
@@ -95,14 +98,15 @@ function Evidence({title,files,tone,open}){
   <div className="lr-files">{files.filter(f=>!shown.has(f.url)).map(f=><FileLink key={f.url} file={f}/>)}</div>
  </section>;
 }
-export function LessonCard({lesson,number,showTeacher,busy,onDownload,defaultOpen=false}){
+export function LessonCard({lesson,number,showTeacher,busy,onDownload,onDownloadHistory=null,defaultOpen=false}){
  const [open,setOpen]=useState(defaultOpen),visible=visibleLessonSections(lesson);
  // Body (and any thumbnails) render only once opened, so files are not preloaded.
  return <details className="lr-lesson" open={defaultOpen||undefined} onToggle={e=>setOpen(e.currentTarget.open)}>
   <summary><span className="lr-no">{number}</span><span className="lr-title"><b>{lesson.topic}</b><small>{[showTeacher&&lesson.teacher,classLine(lesson),lesson.submittedAt?'Submitted '+formatStamp(lesson.submittedAt):lesson.firstDate&&formatDay(lesson.firstDate)].filter(Boolean).join(' · ')}</small></span>
-   <span className="lr-badges">{lesson.activities.length>0&&<span className="lr-badge">{lesson.activities.length} activity</span>}{lesson.writing.length>0&&<span className="lr-badge">{lesson.writing.length} writing</span>}{lesson.audio.length>0&&<span className="lr-badge"><Headphones size={11}/> {lesson.audio.length}</span>}{lesson.reflections.length>0&&<span className="lr-badge">Reflection</span>}{lesson.feedback&&<span className="lr-badge review">Academic Review</span>}</span></summary>
+   <span className="lr-badges">{lesson.activities.length>0&&<span className="lr-badge">{lesson.activities.length} activity</span>}{lesson.writing.length>0&&<span className="lr-badge">{lesson.writing.length} writing</span>}{lesson.audio.length>0&&<span className="lr-badge"><Headphones size={11}/> {lesson.audio.length}</span>}{lesson.reflections.length>0&&<span className="lr-badge">Reflection</span>}{lesson.feedback&&<span className="lr-badge review">Academic Review</span>}{(lesson.outsidePeriodFiles>0||lesson.reviewOutsidePeriod)&&<span className="lr-badge outside">More outside period</span>}</span></summary>
   {open&&<div className="lr-body">
    <div className="lr-meta"><div><span>School</span><b>{lesson.school}</b></div><div><span>Teacher</span><b>{lesson.teacher}</b></div><div><span>Class</span><b>{[lesson.grade,lesson.section&&lesson.section!=='Not Applicable'?'Section '+lesson.section:''].filter(Boolean).join(' · ')||'—'}</b></div><div><span>Subject</span><b>{lesson.subject||'—'}</b></div><div><span>Lesson date</span><b>{[lesson.plannedDate&&'Planned '+formatDay(lesson.plannedDate),lesson.conductedOn&&'Taught '+formatDay(lesson.conductedOn)].filter(Boolean).join(' · ')||formatDay(lesson.firstDate)||'—'}</b></div><div><span>Submitted</span><b>{formatStamp(lesson.submittedAt)||'—'}</b></div></div>
+   {(lesson.outsidePeriodFiles>0||lesson.reviewOutsidePeriod)&&<p className="lr-outside" role="note">Outside this reporting period: {[lesson.outsidePeriodFiles?lesson.outsidePeriodFiles+' file'+(lesson.outsidePeriodFiles===1?'':'s'):'',lesson.reviewOutsidePeriod?'the Academic Review':''].filter(Boolean).join(' and ')} for this lesson {lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'is':'are'} not shown here. Use Complete history PDF to include {lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'it':'them'}.</p>}
    {visible.plan&&<section className="lr-section plan"><h4>Lesson plan</h4>
     {(lesson.plan.fields.length>0||lesson.plan.notes)&&<dl>{lesson.plan.fields.map(f=><div key={f.key} style={{display:'contents'}}><dt>{f.label}</dt><dd>{f.text}</dd></div>)}{lesson.plan.notes&&<div style={{display:'contents'}}><dt>Lesson notes</dt><dd>{lesson.plan.notes}</dd></div>}</dl>}
     {lesson.planFiles.length>0&&<div className="lr-files">{lesson.planFiles.map(f=><FileLink key={f.url} file={f}/>)}</div>}
@@ -114,7 +118,7 @@ export function LessonCard({lesson,number,showTeacher,busy,onDownload,defaultOpe
    {visible.feedback&&<section className="lr-section"><h4>Academic Review</h4><div className="lr-review"><b>{lesson.feedback.date?'Reviewed '+formatStamp(lesson.feedback.date).split(',')[0]:'Review recorded'}</b><p>{lesson.feedback.text}</p></div></section>}
    {visible.additional&&<Evidence title="Further classroom evidence" files={lesson.additional} tone="additional" open={open}/>}
    {!Object.values(visible).some(Boolean)&&<p className="hint">No lesson plan details or evidence were recorded for this lesson.</p>}
-   <div className="lr-lesson-actions"><button className="button" disabled={busy} onClick={onDownload}><FileText size={15}/>Lesson PDF</button></div>
+   <div className="lr-lesson-actions"><button className="button" disabled={busy} onClick={onDownload}><FileText size={15}/>Lesson PDF · this period</button>{onDownloadHistory&&<button className="button" disabled={busy} onClick={onDownloadHistory}><FileText size={15}/>Complete history PDF</button>}</div>
   </div>}
  </details>;
 }
