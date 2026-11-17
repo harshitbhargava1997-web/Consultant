@@ -85,3 +85,34 @@ Old `view=lesson-docs` links in earlier reports keep working.
 - Stored snapshot objects are inert encrypted files; nothing needs cleaning up.
 
 ![Usage PDF link and the linked lesson PDF](direct-lesson-pdf-snapshots.jpg)
+
+## Production fix: "Lesson documentation could not be stored" (17 November 2026)
+
+**Symptom.** The first live Teacher 360° export failed for both lesson groups with "Lesson documentation could not be stored. Retry the export." That message came from an R2 PUT that answered neither OK nor 412.
+
+**Confirmed root cause.** R2 answered **`411 MissingContentLength`** to the upload.
+- `r2Request` signed a `Request` object and passed it to `fetch`. Inside Next.js route handlers, `fetch` is Next's patched fetch, which rebuilds a `Request` input from its body **stream**. The body length is lost, so the PUT went out with `Transfer-Encoding: chunked` and no `Content-Length`.
+- This was confirmed against the real bucket with Production settings, running through Next's patched fetch in a route-handler context. The deployed request shape got `411 MissingContentLength` at 262 KB, 1 MB, 2.5 MB and 3.9 MB; a ~1 KB body was accepted. Real lesson PDFs with photo thumbnails are far above that size.
+- In plain Node, outside Next, the same request keeps its `Content-Length` and succeeds. That is why tests and a plain-Node storage check did not catch it.
+- Bucket permissions, credentials, signing and `If-None-Match` were all ruled out: each succeeded with a known length.
+
+**Fix.**
+- `r2Request` signs only the URL and headers (unsigned payload), then calls `fetch(url, {method, headers, body: bytes, cache: 'no-store'})` with known-length bytes. Strings are UTF-8 encoded. Stream bodies are refused; no caller uses them.
+- This also fixes the server-side PUT of written after-class reflections (`/api/school-success/evidence`), which uses the same function. Larger reflections could have hit the same 411; this was not observed live.
+
+**Safer storage handling** (`lib/school-success/snapshot-storage.js`, shared by the routes and the self-check):
+- **HEAD:** only `404` means "absent". `403`, `5xx` and other answers stop the export with a diagnostic; they are never treated as permission to upload.
+- **PUT:** `If-None-Match: *`. A `412` is accepted only after HEAD confirms the object exists. Any other failure reports `R2 PUT <status> <code>, ref <cf-ray>`.
+- **GET:** `404` means "not found". Storage errors answer `503` with a diagnostic instead of claiming the snapshot does not exist.
+- Storage failures are `503`, so the export's bounded retries apply. If any group still fails, no report is produced, so there are still no broken links.
+- **Server logs** record only `{event, stage, op, status, code, requestId}`. Never credentials, signed URLs, object keys, PDF content or teacher details.
+
+**Real-storage verification.** Run with `scripts/r2-snapshot-selfcheck.mjs --write-synthetic [--probe] [--size-probe] [--pdf-bytes=N] [--next-route-context]`, using a uniquely named synthetic PDF and the production library code with Production settings. The results:
+- store → HEAD;
+- an identical retry is reused with no second write;
+- a conflicting conditional write is refused with `412 PreconditionFailed`, and the stored bytes are unchanged;
+- read and decrypt return byte-identical content;
+- the envelope is bound to its ID;
+- the public bucket URL serves ciphertext only.
+
+All of these passed at 2.5 MB, through Next's patched fetch. The check writes only synthetic, encrypted objects under the snapshot prefix and never touches teacher records.

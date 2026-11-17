@@ -23,7 +23,28 @@ catch {
 } }
 export async function r2Request(config, key, method, body, headers = {}) { if (!r2UploadsConfigured(config))
     throw Error('503:Evidence uploads need the R2 access key ID and secret access key'); const endpoint = new URL(config.R2_ENDPOINT_URL); if (endpoint.protocol !== 'https:' || !endpoint.hostname.endsWith('.r2.cloudflarestorage.com') || config.R2_BUCKET_NAME !== 'onelern-media')
-    throw Error('503:Expected the existing onelern-media bucket'); const url = endpoint.origin + '/' + encodeURIComponent(config.R2_BUCKET_NAME) + '/' + key.split('/').map(encodeURIComponent).join('/'); const client = new AwsClient({ accessKeyId: config.R2_ACCESS_KEY_ID, secretAccessKey: config.R2_SECRET_ACCESS_KEY, service: 's3', region: 'auto' }); const signed = await client.sign(url, { method, headers: { ...headers, 'x-amz-content-sha256': 'UNSIGNED-PAYLOAD' }, body, aws: { signQuery: true }, ...{ duplex: 'half' } }); return fetch(signed, { signal: AbortSignal.timeout(120000) }); }
+    throw Error('503:Expected the existing onelern-media bucket'); const url = endpoint.origin + '/' + encodeURIComponent(config.R2_BUCKET_NAME) + '/' + key.split('/').map(encodeURIComponent).join('/'); const client = new AwsClient({ accessKeyId: config.R2_ACCESS_KEY_ID, secretAccessKey: config.R2_SECRET_ACCESS_KEY, service: 's3', region: 'auto' });
+    // Sign the URL and headers only (unsigned payload), then send the bytes from a plain init object.
+    // Passing a signed Request object to fetch breaks inside Next.js route handlers: the patched fetch
+    // rebuilds the Request from its body *stream*, so the PUT goes out with Transfer-Encoding: chunked
+    // and no Content-Length, which R2 rejects. Known-length bytes keep Content-Length in every runtime.
+    const bytes = body == null ? undefined : typeof body === 'string' ? encoder.encode(body) : body instanceof ArrayBuffer ? new Uint8Array(body) : ArrayBuffer.isView(body) ? body : null;
+    if (bytes === null) throw Error('R2 request body must be a string or bytes');
+    const signed = await client.sign(url, { method, headers: { ...headers, 'x-amz-content-sha256': 'UNSIGNED-PAYLOAD' }, aws: { signQuery: true } });
+    return fetch(signed.url.toString(), { method, headers: signed.headers, body: bytes, cache: 'no-store', signal: AbortSignal.timeout(120000) }); }
+// Safe diagnostics for an unsuccessful R2 response: operation, HTTP status, R2 error code and request
+// reference only. Never the signed URL, object key, request/response body, credentials or report content.
+export async function r2Diagnostics(op, res) {
+    let code = '';
+    if (op !== 'HEAD') {
+        try { code = ((await res.text()).slice(0, 4096).match(/<Code>([A-Za-z0-9.]{1,64})<\/Code>/) || [])[1] || ''; }
+        catch { code = ''; }
+    }
+    const requestId = String(res.headers.get('cf-ray') || res.headers.get('x-amz-request-id') || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 64);
+    return { op, status: res.status, code, requestId };
+}
+export const describeR2 = d => `R2 ${d.op} ${d.status}${d.code ? ' ' + d.code : ''}${d.requestId ? ', ref ' + d.requestId : ''}`;
+export function logR2Failure(stage, d) { console.error(JSON.stringify({ event: 'r2-request-failed', stage, op: d.op, status: d.status, code: d.code, requestId: d.requestId })); }
 export const MEDIA_SETTINGS_KEY = 'r2CredentialsEncryptedV1';
 async function encryptionKey(secret) { if (!secret)
     throw Error('503:Media settings encryption is not configured'); return crypto.subtle.importKey('raw', await crypto.subtle.digest('SHA-256', encoder.encode(secret)), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']); }

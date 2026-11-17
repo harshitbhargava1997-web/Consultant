@@ -1,16 +1,16 @@
 import {withRequest,actor,database,checkOrigin,failure,assertSchool} from '@/lib/school-success/server';
 import {env} from '@/lib/school-success/environment';
-import {loadR2Config,r2Request,seal,unseal} from '@/lib/school-success/r2-evidence';
-import {isSnapshotId,snapshotKey,openSnapshot,contentDisposition,snapshotFilename,snapshotPagePath,TICKET_TTL_MS} from '@/lib/school-success/report-snapshots';
+import {loadR2Config,seal,unseal} from '@/lib/school-success/r2-evidence';
+import {loadSnapshotObject} from '@/lib/school-success/snapshot-storage';
+import {isSnapshotId,contentDisposition,snapshotFilename,snapshotPagePath,TICKET_TTL_MS} from '@/lib/school-success/report-snapshots';
 export const runtime='nodejs';
 const noStore={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
-// failure() has no 404 mapping; missing, altered or unreadable snapshots answer 404 here.
+// failure() has no 404 mapping; missing, altered or undecryptable snapshots answer 404 here. Storage
+// outages (R2 403/5xx) answer 503 with diagnostics instead of pretending the snapshot does not exist.
 const fail=e=>String(e?.message||e).startsWith('404:')?Response.json({error:'Lesson documentation not found'},{status:404,headers:noStore}):failure(e);
 async function load(config,id){
  if(!isSnapshotId(id))throw Error('404:Lesson documentation not found');
- const response=await r2Request(config,snapshotKey(id),'GET');
- if(!response.ok)throw Error('404:Lesson documentation not found');
- return openSnapshot(config.SUPABASE_GATEWAY_TOKEN,id,await response.arrayBuffer());
+ return loadSnapshotObject({config,secret:config.SUPABASE_GATEWAY_TOKEN,id});
 }
 // Authorises the signed-in reader against the snapshot's stored school, then issues a two-minute
 // viewing ticket bound to this snapshot and reader. URL parameters never grant access.

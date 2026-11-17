@@ -7,9 +7,10 @@ const CONFIG={SUPABASE_GATEWAY_TOKEN:SECRET,R2_ACCESS_KEY_ID:'k',R2_SECRET_ACCES
 const ADMIN={role:'admin',email:'consultant@example.test',allowedSchools:['Alpha School']},SUPER={role:'admin',email:'super@example.test',allowedSchools:null};
 
 function harness(){
- const r2=new Map(),writes=[],state={actor:ADMIN};
- const status=(code,body)=>({ok:code<300,status:code,headers:new Headers(body?{'content-length':String(body.length)}:{}),arrayBuffer:async()=>body.buffer.slice(body.byteOffset,body.byteOffset+body.length),text:async()=>Buffer.from(body||'').toString()});
+ const r2=new Map(),writes=[],state={actor:ADMIN,fail:null};
+ const status=(code,body,extra={})=>({ok:code<300,status:code,headers:new Headers({...(body?{'content-length':String(body.length)}:{}),...extra}),arrayBuffer:async()=>body.buffer.slice(body.byteOffset,body.byteOffset+body.length),text:async()=>Buffer.from(body||'').toString()});
  async function r2Request(config,key,method,body,headers={}){
+  const scripted=state.fail&&state.fail(method);if(scripted)return scripted;
   if(method==='HEAD')return r2.has(key)?status(200,r2.get(key)):status(404);
   if(method==='GET')return r2.has(key)?status(200,r2.get(key)):status(404);
   if(method==='PUT'){if(headers['If-None-Match']==='*'&&r2.has(key))return status(412);const bytes=new Uint8Array(body);writes.push(key);r2.set(key,bytes);return status(200);}
@@ -23,10 +24,13 @@ function harness(){
   '@/lib/school-success/environment':{env:{}},
   '@/lib/school-success/r2-evidence':{...real,r2Request,loadR2Config:async()=>CONFIG}
  };
- const load=file=>{const filename=path.join(root,file),out=transformSync(fs.readFileSync(filename,'utf8'),{filename,jsc:{parser:{syntax:'ecmascript'}},module:{type:'commonjs'}}),m=new Module(filename,module);m.paths=Module._nodeModulePaths(path.dirname(filename));const normal=m.require.bind(m);m.require=name=>mocks[name]||normal(name.startsWith('@/')?path.join(root,name.slice(2)):name);m._compile(out.code,filename);return m.exports;};
+ const load=file=>{const filename=path.join(root,file),out=transformSync(fs.readFileSync(filename,'utf8'),{filename,jsc:{parser:{syntax:'ecmascript'}},module:{type:'commonjs'}}),m=new Module(filename,module);m.filename=filename;m.paths=Module._nodeModulePaths(path.dirname(filename));const normal=m.require.bind(m);m.require=name=>mocks[name]||normal(name.startsWith('@/')?path.join(root,name.slice(2)):name);m._compile(out.code,filename);return m.exports;};
+ // The shared storage module is compiled with the same in-memory R2 in place of its relative import.
+ mocks['./r2-evidence.js']=mocks['@/lib/school-success/r2-evidence'];
+ mocks['@/lib/school-success/snapshot-storage']=load('lib/school-success/snapshot-storage.js');
  const store=load('app/api/school-success/report-snapshots/route.js'),one=load('app/api/school-success/report-snapshots/[id]/route.js');
  const scopeHeader=s=>Buffer.from(JSON.stringify(s)).toString('base64url');
- return {r2,writes,state,real,
+ return {r2,writes,state,real,status,
   store:async(bytes,s)=>{const res=await store.POST(new Request('https://app.test/api/school-success/report-snapshots',{method:'POST',headers:{'Content-Type':'application/pdf','X-Snapshot-Scope':scopeHeader(s)},body:bytes}));return {status:res.status,body:await res.json()};},
   ticket:async id=>{const res=await one.POST(new Request('https://app.test/api/school-success/report-snapshots/'+id,{method:'POST'}),{params:Promise.resolve({id})});return {status:res.status,body:await res.json()};},
   open:async(id,query)=>one.GET(new Request('https://app.test/api/school-success/report-snapshots/'+id+query),{params:Promise.resolve({id})})};
@@ -100,4 +104,22 @@ test('stored snapshots never change; a later export of updated lessons creates a
  // Tampered storage is detected rather than served.
  const key=[...h.r2.keys()][0],bad=new Uint8Array(h.r2.get(key));bad[bad.length-3]^=1;h.r2.set(key,bad);
  assert.equal((await h.ticket(first.body.id)).status,404);
+});
+
+test('storage failures answer 503 with diagnostics: no upload after a failed HEAD, no "not found" for an outage',async()=>{
+ const h=harness(),xml=code=>new TextEncoder().encode(`<Error><Code>${code}</Code></Error>`),ray={'cf-ray':'8f00aa11bb22cc33-BOM'};
+ const errors=[],nativeError=console.error;console.error=(...a)=>errors.push(a.join(' '));
+ try{
+  h.state.fail=method=>method==='HEAD'?h.status(403,null,ray):null;
+  const head=await h.store(pdf('x'),scope());
+  assert.equal(head.status,503);assert.equal(head.body.error,'Report storage could not be checked (R2 HEAD 403, ref 8f00aa11bb22cc33-BOM). Retry the export.');
+  assert.equal(h.writes.length,0,'a failed HEAD is never treated as permission to upload');
+  h.state.fail=method=>method==='PUT'?h.status(400,xml('InvalidRequest'),ray):null;
+  const put=await h.store(pdf('x'),scope());
+  assert.equal(put.status,503,'retryable by the export');assert.equal(put.body.error,'Lesson documentation could not be stored (R2 PUT 400 InvalidRequest, ref 8f00aa11bb22cc33-BOM). Retry the export.');
+  h.state.fail=null;const {body:{id}}=await h.store(pdf('ok'),scope());
+  h.state.fail=method=>method==='GET'?h.status(503,xml('ServiceUnavailable'),ray):null;
+  const t=await h.ticket(id);assert.equal(t.status,503);assert.match(t.body.error,/^Lesson documentation could not be read from storage \(R2 GET 503 ServiceUnavailable, ref 8f00aa11bb22cc33-BOM\)/);
+  assert.equal(errors.length,3);for(const line of errors){const log=JSON.parse(line);assert.equal(log.event,'r2-request-failed');assert.ok(!line.includes('Alpha')&&!line.includes('AKANSHA')&&!line.includes('report-snapshots/v1')&&!line.includes(SECRET),'no teacher details, keys or secrets in logs');}
+ }finally{console.error=nativeError;}
 });
