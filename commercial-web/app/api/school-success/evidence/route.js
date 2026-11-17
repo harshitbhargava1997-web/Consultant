@@ -5,6 +5,8 @@ import { gateway, publicBase } from '@/lib/school-success/live';
 import { scopedSubmission, evidencePlan, submissionRecords } from '@/lib/school-success/teacher-submissions';
 import { seal, unseal, r2UploadsConfigured, r2Request, loadR2Config } from '@/lib/school-success/r2-evidence';
 import { assertResumeAccess, lessonFromRows, assertEvidenceMatches } from '@/lib/school-success/lesson-workflow';
+import { reflectionInputSchema, planReflectionDocuments } from '@/lib/school-success/reflection-text';
+import { submissionSchema } from '@/lib/school-success/teacher-submissions';
 async function handlerPOST(req) {
     try {
         checkOrigin(req);
@@ -39,7 +41,16 @@ async function handlerPOST(req) {
             const mode = body.mode || 'legacy';
             if (!['legacy', 'preparation', 'evidence'].includes(mode))
                 throw Error('Choose preparation or classroom evidence');
-            const submission = scopedSubmission(body.submission, a), files = evidencePlan(submission);
+            let submission = scopedSubmission(body.submission, a);
+            // JSON evidence is written only by the server (written reflections); browsers cannot upload it.
+            if (submission.files.some(f => /\.json$/i.test(f.name)))
+                throw Error('Use PDF, photo, video or audio evidence files');
+            const reflectionInput = body.reflections == null ? [] : reflectionInputSchema.parse(body.reflections);
+            if (reflectionInput.some(r => !submission.periods.some(p => p.id === r.periodId)))
+                throw Error('403:Reflection must belong to a class period of this lesson');
+            if (reflectionInput.length && mode !== 'evidence')
+                throw Error('Add after-class reflections with classroom evidence.');
+            let files = evidencePlan(submission);
             if (files.length && !r2UploadsConfigured(config))
                 throw Error('503:File uploads require the R2 upload secrets. You can save a lesson reflection without files.');
             if (mode === 'preparation' && submission.files.some(f => !['voice', 'lesson_plan'].includes(f.category)))
@@ -68,8 +79,16 @@ async function handlerPOST(req) {
                     return Response.json(mode === 'preparation' ? await resumeReceipt(submission, existing) : existing);
                 }
             }
+            // Written after-class reflections: built and sized here, sealed into the plan, written at commit.
+            let reflectionDocs = [];
+            if (reflectionInput.length) {
+                if (!r2UploadsConfigured(config))
+                    throw Error('503:Saving written reflections requires the R2 upload secrets.');
+                const planned = await planReflectionDocuments({ submission, reflections: reflectionInput, updateId: body.updateId, conductedOn: body.conductedOn, savedAt: new Date().toISOString(), evidencePlan, submissionSchema });
+                submission = planned.submission; reflectionDocs = planned.docs; files = planned.uploads;
+            }
             const exp = Date.now() + 60 * 60 * 1000;
-            return Response.json({ token: await seal({ kind: 'plan', email: a.email, exp, submission, mode, ...(mode === 'evidence' ? { resume: body.resume, version: body.version, updateId: body.updateId, conductedOn: body.conductedOn } : {}) }, signer), files: await Promise.all(files.map(async (file) => ({ id: file.id, token: await seal({ kind: 'file', email: a.email, exp, ...file }, signer) }))) });
+            return Response.json({ token: await seal({ kind: 'plan', email: a.email, exp, submission, mode, ...(mode === 'evidence' ? { resume: body.resume, version: body.version, updateId: body.updateId, conductedOn: body.conductedOn, reflections: reflectionDocs } : {}) }, signer), files: await Promise.all(files.map(async (file) => ({ id: file.id, token: await seal({ kind: 'file', email: a.email, exp, ...file }, signer) }))) });
         }
         if (body.action === 'commit') {
             const plan = await unseal(body.token, signer);
@@ -84,6 +103,15 @@ async function handlerPOST(req) {
                     throw Error('403:Lesson access denied');
             }
             const files = evidencePlan(submission);
+            // Write server-built reflection documents (idempotent: same key and content on retry).
+            for (const doc of plan.mode === 'evidence' ? plan.reflections || [] : []) {
+                const planned = files.find(f => f.id === doc.id);
+                if (!planned || planned.key !== doc.key || planned.category !== 'closure')
+                    throw Error('403:Reflection does not belong to this lesson');
+                const put = await r2Request(config, doc.key, 'PUT', doc.text, { 'Content-Type': 'application/json; charset=utf-8' });
+                if (!put.ok)
+                    throw Error('Written reflection could not be saved. Retry this submission.');
+            }
             for (const file of files) {
                 const r = await r2Request(config, file.key, 'HEAD');
                 if (!r.ok || Number(r.headers.get('content-length')) !== file.size)

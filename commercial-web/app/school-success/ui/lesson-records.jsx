@@ -18,8 +18,10 @@ function thumbnailUrls(lessons,sections){
 
 // Lesson-wise documentation: one card per lesson record, in original submission order.
 // Reads only the already-authorised School Success data response; never writes records.
-export default function LessonRecords({data,from,to,school='',teacherKey='',includeArchived=false,mode='teacher'}){
- const [filters,setFilters]=useState({teacher:'',grade:'',subject:''}),[sections,setSections]=useState(defaultLessonSections),[embed,setEmbed]=useState(true);
+const ANY='__any__';
+// initialFilters: {grade, section, subject} — e.g. from a lesson-documentation link. section '' = recorded without a section.
+export default function LessonRecords({data,from,to,school='',teacherKey='',includeArchived=false,mode='teacher',initialFilters={}}){
+ const [filters,setFilters]=useState({teacher:'',grade:initialFilters.grade??ANY,section:initialFilters.section??ANY,subject:initialFilters.subject??ANY}),[sections,setSections]=useState(defaultLessonSections),[embed,setEmbed]=useState(true);
  const [page,setPage]=useState(1),[busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const fresh=data.period?.from===from&&data.period?.to===to;
  const source=useMemo(()=>reportDirectorySource(data,data.directory?.archives||[],includeArchived),[data,includeArchived]);
@@ -29,7 +31,9 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
  const scoped=useMemo(()=>filterLessons(all,{school,teacher:teacherKey}),[all,school,teacherKey]);
  const teachers=useMemo(()=>[...new Map(scoped.map(l=>[l.teacherKey,l.teacher])).entries()].sort((a,b)=>a[1].localeCompare(b[1])),[scoped]);
  const options=lessonFilterOptions(scoped);
- const lessons=filterLessons(scoped,{teacher:filters.teacher,grade:filters.grade,subject:filters.subject});
+ // Exact matching: '' means "not recorded", ANY means no filter, so a link never widens its scope.
+ const match=(value,filter)=>filter===ANY||value===filter;
+ const lessons=filterLessons(scoped,{teacher:filters.teacher}).filter(l=>match(l.grade,filters.grade)&&match(l.section,filters.section)&&match(l.subject,filters.subject));
  const summary=lessonSummary(lessons),pages=Math.max(1,Math.ceil(lessons.length/PAGE)),current=Math.min(page,pages);
  const setFilter=(key,value)=>{setFilters(f=>({...f,[key]:value}));setPage(1);};
  const teacherName=teacherKey?scoped[0]?.teacher||'':'';
@@ -61,8 +65,9 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
    <div className="lr-head"><div><span className="eyebrow">LESSON DOCUMENTATION</span><h2>{mode==='school'?'Lesson records · '+school:'Lesson records'+(teacherName?' · '+teacherName:'')}</h2><p>Each lesson with its plan, classroom activities, written work, recordings, reflections and Academic Review, in the order it was first submitted. Evidence and reviews are limited to {formatDay(from)} – {formatDay(to)}; each lesson also offers its complete history.</p></div><BookOpen size={24}/></div>
    <div className="lr-filters">
     {mode==='school'&&<label className="field"><span>Teacher</span><select value={filters.teacher} onChange={e=>setFilter('teacher',e.target.value)}><option value="">All teachers</option>{teachers.map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>}
-    <label className="field"><span>Class</span><select value={filters.grade} onChange={e=>setFilter('grade',e.target.value)}><option value="">All classes</option>{options.grades.map(g=><option key={g}>{g}</option>)}</select></label>
-    <label className="field"><span>Subject</span><select value={filters.subject} onChange={e=>setFilter('subject',e.target.value)}><option value="">All subjects</option>{options.subjects.map(s=><option key={s}>{s}</option>)}</select></label>
+    <label className="field"><span>Class</span><select value={filters.grade} onChange={e=>setFilter('grade',e.target.value)}><option value={ANY}>All classes</option>{[...new Set([...options.grades,...(filters.grade!==ANY?[filters.grade]:[])])].map(g=><option key={g||'none'} value={g}>{g||'Not recorded'}</option>)}</select></label>
+    <label className="field"><span>Section</span><select value={filters.section} onChange={e=>setFilter('section',e.target.value)}><option value={ANY}>All sections</option>{[...new Set([...options.sections,...(filters.section!==ANY?[filters.section]:[])])].map(s=><option key={s||'none'} value={s}>{s||'Not recorded'}</option>)}</select></label>
+    <label className="field"><span>Subject</span><select value={filters.subject} onChange={e=>setFilter('subject',e.target.value)}><option value={ANY}>All subjects</option>{[...new Set([...options.subjects,...(filters.subject!==ANY?[filters.subject]:[])])].map(s=><option key={s||'none'} value={s}>{s||'Not recorded'}</option>)}</select></label>
    </div>
    <details><summary className="text-button">PDF sections</summary>
     <p className="hint">The lesson plan is always included. Unchecked sections are left out of the PDF only; no records change.</p>
@@ -87,6 +92,13 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
  </div>;
 }
 
+const reflectionQuestions={achievement:'Did students achieve the learning outcome, and what went well in your class?',nextStep:'Which students need support, what learning gaps do they have, and what will you do next to support them?'};
+export function WrittenReflection({reflection}){
+ const label=key=>reflection.prompts?.find(p=>p.key===key)?.label||reflectionQuestions[key];
+ return <article className="lr-reflection"><b>{reflection.label}{reflection.date?' · '+formatDay(reflection.date):''}{reflection.conductedOn?' · taught '+formatDay(reflection.conductedOn):''}</b>
+  {['achievement','nextStep'].filter(key=>reflection.answers?.[key]).map(key=><div key={key}><span>{label(key)}</span><p>{reflection.answers[key]}</p></div>)}
+ </article>;
+}
 function FileLink({file,action='Open'}){
  const url=safeUrl(file.url);if(!url)return null;
  return <a className={'lr-file'+(file.kind==='Audio'?' audio':'')} href={url} target="_blank" rel="noopener noreferrer"><span className="tag">{file.kind.toUpperCase()}</span><span><b>{file.label}</b><small>{[file.addedOn&&'Added '+formatDay(file.addedOn),file.stage].filter(Boolean).join(' · ')}</small></span><span className="go">{action}<ArrowUpRight size={14}/></span></a>;
@@ -114,7 +126,11 @@ export function LessonCard({lesson,number,showTeacher,busy,onDownload,onDownload
    {visible.activities&&<Evidence title="Classroom activities" files={lesson.activities} tone="activities" open={open}/>}
    {visible.writing&&<Evidence title="Student written work" files={lesson.writing} tone="writing" open={open}/>}
    {visible.audio&&<section className="lr-section audio"><h4>Audio recordings<em>{lesson.audio.length}</em></h4><div className="lr-files">{lesson.audio.map(f=>safeUrl(f.url)&&<div className="lr-audio" key={f.url}><span><b>{f.label}</b><small>{f.addedOn?'Added '+formatDay(f.addedOn):''} · <a className="text-button" href={f.url} target="_blank" rel="noopener noreferrer">Open<ArrowUpRight size={12}/></a></small></span><audio controls preload="none" src={f.url}/></div>)}</div></section>}
-   {visible.reflections&&<section className="lr-section"><h4>Teacher reflections<em>{lesson.reflections.length}</em></h4><div className="lr-files">{lesson.reflections.map(f=><FileLink key={f.url} file={f} action={f.kind==='Audio'?'Listen':'Open'}/>)}</div></section>}
+   {visible.reflections&&<section className="lr-section"><h4>Teacher reflections<em>{(lesson.writtenReflections||[]).length+lesson.reflections.length}</em></h4>
+    {(lesson.writtenReflections||[]).map(r=><WrittenReflection key={r.url} reflection={r}/>)}
+    {lesson.reflections.some(f=>f.legacy)&&<p className="hint">Earlier reflections were saved as PDFs; their written text is available by opening the saved file.</p>}
+    {lesson.reflections.length>0&&<div className="lr-files">{lesson.reflections.map(f=><FileLink key={f.url} file={f} action={f.kind==='Audio'?'Listen':'Open'}/>)}</div>}
+   </section>}
    {visible.feedback&&<section className="lr-section"><h4>Academic Review</h4><div className="lr-review"><b>{lesson.feedback.date?'Reviewed '+formatStamp(lesson.feedback.date).split(',')[0]:'Review recorded'}</b><p>{lesson.feedback.text}</p></div></section>}
    {visible.additional&&<Evidence title="Further classroom evidence" files={lesson.additional} tone="additional" open={open}/>}
    {!Object.values(visible).some(Boolean)&&<p className="hint">No lesson plan details or evidence were recorded for this lesson.</p>}

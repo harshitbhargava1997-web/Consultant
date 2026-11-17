@@ -9,6 +9,20 @@ import { gateway, publicBase } from '@/lib/school-success/live';
 import { mapLive } from '@/lib/school-success/live-mapping';
 import { actor, database, checkOrigin, failure, assertSchool, schoolTeachers, streamJson } from '@/lib/school-success/server';
 import { schemas } from '@/lib/school-success/domain';
+import { attachReflectionText, MAX_REFLECTION_BYTES } from '@/lib/school-success/reflection-text';
+import { r2Request } from '@/lib/school-success/r2-evidence';
+// Reads only objects under the configured media base (never arbitrary URLs), with a size cap and timeout.
+function reflectionFetcher(config) {
+    const base = publicBase().replace(/\/$/, '') + '/';
+    return async (url) => {
+        if (!url.startsWith(base)) throw Error('Unexpected media location');
+        const key = url.slice(base.length).split('/').map(decodeURIComponent).join('/');
+        const request = r2UploadsConfigured(config) ? r2Request(config, key, 'GET') : fetch(url, { signal: AbortSignal.timeout(8000) });
+        const response = await Promise.race([request, new Promise((_, reject) => setTimeout(() => reject(Error('Timed out')), 8000))]);
+        if (!response.ok || Number(response.headers.get('content-length') || 0) > MAX_REFLECTION_BYTES) throw Error('Unavailable');
+        return response.text();
+    };
+}
 export const dynamic = 'force-dynamic';
 async function hash(s) { return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))).map(x => x.toString(16).padStart(2, '0')).join(''); }
 async function handlerGET(req) {
@@ -34,7 +48,11 @@ async function handlerGET(req) {
         const roster = [...new Map([...mapped.roster, ...allMembers].map((r) => [JSON.stringify([r.school, r.name]), { school: r.school, name: r.name }])).values()];
         const activeRoster = roster.filter(r => !isArchived(archives, r.school, r.name));
         const directory = a.role === 'admin' ? { archives, schools: [...new Set([...allEntries.map(r => r.school || r.name), ...roster.map(r => r.school), ...archives.map(r => r.school)])].filter(Boolean).sort(), teachers: [...new Map([...roster, ...archives.filter(r => r.kind === 'teacher').map(r => ({ school: r.school, name: r.teacher }))].map(r => [JSON.stringify([r.school, r.name]), r])).values()], members: allMembers } : undefined;
-        return streamJson({ actor: {...a,allowedSchools:undefined,userId:undefined}, entries: a.role === 'admin' ? entries : entries.filter(r => (r.kind === 'school' && (r.school || r.name) === a.school) || (r.kind === 'submission' && r.school === a.school && r.teacher === a.name && (a.role !== 'school-teacher' || r.uploadedBy === a.email))), members, directory, crmArchive: a.role === 'admin' ? { createdAt: crmArchive.createdAt, count: crmArchive.ids.length } : undefined, archivedEntries: a.role === 'admin' ? allEntries.filter(r => !active(r)) : undefined, archivedRoster: a.role === 'admin' ? roster.filter(r => isArchived(archives, r.school, r.name)) : undefined, roster: a.role === 'admin' ? activeRoster : a.role === 'school-teacher' ? a.teachers.map((name) => ({ name, school: a.school })) : [], source: 'Vision · School Success', period: { from, to }, counts: a.role === 'admin' ? mapped.counts : undefined, reportSettings: a.role === 'admin' ? reportSettings : undefined, calendars: a.role === 'admin' ? calendars : undefined, uploadsEnabled: r2UploadsConfigured(config), mediaPublicBase: publicBase(), teacherSubmissionsEnabled: true, importsEnabled: a.role === 'admin' }, { headers: { 'Cache-Control': 'no-store','Server-Timing':`auth;dur=${(authDone-started).toFixed(1)}, data;dur=${(dataDone-authDone).toFixed(1)}, total;dur=${(performance.now()-started).toFixed(1)}` } });
+        const visibleEntries = a.role === 'admin' ? entries : entries.filter(r => (r.kind === 'school' && (r.school || r.name) === a.school) || (r.kind === 'submission' && r.school === a.school && r.teacher === a.name && (a.role !== 'school-teacher' || r.uploadedBy === a.email))), archivedEntries = a.role === 'admin' ? allEntries.filter(r => !active(r)) : undefined;
+        // Written after-class reflections are small server-built documents in the lesson's evidence folder;
+        // attach their text for the records this caller is already allowed to read.
+        await attachReflectionText([...visibleEntries, ...(archivedEntries || [])], reflectionFetcher(config));
+        return streamJson({ actor: {...a,allowedSchools:undefined,userId:undefined}, entries: visibleEntries, members, directory, crmArchive: a.role === 'admin' ? { createdAt: crmArchive.createdAt, count: crmArchive.ids.length } : undefined, archivedEntries, archivedRoster: a.role === 'admin' ? roster.filter(r => isArchived(archives, r.school, r.name)) : undefined, roster: a.role === 'admin' ? activeRoster : a.role === 'school-teacher' ? a.teachers.map((name) => ({ name, school: a.school })) : [], source: 'Vision · School Success', period: { from, to }, counts: a.role === 'admin' ? mapped.counts : undefined, reportSettings: a.role === 'admin' ? reportSettings : undefined, calendars: a.role === 'admin' ? calendars : undefined, uploadsEnabled: r2UploadsConfigured(config), mediaPublicBase: publicBase(), teacherSubmissionsEnabled: true, importsEnabled: a.role === 'admin' }, { headers: { 'Cache-Control': 'no-store','Server-Timing':`auth;dur=${(authDone-started).toFixed(1)}, data;dur=${(dataDone-authDone).toFixed(1)}, total;dur=${(performance.now()-started).toFixed(1)}` } });
     }
     catch (e) {
         return failure(e);

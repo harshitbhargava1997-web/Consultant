@@ -7,6 +7,14 @@
 import {fileCategory,lessonIdentity} from './school-portfolio.js';
 import {teacherKey} from './reports.js';
 import {chronologicalRows} from '../report-sequence.js';
+import {isReflectionTextUrl} from './reflection-text.js';
+
+// Provenance of the automatically generated preparation PDF: teacher-portal.jsx uploads it with
+// file ID = lesson-period ID, so its key ends in implementation_<P>/lesson_plan/<P>.pdf. Uploaded
+// lesson-plan documents and photos always get random IDs. This is an identity check, not a name guess.
+export function isGeneratedPreparationPdf(url){
+ try{const m=/\/implementation_([0-9a-f-]{36})\/lesson_plan\/([0-9a-f-]{36})\.pdf$/i.exec(decodeURIComponent(new URL(url).pathname));return Boolean(m)&&m[1].toLowerCase()===m[2].toLowerCase();}catch{return false;}
+}
 
 // Labels written by formatReflection() in teacher-flow.js. Only these exact
 // heading lines are treated as structure; anything else stays as written text.
@@ -84,20 +92,27 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
   const url=safeUrl(file.url);if(!url)continue;
   // One file is counted once per lesson, however often it is re-sent; keep every date it was sent.
   const known=files.get(url);
-  if(known){if(row.date&&!known.dates.includes(row.date))known.dates.push(row.date);continue;}
-  files.set(url,{url,key:file.key||url,column:file.column||'',category:fileCategory(file),section:fileSection(file),addedOn:row.date||'',dates:row.date?[row.date]:[],stage:row.feedStage||'',eventId:row.evidenceEventId||''});
+  if(known){if(row.date&&!known.dates.includes(row.date))known.dates.push(row.date);if(file.reflection&&!known.reflection)known.reflection=file.reflection;continue;}
+  files.set(url,{url,key:file.key||url,column:file.column||'',category:fileCategory(file),section:fileSection(file),addedOn:row.date||'',dates:row.date?[row.date]:[],stage:row.feedStage||'',eventId:row.evidenceEventId||'',
+   ...(isReflectionTextUrl(url)?{reflection:file.reflection||null,textDocument:true}:{}),...(isGeneratedPreparationPdf(url)&&row.feedStage==='Lesson preparation'?{generatedPreparation:true}:{})});
  }
  const all=[...files.values()],pick=section=>all.filter(f=>f.section===section);
  const label=(list,name)=>list.map((f,i)=>({...f,kind:mediaKind(f.url),label:name(f,i,list)}));
- const reflections=pick('reflections'),reflectionAudio=reflections.filter(f=>isAudioUrl(f.url)),reflectionDocs=reflections.filter(f=>!isAudioUrl(f.url));
+ const reflections=pick('reflections'),reflectionAudio=reflections.filter(f=>isAudioUrl(f.url));
+ // Written reflections saved as text (new) are shown inline; earlier reflections exist only as saved PDFs.
+ const written=reflections.filter(f=>f.textDocument&&f.reflection),unreadable=reflections.filter(f=>f.textDocument&&!f.reflection);
+ const reflectionDocs=reflections.filter(f=>!isAudioUrl(f.url)&&!f.textDocument);
+ const plan=parseLessonPlan(first.reflection,first.materials),planText=plan.fields.length>0||Boolean(plan.notes);
  const keep=f=>scope==='all'||f.dates.some(inRange);
  const scoped=list=>list.filter(keep);
  const sections={
-  planFiles:label(pick('plan'),(f,i,l)=>(isImageUrl(f.url)?'Lesson plan photo':'Lesson plan document')+(l.length>1?' '+(i+1):'')),
+  // The generated preparation PDF repeats the plan text shown inline, so it is listed only when no plan text exists.
+  planFiles:label(pick('plan').filter(f=>!(f.generatedPreparation&&planText)),(f,i,l)=>{const type=x=>x.generatedPreparation?'Saved lesson plan (PDF)':isImageUrl(x.url)?'Lesson plan photo':'Lesson plan document',same=l.filter(x=>type(x)===type(f));return type(f)+(same.length>1?' '+(same.indexOf(f)+1):'');}),
   activities:label(pick('activities'),(f,i)=>'Classroom activity '+(i+1)),
   writing:label(pick('writing'),(f,i)=>'Written work sample '+(i+1)),
   audio:label(pick('audio'),(f,i,l)=>'Lesson preparation recording'+(l.length>1?' '+(i+1):'')),
-  reflections:[...label(reflectionDocs,(f,i,l)=>'After-class reflection'+(l.length>1?' '+(i+1):'')),...label(reflectionAudio,(f,i,l)=>'After-class reflection recording'+(l.length>1?' '+(i+1):''))],
+  writtenReflections:written.map((f,i)=>({url:f.url,date:f.addedOn,dates:f.dates,savedAt:f.reflection.savedAt||'',conductedOn:f.reflection.conductedOn||'',answers:f.reflection.answers,prompts:f.reflection.prompts||[],label:'Written reflection'+(written.length>1?' '+(i+1):'')})),
+  reflections:[...label(reflectionDocs,(f,i,l)=>'Earlier after-class reflection (saved PDF)'+(l.length>1?' '+(i+1):'')).map(f=>({...f,legacy:true})),...label(unreadable,(f,i,l)=>'Written reflection (open saved text)'+(l.length>1?' '+(i+1):'')),...label(reflectionAudio,(f,i,l)=>'After-class reflection recording'+(l.length>1?' '+(i+1):''))],
   additional:label(pick('additional'),(f,i,l)=>{const same=l.filter(x=>x.category===f.category);return (additionalLabels[f.category]||'Other file')+(same.length>1?' '+(same.indexOf(f)+1):'');})
  };
  // Period view: the taught date comes only from in-period activity, so later uploads do not leak in.
@@ -105,7 +120,7 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
  const prepared=utcStamp(rows.map(r=>r.preparationSavedAt).find(Boolean)),submitted=utcStamp(rows.map(r=>r.lessonSubmittedAt).find(Boolean));
  const review=rows.map(r=>clean(r.review)).find(Boolean)||'',reviewedAt=utcStamp(clean(rows.map(r=>r.reviewedAt||r.version).find(Boolean)));
  const reviewInScope=Boolean(review)&&(scope==='all'||inRange(istDay(reviewedAt)));
- const plan=parseLessonPlan(first.reflection,first.materials);
+
  const firstDate=rows.map(r=>r.date).filter(Boolean).sort()[0]||'';
  return {
   key:lessonKeyOf(first),recordId:clean(first.recordId||first.id),submissionId:clean(first.submissionId),periodId:clean(first.periodId),
@@ -145,11 +160,13 @@ export function buildLessonRecords(entries,from,to,{scope='period'}={}){
  return lessons.sort(compareLessons);
 }
 
-export function filterLessons(lessons,{school='',teacher='',grade='',subject=''}={}){
- return lessons.filter(l=>(!school||l.school===school)&&(!teacher||l.teacherKey===teacher)&&(!grade||l.grade===grade)&&(!subject||l.subject===subject));
+// section: undefined/null = any section; '' matches lessons recorded without a section.
+export function filterLessons(lessons,{school='',teacher='',grade='',section=null,subject=''}={}){
+ return lessons.filter(l=>(!school||l.school===school)&&(!teacher||l.teacherKey===teacher)&&(!grade||l.grade===grade)&&(section==null||l.section===section)&&(!subject||l.subject===subject));
 }
 export const lessonFilterOptions=lessons=>({
  grades:[...new Set(lessons.map(l=>l.grade).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})),
+ sections:[...new Set(lessons.map(l=>l.section))].sort((a,b)=>a.localeCompare(b)),
  subjects:[...new Set(lessons.map(l=>l.subject).filter(Boolean))].sort((a,b)=>a.localeCompare(b))
 });
 
@@ -160,7 +177,7 @@ export function visibleLessonSections(lesson,sections=defaultLessonSections){
   activities:on('activities')&&lesson.activities.length>0,
   writing:on('writing')&&lesson.writing.length>0,
   audio:on('audio')&&lesson.audio.length>0,
-  reflections:on('reflections')&&lesson.reflections.length>0,
+  reflections:on('reflections')&&(lesson.reflections.length>0||(lesson.writtenReflections||[]).length>0),
   feedback:on('feedback')&&Boolean(lesson.feedback),
   additional:on('additional')&&lesson.additional.length>0
  };
@@ -169,7 +186,7 @@ export function visibleLessonSections(lesson,sections=defaultLessonSections){
 export function lessonSummary(lessons){
  const sum=key=>lessons.reduce((n,l)=>n+l[key].length,0);
  return {lessons:lessons.length,plansSubmitted:lessons.filter(l=>l.planSubmittedInPeriod).length,teachers:new Set(lessons.map(l=>l.teacherKey)).size,
-  activities:sum('activities'),writing:sum('writing'),audio:sum('audio'),reflections:sum('reflections'),additional:sum('additional'),
+  activities:sum('activities'),writing:sum('writing'),audio:sum('audio'),reflections:sum('reflections')+lessons.reduce((n,l)=>n+(l.writtenReflections||[]).length,0),additional:sum('additional'),
   reviewed:lessons.filter(l=>l.feedback).length};
 }
 
@@ -185,6 +202,17 @@ export function groupLessons(lessons){
   t.classes.get(classKey).lessons.push(lesson);t.lessons.push(lesson);
  }
  return [...schools.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([school,teachers])=>({school,teachers:[...teachers.values()].sort((a,b)=>a.teacher.localeCompare(b.teacher)).map(t=>({...t,classes:[...t.classes.values()].sort((a,b)=>a.grade.localeCompare(b.grade,undefined,{numeric:true})||a.section.localeCompare(b.section)||a.subject.localeCompare(b.subject))}))}));
+}
+
+// Teacher → class/section → subject groups for the Teacher 360° usage PDF. Counts are distinct lessons.
+export function lessonDocumentationGroups(lessons){
+ const groups=new Map();
+ for(const l of lessons){
+  const key=JSON.stringify([l.teacherKey,l.grade,l.section,l.subject]);
+  const g=groups.get(key)||{school:l.school,teacher:l.teacher,teacherKey:l.teacherKey,grade:l.grade,section:l.section,subject:l.subject,lessons:0,topics:[]};
+  g.lessons++;g.topics.push(l.topic);groups.set(key,g);
+ }
+ return [...groups.values()].sort((a,b)=>a.teacherKey.localeCompare(b.teacherKey)||a.grade.localeCompare(b.grade,undefined,{numeric:true})||a.section.localeCompare(b.section)||a.subject.localeCompare(b.subject));
 }
 
 export function classSubjectBreakdown(lessons){

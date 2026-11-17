@@ -13,6 +13,7 @@ const lineHeight=size=>size*PT*1.45;
 const kindTag={Photo:'PHOTO',Video:'VIDEO',PDF:'PDF',Audio:'AUDIO',File:'FILE'};
 const sectionStyle={activities:[palette.teal,palette.tealTint],writing:[palette.blue,palette.blueTint],audio:[palette.plum,palette.plumTint],reflections:[palette.teal,palette.tealTint],additional:[palette.amber,palette.amberTint],plan:[palette.navy,palette.tint]};
 const plural=(n,one,many=one+'s')=>n+' '+(n===1?one:many);
+const reflectionQuestions={achievement:'Did students achieve the learning outcome, and what went well in your class?',nextStep:'Which students need support, what learning gaps do they have, and what will you do next to support them?'};
 const periodText=(from,to)=>from===to?formatDay(from):formatDay(from)+' – '+formatDay(to);
 
 export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sections=defaultLessonSections,images=new Map(),raster=null,generatedAt=new Date(),thumbnailsPerSection=6}){
@@ -185,6 +186,28 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
    draw(rest.slice(0,room),isFirst);rest=rest.slice(room);isFirst=false;if(rest.length)newPage();
   }
  }
+ // Written after-class reflections (text) inline; earlier PDF-only reflections and recordings as links.
+ function reflectionSection(lesson){
+  const written=lesson.writtenReflections||[],files=lesson.reflections;
+  sectionHeading('Teacher reflections',written.length+files.length,sectionStyle.reflections,written.length?30:11);
+  for(const r of written){
+   ensure(24);
+   const title=[r.label,r.date?formatDay(r.date):'',r.conductedOn?'taught '+formatDay(r.conductedOn):''].filter(Boolean).join('  ·  ');
+   if(!state.dry){doc.setFillColor(palette.teal);doc.rect(M,state.y+0.8,0.9,3.6,'F');}
+   drawLine(title,M+3,state.y,8.4,{bold:true,color:palette.teal});state.y+=lineHeight(8.4)+1.2;
+   for(const key of ['achievement','nextStep']){
+    const text=r.answers?.[key];if(!text)continue;
+    const question=(r.prompts||[]).find(p=>p.key===key)?.label||reflectionQuestions[key];
+    ensure(lineHeight(8.2)*2+lineHeight(9.8)*2);
+    for(const line of wrap(question,W-3,8.2,true)){drawLine(line,M+3,state.y,8.2,{bold:true,color:palette.muted});state.y+=lineHeight(8.2);}
+    state.y+=0.6;paragraph(text,{x:M+3,width:W-3,size:9.8,after:2});
+   }
+   rule(state.y,palette.hair,0.15);state.y+=3;
+  }
+  if(files.some(f=>f.legacy))paragraph('Earlier reflections were saved as PDFs; their written text is preserved in the original file.',{size:8.2,color:palette.muted,after:1.5});
+  for(const file of files)linkRow(file,{action:file.kind==='Audio'?'Listen':'Open',style:sectionStyle.reflections});
+  state.y+=2;
+ }
  function lessonHeader(lesson,index,total,teacherShown=false){
   const standalone=kind==='lesson';
   if(!standalone)kicker(`Lesson ${index+1} of ${total}`);
@@ -214,7 +237,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   if(visible.activities)evidenceSection('Classroom activities',lesson.activities,sectionStyle.activities);
   if(visible.writing)evidenceSection('Student written work',lesson.writing,sectionStyle.writing);
   if(visible.audio)evidenceSection('Audio recordings',lesson.audio,sectionStyle.audio,{action:'Listen',note:'Recordings saved with this lesson. Tap to listen; an internet connection is required.'});
-  if(visible.reflections)evidenceSection('Teacher reflections',lesson.reflections,sectionStyle.reflections,{note:'After-class reflections are preserved as the teacher’s original PDF and recordings.'});
+  if(visible.reflections)reflectionSection(lesson);
   if(visible.feedback)reviewPanel(lesson.feedback);
   if(visible.additional)evidenceSection('Further classroom evidence',lesson.additional,sectionStyle.additional);
   if(!Object.values(visible).some(Boolean))paragraph('No lesson plan details or selected evidence were recorded for this lesson.',{size:9,color:palette.muted});
