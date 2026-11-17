@@ -43,7 +43,7 @@ export async function mapLive(raw, publicBase) {
         const files = evidenceFields.flatMap(k => string(r[k]).split(',').flatMap((value, i) => { const url = evidenceUrl(value, publicBase); return url ? [{ key: k + ':' + r.id + ':' + i, column: k, url, name: k.replaceAll('_', ' '), category: k.replaceAll('_', ' ') }] : []; }));
         if (files.length || r.Type === 'Classroom Reflection') {
             const review = (raw.reviews || []).find((v) => String(v.record_id) === String(r.id));
-            const item = { id: String(r.id), recordId: String(r.id), kind: 'submission', school, teacher, date, grade: string(r.Grade), section: string(r.Section), subject: string(r.Subject), topic: string(r.Book) || 'Classroom practice', stage: r.lesson_stage || '', plannedDate: r.planned_lesson_on || '', conductedOn: r.conducted_on || '', evidenceAt: r.evidence_submitted_at || '', reflection: string(r.lesson_reflection), materials: string(r.materials_notes), files, review: review?.feedback || '', version: review?.updated_at || null, uploadedBy: r.Uploaded_By, submissionId: r.submission_id };
+            const item = { id: String(r.id), recordId: String(r.id), kind: 'submission', school, teacher, date, grade: string(r.Grade), section: string(r.Section), subject: string(r.Subject), topic: string(r.Book) || 'Classroom practice', stage: r.lesson_stage || '', plannedDate: r.planned_lesson_on || '', conductedOn: r.conducted_on || '', evidenceAt: r.evidence_submitted_at || '', reflection: string(r.lesson_reflection), materials: string(r.materials_notes), files, review: review?.feedback || '', version: review?.updated_at || null, uploadedBy: r.Uploaded_By, submissionId: r.submission_id, periodId: string(r.lesson_period_id), preparationSavedAt: string(r.preparation_saved_at), lessonSubmittedAt: string(r.submitted_at || r.created_at), reviewedAt: review?.updated_at || '' };
             if (r.lesson_stage && r.planned_lesson_on) {
                 const events = Array.isArray(r.lesson_evidence_history) ? r.lesson_evidence_history : [];
                 const eventUrls = new Set(events.flatMap((e) => Object.values(e.files || {}).flatMap(v => string(v).split(','))));
@@ -53,7 +53,7 @@ export async function mapLive(raw, publicBase) {
                 if (events.length) {
                     for (const event of events) {
                         const eventFiles = evidenceFields.flatMap(column => string(event.files?.[column]).split(',').filter(Boolean).map((value, i) => ({ key: column + ':' + r.id + ':' + event.id + ':' + i, column, url: evidenceUrl(value, publicBase), name: column.replaceAll('_', ' '), category: column.replaceAll('_', ' ') })));
-                        entries.push({ ...item, id: item.id + ':' + event.id, date: localDay(event.at), feedStage: 'Classroom evidence', stage: 'evidence_submitted', conductedOn: event.conductedOn, files: eventFiles });
+                        entries.push({ ...item, id: item.id + ':' + event.id, date: localDay(event.at), feedStage: 'Classroom evidence', stage: 'evidence_submitted', conductedOn: event.conductedOn, evidenceEventId: string(event.id), evidenceEventAt: string(event.at), files: eventFiles });
                     }
                 }
                 const known = new Set([...preparationFiles.map(f => f.url), ...eventUrls]);
