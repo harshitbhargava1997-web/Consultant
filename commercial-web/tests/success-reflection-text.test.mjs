@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {formatClosure} from '../lib/closure-reflection.js';
-import {parseClosureText,reflectionFileId,planReflectionDocuments,attachReflectionText,reflectionDocument,isReflectionTextUrl,REFLECTION_DOCUMENT_TYPE} from '../lib/school-success/reflection-text.js';
+import {parseClosureText,reflectionFileId,planReflectionDocuments,attachReflectionText,reflectionDocument,isReflectionTextUrl,storeReflectionDocuments,REFLECTION_DOCUMENT_TYPE} from '../lib/school-success/reflection-text.js';
 import {submissionSchema,evidencePlan,submissionRecords} from '../lib/school-success/teacher-submissions.js';
 import {mapLive} from '../lib/school-success/live-mapping.js';
 import {buildLessonRecords,isGeneratedPreparationPdf,visibleLessonSections} from '../lib/school-success/lesson-records.js';
@@ -28,7 +28,7 @@ test('the two prompts are split from the editor text; Hindi, mixed text and unti
 
 test('server plans one reflection document per period, keyed in that period’s closure folder; browsers upload only their own files',async()=>{
  const reflections=[{periodId:P1,answers:{achievement:'बहुत अच्छा',nextStep:'Group practice'}}];
- const planned=await planReflectionDocuments({submission:submission(),reflections,updateId:U1,conductedOn:'2026-10-22',savedAt:'2026-10-22T08:00:00.000Z',evidencePlan,submissionSchema});
+ const planned=await planReflectionDocuments({submission:submission(),reflections,updateId:U1,conductedOn:'2026-10-22',evidencePlan,submissionSchema});
  assert.equal(planned.docs.length,1);
  const doc=planned.docs[0];
  assert.match(doc.key,new RegExp(`submission_${sub}/implementation_${P1}/closure/${doc.id}\\.json$`));
@@ -43,15 +43,31 @@ test('server plans one reflection document per period, keyed in that period’s 
  assert.ok([row.Video_Evidence_1,row.Video_Evidence_2,row.Video_Evidence_3].join(',').includes(`/closure/${doc.id}.json`));
 });
 
-test('retries reuse the same reflection identity; other updates and periods get new ones',async()=>{
- assert.equal(await reflectionFileId(U1,P1),await reflectionFileId(U1,P1));
- assert.notEqual(await reflectionFileId(U1,P1),await reflectionFileId(U2,P1));
- assert.notEqual(await reflectionFileId(U1,P1),await reflectionFileId(U1,P2));
- assert.match(await reflectionFileId(U1,P1),/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+test('reflection identity is content-addressed: same answers → same object; any change → a new object',async()=>{
+ const plan=answers=>planReflectionDocuments({submission:submission(),reflections:[{periodId:P1,answers}],updateId:U1,conductedOn:'2026-10-22',evidencePlan,submissionSchema});
+ const a=(await plan({achievement:'Same'})).docs[0],b=(await plan({achievement:'Same'})).docs[0],c=(await plan({achievement:'Different'})).docs[0];
+ assert.deepEqual([a.id,a.text],[b.id,b.text],'identical retries produce identical bytes at the same key');
+ assert.notEqual(a.id,c.id);assert.notEqual(a.key,c.key);
+ assert.ok(!('savedAt' in JSON.parse(a.text)),'no clock values in stored content');
+ assert.notEqual(await reflectionFileId(U1,P1,'h'),await reflectionFileId(U2,P1,'h'));assert.notEqual(await reflectionFileId(U1,P1,'h'),await reflectionFileId(U1,P2,'h'));
+ assert.match(a.id,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+});
+
+test('storing never replaces an existing object; concurrent first writes resolve through If-None-Match',async()=>{
+ const store=new Map(),calls=[];
+ const head=async k=>({ok:store.has(k),status:store.has(k)?200:404,headers:new Headers(store.has(k)?{'content-length':String(Buffer.byteLength(store.get(k)))}:{})});
+ const put=async(k,body,headers)=>{calls.push(k);if(headers['If-None-Match']==='*'&&store.has(k))return {ok:false,status:412};store.set(k,body);return {ok:true,status:200};};
+ const doc={key:'k1',text:'{"a":1}',size:7};
+ await storeReflectionDocuments([doc],{put,head});await storeReflectionDocuments([doc],{put,head});
+ assert.deepEqual(calls,['k1'],'second store skips the existing object');
+ // Race: HEAD saw nothing, another writer stored first; If-None-Match turns the second PUT into 412 and it is accepted after verifying size.
+ const raced=new Map([['k2','{"a":1}']]);let first=true;
+ await storeReflectionDocuments([{key:'k2',text:'{"a":1}',size:7}],{put:async(k,b,h)=>h['If-None-Match']==='*'&&raced.has(k)?{ok:false,status:412}:{ok:true,status:200},head:async k=>{if(first){first=false;return {ok:false,status:404,headers:new Headers()};}return {ok:true,status:200,headers:new Headers({'content-length':'7'})};}});
+ await assert.rejects(storeReflectionDocuments([{key:'k3',text:'x',size:1}],{put:async()=>({ok:false,status:500}),head:async()=>({ok:false,status:404,headers:new Headers()})}),/could not be saved/);
 });
 
 test('reflection input is validated: own periods only, non-empty, bounded length, no extra fields',async()=>{
- const plan=reflections=>planReflectionDocuments({submission:submission(),reflections,updateId:U1,conductedOn:'2026-10-22',savedAt:'2026-10-22T08:00:00.000Z',evidencePlan,submissionSchema});
+ const plan=reflections=>planReflectionDocuments({submission:submission(),reflections,updateId:U1,conductedOn:'2026-10-22',evidencePlan,submissionSchema});
  await assert.rejects(plan([{periodId:'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',answers:{achievement:'x'}}]),/belong to a class period/);
  await assert.rejects(plan([{periodId:P1,answers:{achievement:'  ',nextStep:''}}]),/at least one/);
  await assert.rejects(plan([{periodId:P1,answers:{achievement:'x'.repeat(4001)}}]));
@@ -62,7 +78,7 @@ test('reflection input is validated: own periods only, non-empty, bounded length
 
 test('read path attaches only valid reflection documents and leaves failures as links',async()=>{
  const good=`${base}/x/submission_${sub}/implementation_${P1}/closure/${await reflectionFileId(U1,P1)}.json`,bad=`${base}/x/implementation_${P1}/closure/${await reflectionFileId(U2,P1)}.json`;
- const body=JSON.stringify(reflectionDocument({submissionId:sub,periodId:P1,updateId:U1,conductedOn:'2026-10-22',savedAt:'2026-10-22T08:00:00.000Z',answers:{achievement:'Done',nextStep:''}}));
+ const body=JSON.stringify(reflectionDocument({submissionId:sub,periodId:P1,updateId:U1,conductedOn:'2026-10-22',answers:{achievement:'Done',nextStep:''}}));
  const entries=[{kind:'submission',files:[{url:good},{url:bad},{url:`${base}/x/closure/legacy.pdf`}]},{kind:'usage',files:[{url:good}]}];
  const fetched=[];
  const result=await attachReflectionText(entries,async url=>{fetched.push(url);if(url===good)return body;return '{"type":"other"}';});
@@ -84,7 +100,7 @@ async function lessonEntries({planText=true}={}){
   lesson_reflection:planText?'Why — learning objective\nपढ़ना और लिखना':'',materials_notes:'',lesson_version:3,Voice_Note_Link:'',Lesson_Plan_Picture:[generated,photo].join(','),Video_Evidence_1:legacy,Video_Evidence_2:act,Video_Evidence_3:[inside,after].join(','),
   lesson_evidence_history:[{id:'e0',at:'2026-10-21T06:00:00',conductedOn:'2026-10-21',files:{Video_Evidence_1:legacy}},{id:'e1',at:'2026-10-22T06:00:00',conductedOn:'2026-10-22',files:{Video_Evidence_1:[act,inside].join(',')}},{id:'e2',at:'2026-11-02T06:00:00',conductedOn:'2026-11-02',files:{Video_Evidence_1:after}}]};
  const entries=(await mapLive({records:[record],reviews:[],roster:[]},base)).entries;
- const doc=(u,a,on)=>JSON.stringify(reflectionDocument({submissionId:sub,periodId:P1,updateId:u,conductedOn:on,savedAt:on+'T08:00:00.000Z',answers:a}));
+ const doc=(u,a,on)=>JSON.stringify(reflectionDocument({submissionId:sub,periodId:P1,updateId:u,conductedOn:on,answers:a}));
  await attachReflectionText(entries,async u=>u===inside?doc(U1,{achievement:'बच्चों ने मात्रा पहचानी। Most read 5 words.',nextStep:'Ravi needs support with ि.'},'2026-10-22'):u===after?doc(U2,{achievement:'November follow-up',nextStep:''},'2026-11-02'):(()=>{throw Error('missing');})());
  return {entries,generated,photo,legacy};
 }

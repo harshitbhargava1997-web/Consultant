@@ -65,6 +65,11 @@ async function rawGateway(req) {
                 return json({ error: 'Lesson access denied' }, 403);
             return json({ rows });
         }
+        if (b.action === 'readLessonReviews') {
+            if (!Array.isArray(b.ids) || !b.ids.length || b.ids.length > 10 || b.ids.some(id => !/^\d+$/.test(String(id))))
+                throw Error('Invalid lesson review lookup');
+            return json({ rows: await request('/rest/v1/portal_evidence_reviews?record_id=in.(' + b.ids.join(',') + ')&select=record_id,feedback,updated_at') });
+        }
         if (b.action === 'savePreparation') {
             if (!Array.isArray(b.rows) || !b.rows.length || b.rows.length > 10 || !b.actor)
                 throw Error('Use 1 to 10 class periods');

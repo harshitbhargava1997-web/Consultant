@@ -23,21 +23,24 @@ export const reflectionInputSchema=z.array(z.object({periodId:z.string().uuid(),
 const day=z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const reflectionDocumentSchema=z.object({
  type:z.literal(REFLECTION_DOCUMENT_TYPE),submissionId:z.string().uuid(),periodId:z.string().uuid(),updateId:z.string().uuid(),
- conductedOn:day,savedAt:z.string().datetime(),
+ conductedOn:day,savedAt:z.string().datetime().optional(), // savedAt only in early drafts; the save time is the history event time
  prompts:z.array(z.object({key:z.enum(['achievement','nextStep']),label:z.string().max(300)})).max(2),
  answers:z.object({achievement:z.string().max(REFLECTION_ANSWER_LIMIT),nextStep:z.string().max(REFLECTION_ANSWER_LIMIT)})
 });
 
-export function reflectionDocument({submissionId,periodId,updateId,conductedOn,savedAt,answers}){
- return reflectionDocumentSchema.parse({type:REFLECTION_DOCUMENT_TYPE,submissionId,periodId,updateId,conductedOn,savedAt,
+// Deterministic content (no clock values): identical answers always produce identical bytes.
+export function reflectionDocument({submissionId,periodId,updateId,conductedOn,answers}){
+ return reflectionDocumentSchema.parse({type:REFLECTION_DOCUMENT_TYPE,submissionId,periodId,updateId,conductedOn,
   prompts:closurePrompts.map(([key,label])=>({key,label})),answers:{achievement:answers.achievement||'',nextStep:answers.nextStep||''}});
 }
 export const reflectionBytes=doc=>new TextEncoder().encode(JSON.stringify(doc));
 
-// Deterministic file ID per update and period: a retried submission writes the same object,
-// so retries never create duplicate reflections.
-export async function reflectionFileId(updateId,periodId){
- const hash=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('reflection:'+updateId+':'+periodId)));
+export async function sha256Hex(text){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(b=>b.toString(16).padStart(2,'0')).join('');}
+// Content-addressed file ID: (update, period, SHA-256 of the exact document). Identical retries map to the
+// same object with identical bytes; different answers always map to a different object, so accepted
+// content can never be overwritten by a conflicting or stale submission.
+export async function reflectionFileId(updateId,periodId,contentHash){
+ const hash=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('reflection:'+updateId+':'+periodId+':'+contentHash)));
  hash[6]=(hash[6]&0x0f)|0x40;hash[8]=(hash[8]&0x3f)|0x80;
  const hex=[...hash.slice(0,16)].map(b=>b.toString(16).padStart(2,'0')).join('');
  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
@@ -72,7 +75,7 @@ export async function attachReflectionText(entries,fetchText,{limit=400,concurre
    const body=await fetchText(url);
    if(typeof body!=='string'||new TextEncoder().encode(body).length>MAX_REFLECTION_BYTES)throw Error('size');
    const doc=reflectionDocumentSchema.parse(JSON.parse(body));
-   results.set(url,{answers:doc.answers,prompts:doc.prompts,savedAt:doc.savedAt,conductedOn:doc.conductedOn,updateId:doc.updateId});
+   results.set(url,{answers:doc.answers,prompts:doc.prompts,conductedOn:doc.conductedOn,updateId:doc.updateId});
   }catch{results.set(url,null);}
  }));
  for(const [url,files] of byUrl)for(const file of files){const value=results.get(url);if(value)file.reflection=value;else file.reflectionUnavailable=true;}
@@ -81,18 +84,45 @@ export async function attachReflectionText(entries,fetchText,{limit=400,concurre
 
 // Server-side planning for one evidence update: validates the answers against the lesson's periods,
 // builds each reflection document and adds it to the submission's file list as a closure file.
+// Deterministic for the same (submission, answers, updateId, conductedOn), so commit can rebuild and verify it.
 // `evidencePlan` and `submissionSchema` are passed in to avoid a circular import.
-export async function planReflectionDocuments({submission,reflections,updateId,conductedOn,savedAt,evidencePlan,submissionSchema}){
+export async function planReflectionDocuments({submission,reflections,updateId,conductedOn,evidencePlan,submissionSchema}){
  const input=reflections==null?[]:reflectionInputSchema.parse(reflections);
  if(input.some(r=>!submission.periods.some(p=>p.id===r.periodId)))throw Error('403:Reflection must belong to a class period of this lesson');
  if(!input.length)return {submission,docs:[],uploads:evidencePlan(submission)};
  const docs=[];
  for(const r of input){
-  const id=await reflectionFileId(updateId,r.periodId),text=JSON.stringify(reflectionDocument({submissionId:submission.id,periodId:r.periodId,updateId,conductedOn,savedAt,answers:r.answers}));
-  docs.push({id,periodId:r.periodId,text,size:new TextEncoder().encode(text).length});
+  const text=JSON.stringify(reflectionDocument({submissionId:submission.id,periodId:r.periodId,updateId,conductedOn,answers:r.answers})),sha256=await sha256Hex(text);
+  docs.push({id:await reflectionFileId(updateId,r.periodId,sha256),periodId:r.periodId,text,sha256,size:new TextEncoder().encode(text).length});
  }
  const next=submissionSchema.parse({...submission,files:[...submission.files,...docs.map(d=>({id:d.id,periodId:d.periodId,category:'closure',name:REFLECTION_FILE_NAME,size:d.size}))]});
  const planned=evidencePlan(next);
  for(const d of docs)d.key=planned.find(f=>f.id===d.id).key;
- return {submission:next,docs:docs.map(({id,key,text})=>({id,key,text})),uploads:planned.filter(f=>!docs.some(d=>d.id===f.id))};
+ return {submission:next,docs,uploads:planned.filter(f=>!docs.some(d=>d.id===f.id))};
+}
+
+// Writes reflection documents without ever replacing accepted content. Keys are content-addressed, so an
+// existing object at the key already holds these exact bytes. `If-None-Match: *` makes concurrent first
+// writes atomic where storage supports it; otherwise both writers store identical bytes.
+export async function storeReflectionDocuments(docs,{put,head}){
+ for(const doc of docs){
+  const existing=await head(doc.key);
+  if(existing.ok&&Number(existing.headers.get('content-length'))===doc.size)continue;
+  const response=await put(doc.key,doc.text,{'Content-Type':'application/json; charset=utf-8','If-None-Match':'*'});
+  if(response.ok)continue;
+  if(response.status===412){const check=await head(doc.key);if(check.ok&&Number(check.headers.get('content-length'))===doc.size)continue;}
+  throw Error('Written reflection could not be saved. Retry this submission.');
+ }
+}
+
+// Read-only fetcher for reflection documents under the configured media base (never arbitrary URLs).
+export function reflectionFetcher({base,get,timeoutMs=8000}){
+ const prefix=base.replace(/\/$/,'')+'/';
+ return async url=>{
+  if(!url.startsWith(prefix))throw Error('Unexpected media location');
+  const key=url.slice(prefix.length).split('/').map(decodeURIComponent).join('/');
+  const response=await Promise.race([get(key,url),new Promise((_,reject)=>setTimeout(()=>reject(Error('Timed out')),timeoutMs))]);
+  if(!response.ok||Number(response.headers.get('content-length')||0)>MAX_REFLECTION_BYTES)throw Error('Unavailable');
+  return response.text();
+ };
 }

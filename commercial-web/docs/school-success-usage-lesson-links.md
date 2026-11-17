@@ -98,3 +98,69 @@ A migration was considered and not needed. If one is wanted later, an append-onl
 ![Lesson PDF with written reflections](lesson-pdf-written-reflections.jpg)
 
 ![Lesson documentation opened from a usage PDF link](lesson-documentation-link-destination.jpg)
+
+## Review round 1 corrections (PR #6)
+
+### A. Reflection retry safety
+- **Accepted reflection content is immutable.**
+  - Documents are deterministic: there is no `savedAt`, because the save time is the history event time.
+  - Their storage key is content-addressed from (update ID, period ID, SHA-256 of the exact bytes).
+  - Different answers can never reach an existing key. An identical retry maps to the same key with identical bytes.
+- **Writes never overwrite.** They skip an object that already exists (`HEAD`) and send `If-None-Match: *`, so concurrent first writes cannot replace each other. A `412` is accepted only after the size is verified.
+- **Conflicting or stale plans** can at most leave an unreferenced object. The RPC returns `alreadySaved` or `Lesson changed`, and history is unchanged.
+- **Concurrency in the database:** the RPC already takes `pg_advisory_xact_lock(hashtext(p_submission), …)` before its checks, so commits for one submission are serialized. No migration is needed.
+
+### B. Large submissions
+- The base64url encoder is now chunked; before, spreading the bytes overflowed the call stack.
+- **Plan tokens are bounded** (v2): they carry only identifiers, mode, version, update ID, conducted date, a SHA-256 of the final submission, and `{id, periodId, sha256, size}` per reflection.
+- At commit the browser resends the submission and answers. The server rebuilds the exact prepared submission and refuses with `409` if anything differs.
+- Token size depends only on the number of periods and files. Ten periods with two 4,000-character Hindi answers each, plus 5,000-character Hindi plans, produce a token under 4,000 characters, well within `unseal()`'s 200,000.
+- Plans sealed by the previous code (which have no reflections) are still accepted for their one-hour lifetime.
+- The browser keeps the teacher's typed reflection and chosen files on any error, with the same update ID, so resubmitting retries safely.
+
+### C. Readable reflections for teachers
+- The authorised resume API gives every file its IST submission date, from the evidence history, and attaches saved reflection text server-side.
+- The reopened lesson shows dated reflections, each with *learning outcome and what went well* and *students needing support, gaps and next steps*.
+- Earlier PDF-only reflections, recordings, other files and (for School Success administrators only, as before) Academic Review stay listed.
+- No raw JSON is shown. The generated preparation PDF is hidden there too when the preparation text is shown.
+
+### D. Simplified School Success teacher portal
+- **Two primary actions:** **Submit Lesson Plan** and **Submit Evidence**.
+- **Removed:**
+  - Download reflection draft;
+  - Download submitted reflection & receipt;
+  - Download reflection & evidence links;
+  - Download lesson & evidence links;
+  - the bottom "Teacher evidence / My Evidence" feed, with its loaded-period line and entry count.
+- **Kept:** the save confirmation and return link, the saved-lessons-on-this-device list, and the planned-date lookup (which uses its own API and is independent of the feed and its period).
+- **Add Evidence** no longer shows the after-class audio recording or upload block. Historical audio remains listed and playable, and the optional lesson-planning recording is unchanged.
+- **Shared components:** `ReflectionEditor` gained `audio` (default `true`) and `AfterClassReflection` an optional `note`, so native Vision behaves exactly as before. This is verified by test.
+
+### Verification
+- `node --test tests/*.test.mjs tests/*.test.cjs`: **190 passed**. `npm run build` passed.
+- New route-level tests (`tests/success-evidence-route.test.cjs`) run the real route, sealing, schemas and workflow, with an in-memory R2 (honouring `If-None-Match`) and an emulated RPC. They cover:
+  - identical retries;
+  - conflicting plans sharing an update ID;
+  - concurrent commits;
+  - stale versions;
+  - storage and database partial failures with retry;
+  - tampering;
+  - JSON upload rejection;
+  - maximum-length English, Hindi and mixed 10-period submissions;
+  - a 10-period maximum Hindi lesson plan;
+  - dated reload of reflections with legacy files, and feedback only for admins.
+- New UI tests (`tests/success-teacher-portal-ui.test.cjs`) check the two actions, the absence of the removed downloads, feed and audio controls, readable reloaded reflections, and that Vision still has audio.
+- **Browser checks** (synthetic data, mocked API, headless Chromium) on desktop and an emulated iPhone 13: two actions, no downloads, no feed, and no sideways scrolling. Submit Evidence → find → reopen shows 2 dated reflections, no raw JSON and no reflection-audio control.
+- Reporting PDFs were re-generated and inspected: usage links, lesson PDFs with written reflections, and the link destination with its download.
+- **Not verified:** live authentication, real R2 conditional writes (`If-None-Match` support in the production bucket; without it the content-addressed keys still prevent overwrites), real RPC execution, and physical phones.
+
+### Rollback
+- Code only; no schema or settings changed.
+- Reflection documents saved by this version are ordinary closure files that earlier code lists as links.
+- Plan tokens are short-lived (1 hour). After a rollback, a teacher in the middle of a submission simply submits again.
+
+![Teacher portal actions](teacher-portal-actions.jpg)
+
+![Reopened lesson with saved reflections](teacher-portal-saved-reflections.jpg)
+
+![Teacher portal on a phone](teacher-portal-mobile.jpg)
