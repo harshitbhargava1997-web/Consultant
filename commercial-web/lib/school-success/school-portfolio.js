@@ -1,6 +1,6 @@
 import {buildProfiles,defaultReportSettings,reportSettingsSchema,includedMetric,eligibleDays,teacherKey} from './reports.js';
 import {reportDirectorySource,isArchived} from './directory.js';
-import {chronologicalRows,isClosureFile} from '../report-sequence.js';
+import {chronologicalRows,isClosureFile,isRemedialFile} from '../report-sequence.js';
 import {formatReportDuration} from './report-units.js';
 
 export const portfolioModules=settings=>[0,1,3,2].filter(i=>includedMetric(i,settings)&&(i!==1||settings.sections.book!==false));
@@ -17,6 +17,7 @@ export function portfolioComparison(current,previous){
 }
 export const portfolioSettings=data=>{const parsed=reportSettingsSchema.safeParse(data.reportSettings);return parsed.success?parsed.data:structuredClone(defaultReportSettings);};
 export const fileCategory=file=>{
+ if(isRemedialFile(file))return 'remedial';
  if(isClosureFile(file))return 'closure';
  const column=file.column||String(file.key||'').split(':')[0];
  if(column==='Lesson_Plan_Picture'||file.category==='lesson_plan')return 'preparation';
@@ -28,7 +29,7 @@ export const fileCategory=file=>{
  if(column==='Event_Pictures_Link'||file.category==='event_pictures')return 'events';
  return 'other';
 };
-export const portfolioCategories=[['all','All evidence'],['preparation','Lesson preparation PDFs'],['audio','Audio recordings'],['closure','After-class reflections'],['activity','Classroom activities'],['writing','Writing samples'],['phonics','Phonics evidence'],['portfolio','Portfolio artifacts'],['events','Event pictures'],['other','Other files']];
+export const portfolioCategories=[['all','All evidence'],['preparation','Lesson preparation PDFs'],['audio','Audio recordings'],['closure','After-class reflections'],['remedial','Remedial plans / support shared with students'],['activity','Classroom activities'],['writing','Writing samples'],['phonics','Phonics evidence'],['portfolio','Portfolio artifacts'],['events','Event pictures'],['other','Other files']];
 export const lessonIdentity=row=>JSON.stringify([row.school,row.teacher,row.recordId||row.id||[row.plannedDate||row.date,row.grade,row.section,row.subject,row.topic]]);
 export function submissionStats(rows){
  const lessons=new Map(),preparations=new Set(),classroomLessons=new Set(),files=new Map(),teachers=new Set();

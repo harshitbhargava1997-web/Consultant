@@ -1,6 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {transformSync}=require('next/dist/build/swc');
-const filename=path.resolve(__dirname,'../app/LessonVoiceControls.jsx');
+const filename=path.resolve(__dirname,'../app/ReflectionEditor.jsx');
 const code=transformSync(fs.readFileSync(filename,'utf8'),{filename,jsc:{parser:{syntax:'ecmascript',jsx:true},transform:{react:{runtime:'automatic'}}},module:{type:'commonjs'}}).code;
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function harness({permission,uploadsEnabled=true}={}){
@@ -29,4 +29,10 @@ test('permission resolving after unmount releases microphone without attaching a
 });
 test('disabled uploads do not prevent typing or keyboard dictation into planning fields',()=>{
  const h=harness({uploadsEnabled:false}),ui=h.render();assert.equal(ui.button.props.disabled,true);assert(ui.fields.every(f=>!f.props.disabled));ui.fields[0].props.onChange({target:{value:'Plan without audio'}});assert.equal(h.events[0][1],'Plan without audio');h.unmount();
+});
+test('after-class recording uses a separate filename and leaves the written reflection intact',async()=>{
+ const h=harness();h.props.kind='closure';h.props.prompts=[['achievement','Outcome'],['nextStep','Remedial support']];h.props.format=parts=>Object.values(parts).join('\n');
+ let ui=h.render();ui.fields[0].props.onChange({target:{value:'Most students achieved the outcome.'}});ui.fields[1].props.onChange({target:{value:'Plan extra blending practice.'}});
+ ui.button.props.onClick();await tick();ui=h.render();ui.button.props.onClick();await h.capture.done;
+ assert.equal(h.files[0].name,'After-class-reflection.m4a');ui=h.render();assert.equal(ui.fields[0].props.value,'Most students achieved the outcome.');assert.equal(ui.fields[1].props.value,'Plan extra blending practice.');h.unmount();
 });

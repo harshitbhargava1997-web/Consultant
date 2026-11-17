@@ -1,4 +1,4 @@
-import {isClosureFile} from '../report-sequence.js';
+import {isClosureFile,isRemedialFile} from '../report-sequence.js';
 import { z } from 'zod';
 import {chronologicalRows} from '../report-sequence.js';
 import {formatReportDuration as duration} from './report-units.js';
@@ -27,9 +27,10 @@ export function buildProfiles(entries, roster, from, to, settings, calendars = {
         const rows = period.filter(r => r.school === t.school && r.teacher === t.name), usage = rows.filter(r => r.kind === 'usage'), submissions = rows.filter(r => r.kind === 'submission'), observations = rows.filter(r => r.kind === 'observation');
         const holidays = [...settings.holidays, ...(settings.useSchoolCalendars ? (calendars[t.school] || []) : [])], days = eligibleDays(from, to, holidays, settings.excludeSundays);
         const metrics = moduleNames.map((module, i) => { const logs = usage.filter(r => r.module === module), actual = logs.reduce((s, r) => s + Number(r.minutes || 0), 0), target = settings.quantitative ? settings.daily[i] * days : 0; return { module, label: moduleLabels[i], actual, target, average: days ? actual / days : 0, percent: target > 0 ? actual / target * 100 : null, status: metricStatus(actual, target, settings.quantitative, days), logs }; });
-        const byColumn = new Map(), closureMap = new Map();
+        const byColumn = new Map(), closureMap = new Map(), remedialMap = new Map();
         for (const r of submissions)
             for (const f of r.files || []) {
+                if(isRemedialFile(f)){remedialMap.set(f.url,{...f,date:r.date,grade:r.grade,subject:r.subject,topic:r.topic});continue;}
                 if(isClosureFile(f)){closureMap.set(f.url,{...f,date:r.date,grade:r.grade,subject:r.subject,topic:r.topic});continue;}
                 const column = f.column || String(f.key).split(':')[0];
                 if (!byColumn.has(column))
@@ -58,7 +59,7 @@ export function buildProfiles(entries, roster, from, to, settings, calendars = {
             item.minutes += Number(r.minutes || 0);
             preparationGroups.set(key, item);
         }
-        return { ...t, days, holidays, metrics, evidence, closures:chronologicalRows([...closureMap.values()]), evidenceStatus, observations, preparations: [...preparationGroups.values()].sort((a, b) => b.minutes - a.minutes), usage, books: [...bookGroups.values()].sort((a, b) => b.minutes - a.minutes), events: unique(['Event_Pictures_Link']) };
+        return { ...t, days, holidays, metrics, evidence, closures:chronologicalRows([...closureMap.values()]), remedials:chronologicalRows([...remedialMap.values()]), evidenceStatus, observations, preparations: [...preparationGroups.values()].sort((a, b) => b.minutes - a.minutes), usage, books: [...bookGroups.values()].sort((a, b) => b.minutes - a.minutes), events: unique(['Event_Pictures_Link']) };
     });
 }
 export function includedMetric(index, settings) { return index === 1 || index === 0 && settings.sections.lessonPlan || index === 2 && settings.sections.additional || index === 3 && settings.sections.ebooks; }

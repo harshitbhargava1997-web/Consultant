@@ -1,4 +1,9 @@
-export const closurePrompts=[['achievement','What did students learn or achieve?'],['wentWell','What went well in the classroom?'],['nextStep','Who needs more support, and what will I do next?']];
+export const closurePrompts=[['achievement','Did students achieve the learning outcome, and what went well in your class?'],['nextStep','Which students need support, what learning gaps do they have, and what will you do next to support them?']];
+export const CLOSURE_RECORDING_SLOT='after-class-recording';
+export function closureRecordingAttachment(files,file,id){
+ const existing=files.find(f=>f.slot===CLOSURE_RECORDING_SLOT);
+ return [...files.filter(f=>f.slot!==CLOSURE_RECORDING_SLOT),{id:existing?.id||id,slot:CLOSURE_RECORDING_SLOT,category:'closure',file}];
+}
 export const formatClosure=parts=>closurePrompts.filter(([key])=>parts[key]?.trim()).map(([key,label])=>label+'\n'+parts[key].trim()).join('\n\n');
 // Store closure PDFs and recordings in the existing append-only classroom-evidence
 // update. This preserves lesson identity and existing download/report permissions.
