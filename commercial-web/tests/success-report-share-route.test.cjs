@@ -49,6 +49,7 @@ const KEYS=['schools/Alpha%20School/teachers/AKANSHA%20PAL/2026-11-05/submission
  'schools/Alpha%20School/teachers/AKANSHA%20PAL/2026-11-05/submission_1/implementation_1/voice/note.m4a'];
 // Export one consolidated report the way the browser does: client-chosen ID/secret, full snapshot, record.
 async function publish(h,{mode='link',text='AKANSHA PAL · Grade 1 · Mathematics · complete report',over={},evidence=KEYS}={}){
+ for(const k of evidence)if(!h.r2.has(k))h.r2.set(k,new TextEncoder().encode('synthetic evidence '+k));
  const s=await h.storeSnapshot(h.pdf(text),h.scope(over));assert.equal(s.status,200,JSON.stringify(s.body));
  const id=crypto.randomUUID(),secret=mode==='link'?shares.newShareSecret():null;
  const c=await h.createShare({id,mode,snapshotId:s.body.id,secretSha256:secret?await shares.secretDigest(secret):null,evidence});
@@ -68,10 +69,10 @@ test('anyone with the link: signed out, the complete report opens, and so does e
  assert.deepEqual(Buffer.from(await pdf.arrayBuffer()),Buffer.from(r.bytes));
  for(const [n,key] of KEYS.entries()){
   const f=await h.file(r.id,n,{secret:r.secret});assert.equal(f.status,200,JSON.stringify(f.body));
-  const u=signedUrl(f.body.url);assert.equal(u.key,key,'signed URL for exactly that file');assert.ok(u.signed);assert.equal(u.expires,'3600');assert.equal(u.host,'acc.r2.cloudflarestorage.com');
+  const u=signedUrl(f.body.url);assert.equal(u.key,key,'signed URL for exactly that file');assert.ok(u.signed);assert.equal(u.expires,'900');assert.equal(f.body.expiresInSeconds,900,'file URLs live 15 minutes');assert.equal(u.host,'acc.r2.cloudflarestorage.com');
  }
  assert.equal((await h.file(r.id,KEYS.length,{secret:r.secret})).status,404,'only files included in this report');
- for(const [key,value] of h.r2){const b=Buffer.from(value);for(const plain of ['%PDF','AKANSHA','Alpha School',r.secret,'photo.jpg'])assert.ok(!b.includes(Buffer.from(plain)),`${key} leaks ${plain}`);}
+ for(const [key,value] of h.r2){if(!key.startsWith('school-success/'))continue;const b=Buffer.from(value);for(const plain of ['%PDF','AKANSHA','Alpha School',r.secret,'photo.jpg'])assert.ok(!b.includes(Buffer.from(plain)),`${key} leaks ${plain}`);}
 });
 
 test('require school sign-in: report and every file need sign-in with access to the school; the same report opens after sign-in',async()=>{
@@ -90,6 +91,7 @@ test('require school sign-in: report and every file need sign-in with access to 
 
 test('report creation is staff-only and scoped to the snapshot\'s school, teacher and included files',async()=>{
  const h=harness(),s=await h.storeSnapshot(h.pdf('x'));const base={id:crypto.randomUUID(),mode:'link',snapshotId:s.body.id,secretSha256:'a'.repeat(64),evidence:KEYS};
+ for(const k of KEYS)h.r2.set(k,new TextEncoder().encode('x'));
  h.state.actor=OTHER;assert.equal((await h.createShare(base)).status,403);
  h.state.actor=TEACHER;assert.equal((await h.createShare(base)).status,403);
  h.state.actor=null;assert.equal((await h.createShare(base)).status,401);
@@ -102,6 +104,8 @@ test('report creation is staff-only and scoped to the snapshot\'s school, teache
  assert.equal((await h.createShare({...base,extra:1})).status,400);
  assert.equal((await h.createShare({...base,snapshotId:crypto.randomUUID()})).status,404);
  assert.equal((await h.createShare(base,{Origin:'https://evil.example'})).status,403);
+ const gone='schools/Alpha%20School/teachers/AKANSHA%20PAL/2026-11-05/submission_1/implementation_1/activity/deleted.jpg';
+ const missing=await h.createShare({...base,evidence:[...KEYS,gone]});assert.equal(missing.status,409);assert.deepEqual(missing.body.missing,[gone],'a file missing from storage is named, not linked');
  assert.equal(h.writes.filter(k=>k.includes('report-shares')).length,0);
  assert.equal((await h.createShare(base)).status,200);assert.equal((await h.createShare(base)).status,409,'IDs are never reused');
 });
@@ -175,7 +179,7 @@ test('export → revoke (another admin, another session) → re-export without r
  const teacherKeys=[JSON.stringify(['Alpha School','Asha'])],pick=list=>list.filter(l=>l.grade==='Grade 3'&&l.section==='B'&&l.subject==='Hindi');
  // Fake browser render: lists the PDF's evidence links (through session.linkFor) as text.
  const render=async(lessons,{session})=>h.pdf('complete · '+lessons.flatMap(l=>[...l.activities,...l.writing,...l.audio,...l.planFiles,...l.additional,...l.reflections]).map(f=>session.linkFor(f.url)).join(' '));
- const fetcher=async(url,init)=>{const route=url==='/api/school-success/report-snapshots'?null:url;if(!route){const scope=JSON.parse(Buffer.from(init.headers['X-Snapshot-Scope'],'base64url').toString());const r=await h.storeSnapshot(init.body,scope);return Response.json(r.body,{status:r.status});}const r=await h.createShare(JSON.parse(init.body));return Response.json(r.body,{status:r.status});};
+ const fetcher=async(url,init)=>{const route=url==='/api/school-success/report-snapshots'?null:url;if(!route){const scope=JSON.parse(Buffer.from(init.headers['X-Snapshot-Scope'],'base64url').toString());const r=await h.storeSnapshot(init.body,scope);return Response.json(r.body,{status:r.status});}const rec=JSON.parse(init.body);for(const k of rec.evidence)if(!h.r2.has(k))h.r2.set(k,new TextEncoder().encode('evidence'));const r=await h.createShare(rec);return Response.json(r.body,{status:r.status});};
  const exportOnce=async()=>pick([...(await buildDocumentationLinks({entries,from:fx.from,to:fx.to,teacherKeys,generatedAt:'2026-11-17T06:00:00.000Z',render,wait:async()=>{},
   begin:()=>reportAccessSession({mode:'link',origin:'https://app.test',mediaBase:fx.base,newSecret:shares.newShareSecret}),
   store:(bytes,scope)=>storeSnapshot(fetcher,bytes,scope),

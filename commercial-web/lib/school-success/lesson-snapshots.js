@@ -74,15 +74,40 @@ export async function storeSnapshot(fetcher,bytes,scope){
 export async function createReportAccess(fetcher,record){
  const response=await fetcher('/api/school-success/report-shares',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(record)});
  let body={};try{body=await response.json();}catch{}
- if(!response.ok){const error=Error(body.error||'the report link could not be created');error.permanent=response.status>=400&&response.status<500&&![408,429].includes(response.status);throw error;}
+ if(!response.ok){const error=Error(body.error||'the report link could not be created');error.permanent=response.status>=400&&response.status<500&&![408,429].includes(response.status);if(Array.isArray(body.missing))error.missing=body.missing;throw error;}
  return body;
 }
 // Per-export access session: fresh ID and secret, and the evidence manifest the PDF's links point to.
-// Evidence outside the media bucket (other websites) keeps its original link.
+// Every linked file must be servable through the report's own link; anything else is refused here
+// (unavailableEvidence() names such files to the exporter before any report is produced).
 export function reportAccessSession({mode,origin,mediaBase,newId=()=>crypto.randomUUID(),newSecret}){
  const id=newId(),secret=mode==='link'?newSecret():null,evidence=[],index=new Map();
  return {id,secret,mode,evidence,
   reset(){evidence.length=0;index.clear();},
-  linkFor(url){const key=evidenceKeyFromUrl(url,mediaBase);if(!key)return url;if(!index.has(key)){index.set(key,evidence.length);evidence.push(key);}return evidenceLink(origin,mode,id,index.get(key),secret);},
+  linkFor(url){const key=evidenceKeyFromUrl(url,mediaBase);if(!key)throw Error('A file in this lesson cannot be opened through the report link. Export again to see which one.');if(!index.has(key)){index.set(key,evidence.length);evidence.push(key);}return evidenceLink(origin,mode,id,index.get(key),secret);},
   url:()=>reportLink(origin,mode,id,secret)};
+}
+
+// The files a consolidated report links to (written reflections appear as text instead).
+export const LINKED_FILE_LISTS=['planFiles','activities','writing','audio','reflections','additional'];
+const host=url=>{try{return new URL(url).host;}catch{return 'invalid address';}};
+// Included files that cannot be served through a report link (not in the school's media storage), with
+// enough detail for the exporter to find and resolve each one. Nothing is dropped silently.
+export function unavailableEvidence(lessons,mediaBase){
+ const out=[],seen=new Set();
+ for(const l of lessons)for(const list of LINKED_FILE_LISTS)for(const f of l[list]||[]){
+  if(evidenceKeyFromUrl(f.url,mediaBase)||seen.has(f.url))continue;seen.add(f.url);
+  out.push({teacher:l.teacher,school:l.school,grade:l.grade,section:l.section,subject:l.subject,topic:l.topic,date:f.addedOn||l.firstDate||'',file:f.label||'File',where:host(f.url)});
+ }
+ return out;
+}
+export function describeFiles(items,limit=8){
+ const line=f=>`${f.teacher} · ${[f.grade,f.section&&f.section!=='Not Applicable'?f.section:''].filter(Boolean).join(' ')} · ${f.subject} · “${f.topic}”${f.date?' · '+f.date:''} · ${f.file}${f.where?' ('+f.where+')':''}`;
+ return items.slice(0,limit).map(line).join('; ')+(items.length>limit?`; and ${items.length-limit} more`:'');
+}
+// Storage key → where the file appears, for naming files the server reports as missing.
+export function evidenceIndex(lessons,mediaBase){
+ const index=new Map();
+ for(const l of lessons)for(const list of LINKED_FILE_LISTS)for(const f of l[list]||[]){const key=evidenceKeyFromUrl(f.url,mediaBase);if(key&&!index.has(key))index.set(key,{teacher:l.teacher,school:l.school,grade:l.grade,section:l.section,subject:l.subject,topic:l.topic,date:f.addedOn||l.firstDate||'',file:f.label||'File',where:''});}
+ return index;
 }

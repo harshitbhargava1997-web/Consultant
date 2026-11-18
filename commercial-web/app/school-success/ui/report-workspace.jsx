@@ -8,7 +8,7 @@ import {reportEvidenceGroups} from '@/lib/report-sequence';
 import {formatReportDuration as duration} from '@/lib/school-success/report-units';
 import { compareProfiles } from '@/lib/school-success/report-comparison';
 import { isImageUrl } from '@/lib/school-success/lesson-records';
-import { buildDocumentationLinks, documentationGroups, groupLessons, storeSnapshot, createReportAccess, reportAccessSession, THUMBNAIL_LEVELS } from '@/lib/school-success/lesson-snapshots';
+import { buildDocumentationLinks, documentationGroups, groupLessons, storeSnapshot, createReportAccess, reportAccessSession, THUMBNAIL_LEVELS, unavailableEvidence, describeFiles, evidenceIndex } from '@/lib/school-success/lesson-snapshots';
 import { newShareSecret, secretDigest } from '@/lib/school-success/report-shares';
 import { MAX_SNAPSHOT_BYTES } from '@/lib/school-success/report-snapshots';
 import dynamic from 'next/dynamic';
@@ -61,11 +61,17 @@ export default function ReportWorkspace({ data, school, from, to, setFrom, setTo
         const access = linkAccess, source = reportDirectorySource(data, data.directory?.archives || [], includeArchived), generatedAt = new Date().toISOString();
         const { lessons, groups } = documentationGroups(source.entries, from, to, teacherKeys);
         if (!groups.length) return { lessonDocs: () => [], lessonDocsAccess: access };
+        // Every included file must open through the report's link: name any that cannot, before producing anything.
+        const included = groups.flatMap(g => groupLessons(lessons, g)), unavailable = unavailableEvidence(included, data.mediaPublicBase), where = evidenceIndex(included, data.mediaPublicBase);
+        if (unavailable.length) throw Error(`No report was created. ${unavailable.length} included file${unavailable.length === 1 ? ' is' : 's are'} stored outside the school's media storage and cannot be opened through a lesson report link: ${describeFiles(unavailable)}. Upload ${unavailable.length === 1 ? 'it' : 'them'} again in the lesson (Submit Evidence), then export again.`);
         const render = await reportRenderer(lessons, groups, generatedAt), origin = window.location.origin;
         const links = await buildDocumentationLinks({ entries: source.entries, from, to, teacherKeys, includeArchived, generatedAt, render,
             begin: () => reportAccessSession({ mode: access, origin, mediaBase: data.mediaPublicBase, newSecret: newShareSecret }),
             store: (bytes, scope) => storeSnapshot(successFetch, bytes, scope),
-            link: async (stored, g, session) => { await createReportAccess(successFetch, { id: session.id, mode: access, snapshotId: stored.id, secretSha256: session.secret ? await secretDigest(session.secret) : null, evidence: [...session.evidence] }); return { url: session.url() }; },
+            link: async (stored, g, session) => {
+                try { await createReportAccess(successFetch, { id: session.id, mode: access, snapshotId: stored.id, secretSha256: session.secret ? await secretDigest(session.secret) : null, evidence: [...session.evidence] }); }
+                catch (e) { if (e.missing) { const err = Error(`${e.missing.length} included file${e.missing.length === 1 ? ' is' : 's are'} missing from storage: ${describeFiles(e.missing.map(k => where.get(k) || { file: k }))}. Upload ${e.missing.length === 1 ? 'it' : 'them'} again in the lesson, then export again`); err.permanent = true; throw err; } throw e; }
+                return { url: session.url() }; },
             onProgress: ({ done, total }) => setBusy(`Preparing lesson documentation ${done} of ${total}`) });
         return { lessonDocs: p => links.get(p.key) || [], lessonDocsAccess: access };
     }
@@ -82,7 +88,8 @@ export default function ReportWorkspace({ data, school, from, to, setFrom, setTo
         const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
         if (tab && !tab.closed) tab.location.href = url; else saveBlob(new Blob([bytes], { type: 'application/pdf' }), 'Preview_' + safeName(group.teacher) + '_' + safeName([group.grade, group.section, group.subject].filter(Boolean).join('_')) + '_' + from + '_' + to + '.pdf');
         setTimeout(() => URL.revokeObjectURL(url), 120000);
-        setMessage(`Preview opened: ${group.teacher} · ${[group.grade, group.section].filter(Boolean).join(' ')} · ${group.subject}. This is the complete report recipients of this group's link will see.`);
+        const unavailable = unavailableEvidence(subset, data.mediaPublicBase);
+        setMessage(`Preview opened: ${group.teacher} · ${[group.grade, group.section].filter(Boolean).join(' ')} · ${group.subject}. This is the complete report recipients of this group's link will see.` + (unavailable.length ? ` Before exporting, resolve ${unavailable.length} file${unavailable.length === 1 ? '' : 's'} stored outside the school's media storage: ${describeFiles(unavailable)}.` : ''));
     }
     async function exportReport(kind) {
         if (compareEnabled && !comparison)

@@ -3,7 +3,7 @@ import {withRequest,database,checkOrigin,failure,actor,assertSchool} from '@/lib
 import {env} from '@/lib/school-success/environment';
 import {loadR2Config} from '@/lib/school-success/r2-evidence';
 import {presignDownload} from '@/lib/school-success/r2-upload';
-import {isShareId} from '@/lib/school-success/report-shares';
+import {isShareId,FILE_URL_TTL_SECONDS} from '@/lib/school-success/report-shares';
 import {authorizeAccess} from '@/lib/school-success/report-access';
 import {loadShareObject,shareRevocation} from '@/lib/school-success/snapshot-storage';
 export const runtime='nodejs';
@@ -16,8 +16,8 @@ const body=z.object({secret:z.string().max(100).optional()}).strict();
 async function signedIn(req,school){const a=await actor(req);if(a.role!=='admin')throw Error('403:This file requires school sign-in with access to the school.');assertSchool(a,school);}
 // One evidence file (photo, writing sample, recording, attachment) linked from a consolidated report.
 // Same access as the report itself; only files recorded in that report's access record; revocation
-// applies. The answer is a short-lived signed storage URL the browser opens directly (images display,
-// recordings play, with range requests).
+// applies. The answer is a signed storage URL valid for FILE_URL_TTL_SECONDS that the browser opens
+// directly (images display, recordings play, with range requests).
 async function handlePOST(req,id,n){
  try{
   checkOrigin(req);
@@ -29,7 +29,7 @@ async function handlePOST(req,id,n){
   if(await shareRevocation({config,secret,id}))throw Error('410:This link has been revoked by the school. Ask the sender for a new link.');
   const key=Array.isArray(record.evidence)?record.evidence[Number(n)]:undefined;
   if(!key)throw Error('404:not in this report');
-  return Response.json({url:await presignDownload(config,key)},{headers:noStore});
+  return Response.json({url:await presignDownload(config,key,FILE_URL_TTL_SECONDS),expiresInSeconds:FILE_URL_TTL_SECONDS},{headers:noStore});
  }catch(e){return fail(e);}
 }
 export async function POST(req,{params}){const {id,n}=await params;return withRequest(req,()=>handlePOST(req,id,n));}

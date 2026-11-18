@@ -4,7 +4,7 @@ import {env} from '@/lib/school-success/environment';
 import {loadR2Config,r2UploadsConfigured} from '@/lib/school-success/r2-evidence';
 import {isSnapshotId} from '@/lib/school-success/report-snapshots';
 import {isShareId,ACCESS_MODES,MAX_EVIDENCE_PER_REPORT,isEvidenceKey,evidenceKeyInScope,sharePagePath,securePagePath} from '@/lib/school-success/report-shares';
-import {loadSnapshotObject,createAccessRecord} from '@/lib/school-success/snapshot-storage';
+import {loadSnapshotObject,createAccessRecord,snapshotExists} from '@/lib/school-success/snapshot-storage';
 export const runtime='nodejs';
 const noStore={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
 // The browser chooses the ID (and, for 'link', the secret) before rendering, because the PDF's own
@@ -30,6 +30,11 @@ async function handlePOST(req){
   assertSchool(a,meta.school);
   if(meta.variant==='shareable')throw Error('Choose the full lesson documentation report.');
   if(input.evidence.some(k=>!evidenceKeyInScope(k,meta.school,meta.teacher)))throw Error('403:A linked file does not belong to this teacher and school.');
+  // Every included file must be in storage, so each link in the report will open. Missing files are named
+  // back to the exporter (the report is not produced) instead of being linked or dropped.
+  const missing=[],keys=[...new Set(input.evidence)];
+  for(let i=0;i<keys.length;i+=8)await Promise.all(keys.slice(i,i+8).map(async k=>{if(!(await snapshotExists(config,k,'report-evidence-check','Try again.')))missing.push(k);}));
+  if(missing.length)return Response.json({error:`${missing.length} file${missing.length===1?' is':'s are'} not in storage, so ${missing.length===1?'it':'they'} could not be linked from the report.`,missing},{status:409,headers:noStore});
   const record={v:2,id:input.id,mode:input.mode,snapshotId:input.snapshotId,school:meta.school,teacher:meta.teacher,secretSha256:input.secretSha256,evidence:input.evidence,createdBy:a.email,createdAt:new Date().toISOString()};
   await createAccessRecord({config,secret,record});
   return Response.json({id:record.id,mode:record.mode,path:record.mode==='signin'?securePagePath(record.id):sharePagePath(record.id)},{headers:noStore});

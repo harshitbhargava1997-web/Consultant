@@ -57,6 +57,10 @@ export async function openShareRecord(secret,id,purpose,envelope){
 //   'signin' — School Success sign-in with access to the record's school is required.
 export const ACCESS_MODES=['link','signin'];
 export const MAX_EVIDENCE_PER_REPORT=2000;
+// Lifetime of the signed storage URL handed out for one file after the access check. Storage validates
+// only the signature and this expiry, so an already-issued URL keeps working for at most this long, even
+// if the report is revoked meanwhile; every new open of a file link is checked again.
+export const FILE_URL_TTL_SECONDS=900;
 export const securePagePath=id=>'/school-success/secure/'+check(id);
 export function reportLink(origin,mode,id,secret){return mode==='signin'?new URL(securePagePath(id),origin).href:shareLink(origin,id,secret);}
 export function evidenceLink(origin,mode,id,n,secret){

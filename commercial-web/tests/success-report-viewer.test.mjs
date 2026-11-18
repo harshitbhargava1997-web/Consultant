@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {openReportAccess} from '../lib/school-success/report-viewer.js';
 import {parseShareLink,reportLink,evidenceLink,evidenceKeyFromUrl,evidenceKeyInScope,isEvidenceKey,newShareSecret,isShareSecret,sealShareRecord,openShareRecord,sameDigest} from '../lib/school-success/report-shares.js';
-import {createReportAccess,reportAccessSession} from '../lib/school-success/lesson-snapshots.js';
+import {createReportAccess,reportAccessSession,unavailableEvidence,describeFiles,evidenceIndex} from '../lib/school-success/lesson-snapshots.js';
 const ID='0b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f60',SECRET='A'.repeat(43),MEDIA='https://pub-media.r2.dev';
 const ok=url=>async()=>Response.json({url,filename:'Lesson_Documentation.pdf'});
 
@@ -62,7 +62,7 @@ test('per-export access session: fresh ID and secret, deduplicated evidence mani
  assert.equal(s1.linkFor(photo),`https://v.test/school-success/shared/${ID}/file/0#${s1.secret}`);
  assert.equal(s1.linkFor(audio),`https://v.test/school-success/shared/${ID}/file/1#${s1.secret}`);
  assert.equal(s1.linkFor(photo),`https://v.test/school-success/shared/${ID}/file/0#${s1.secret}`,'same file, same index');
- assert.equal(s1.linkFor(ext),ext);assert.deepEqual(s1.evidence,['schools/A/teachers/T/p.jpg','schools/A/teachers/T/a.m4a']);
+ assert.throws(()=>s1.linkFor(ext),/cannot be opened through the report link/,'no silent fallback to an outside address');assert.deepEqual(s1.evidence,['schools/A/teachers/T/p.jpg','schools/A/teachers/T/a.m4a']);
  s1.reset();assert.deepEqual(s1.evidence,[]);
  const s2=reportAccessSession({mode:'signin',origin:'https://v.test',mediaBase:MEDIA,newId:()=>'1b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f60'});
  assert.equal(s2.secret,null);assert.equal(s2.url(),'https://v.test/school-success/secure/1b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f60');
@@ -79,4 +79,15 @@ test('records are bound to their ID and purpose; export errors are permanent onl
  await assert.rejects(createReportAccess(fetcher(503),{}),e=>e.permanent===false);
  let sent;await createReportAccess(async(url,init)=>{sent={url,body:JSON.parse(init.body)};return Response.json({id:ID});},{id:ID,mode:'link'});
  assert.equal(sent.url,'/api/school-success/report-shares');assert.deepEqual(sent.body,{id:ID,mode:'link'});
+});
+
+test('files outside the media storage are named to the exporter (never silently linked or dropped)',()=>{
+ const lesson={teacher:'Asha Verma',school:'Sunrise',grade:'Grade 2',section:'A',subject:'English',topic:'Blending CVC words',firstDate:'2026-10-21',
+  planFiles:[],activities:[{url:MEDIA+'/schools/S/teachers/T/a.jpg',label:'Classroom activity 1',addedOn:'2026-10-22'},{url:'https://drive.example.com/file/7',label:'Classroom activity 2',addedOn:'2026-10-22'}],
+  writing:[],audio:[{url:'https://old-portal.example.org/rec.m4a',label:'Lesson preparation recording',addedOn:'2026-10-21'}],reflections:[],additional:[]};
+ const list=unavailableEvidence([lesson,lesson],MEDIA);
+ assert.deepEqual(list.map(f=>[f.file,f.where,f.date]),[['Classroom activity 2','drive.example.com','2026-10-22'],['Lesson preparation recording','old-portal.example.org','2026-10-21']],'each once, with where it lives');
+ assert.equal(describeFiles(list),'Asha Verma · Grade 2 A · English · “Blending CVC words” · 2026-10-22 · Classroom activity 2 (drive.example.com); Asha Verma · Grade 2 A · English · “Blending CVC words” · 2026-10-21 · Lesson preparation recording (old-portal.example.org)');
+ assert.equal(evidenceIndex([lesson],MEDIA).get('schools/S/teachers/T/a.jpg').file,'Classroom activity 1');
+ assert.deepEqual(unavailableEvidence([{...lesson,activities:[lesson.activities[0]],audio:[]}],MEDIA),[]);
 });

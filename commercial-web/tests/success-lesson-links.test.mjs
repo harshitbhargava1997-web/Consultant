@@ -90,23 +90,21 @@ test('parent usage report: one "Open lesson documentation" link per group in the
 });
 const mediaBase=base.replace(/\/$/,'');
 
-test('consultant observations: counts and dates only in anyone-with-the-link exports (individual, combined, per-school); details with school sign-in',async()=>{
+test('consultant observations: the same detailed content in both access options (individual, combined, per-school)',async()=>{
  const STUDENT='Zephyrine Quillfeather',settings=structuredClone(defaultReportSettings);settings.sections.observations=true;
  const observation=(id,school,teacher,date)=>({kind:'observation',id,school,teacher,date,grade:'Grade 2 A',subject:'English',topic:'Blending CVC words',
   rubrics:{Questioning:{score:2,comment:`${STUDENT} answered every question; others waited.`},'Classroom climate':`Praise ${STUDENT} less publicly.`},
   strengths:`Clear modelling; ${STUDENT} read all six words.`,improvements:`Seat ${STUDENT} away from the door.`,actions:`Share ${STUDENT}'s progress with her parents.`,followup:'',readOnly:true});
  const entries=[...await entriesP,observation('obs-1','Alpha School','Asha','2026-10-22'),observation('obs-2','Alpha School','Asha','2026-10-27'),observation('obs-3','Beta School','Asha','2026-10-23')];
  const profiles=buildProfiles(entries,raw().roster,from,to,settings),asha=profiles.find(p=>p.school==='Alpha School'&&p.name==='Asha');
- assert.deepEqual(asha.observations.map(o=>o.date),['2026-10-22','2026-10-24','2026-10-27']);
  const base=docsOption(entries),text=doc=>pdfText(doc).replace(/\s+/g,' ');
+ // Every teacher's observation section, up to the next teacher profile (other sections differ by mode by design).
+ const observationSection=t=>t.replace(/SCHOOL SUCCESS \| Private academic review \d+\/\d+/g,'').split('Classroom observation report').slice(1).map(c=>c.split('TEACHER PROFILE')[0].replace(/ONELERN \/ SCHOOL SUCCESS\s*$/,'').trim());
  const reports={individual:[asha],combined:profiles,...Object.fromEntries([...new Set(profiles.map(p=>p.school))].map(s=>['zip:'+s,profiles.filter(p=>p.school===s)]))};
  for(const [label,list] of Object.entries(reports)){
-  const t=text(createReportPdf(list,from,to,settings,undefined,accessOption(base,'link')));
-  for(const fragment of [STUDENT,'Zephyrine','Quillfeather','answered every question','away from the door','Clear modelling'])assert.ok(!t.includes(fragment),`${label}: omits "${fragment}"`);
-  assert.match(t,/Observation notes and rubric comments are left out of reports created for anyone with the link; they appear in reports created with school sign-in\./,label);
-  const s=text(createReportPdf(list,from,to,settings,undefined,accessOption(base,'signin')));
-  assert.ok(s.includes(STUDENT),label+': sign-in report keeps the details');
+  const link=text(createReportPdf(list,from,to,settings,undefined,accessOption(base,'link'))),signin=text(createReportPdf(list,from,to,settings,undefined,accessOption(base,'signin')));
+  for(const t of [link,signin]){assert.ok(t.includes(STUDENT),label);assert.match(t,/answered every question/);assert.match(t,/Clear modelling/);assert.match(t,/away from the door/);}
+  assert.ok(observationSection(link).length>0,label);assert.deepEqual(observationSection(link),observationSection(signin),label+': identical observation content in both options');
+  assert.doesNotMatch(link,/left out of reports created for anyone with the link/);
  }
- const indiv=text(createReportPdf([asha],from,to,settings,undefined,accessOption(base,'link')));
- assert.match(indiv,/3 consultant observations recorded in this review period/);assert.match(indiv,/Observation 1 2026-10-22/);assert.match(indiv,/Observation 3 2026-10-27/);
 });
