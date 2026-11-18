@@ -71,6 +71,16 @@
   - `tests/success-lesson-links.test.mjs`: the parent's only links are sharing links and app sign-in links.
   - `tests/success-report-share-route.test.cjs`: full and legacy snapshots cannot be shared; a shareable PDF with a link is refused.
 
+## Review round 2
+
+### Classroom observations in shareable parent reports
+- **Problem:** when **Classroom observation reports · consultant** is enabled, the parent Teacher 360° usage PDF printed the full observation: strengths, areas for growth, agreed actions and rubric comments. That free text can name students.
+- **Fix:** in **Shareable copy** exports, every parent PDF (individual, combined and each PDF in the school ZIP) shows only the number of observations and their dates. A note says the notes and rubric comments are in the full-evidence report with school sign-in.
+- **Unchanged:**
+  - **Full evidence only** exports and the signed-in Teacher 360° views keep the detailed observations.
+  - Lesson documentation PDFs never include observations.
+- **Test** (`tests/success-lesson-links.test.mjs`): observations naming the fictional student "Zephyrine Quillfeather" in strengths, improvements, actions and rubric comments. The name and notes are absent from the shareable individual, combined and per-school parent PDFs, which show counts and dates. They are present in the authorised full-evidence reports.
+
 ## Schema
 
 **No database change is required.** Shares and revocation markers are encrypted objects in the existing bucket, like snapshots.

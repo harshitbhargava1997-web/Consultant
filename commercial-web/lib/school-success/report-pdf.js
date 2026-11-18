@@ -128,7 +128,13 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                 heading('Classroom observation report');
                 if (!p.observations.length)
                     paragraph('No consultant observations recorded in this review period.');
-                for (const v of p.observations)
+                // Shareable exports: notes and rubric comments can identify students, so only counts and dates
+                // appear; the detailed observations stay in the signed-in full-evidence report.
+                else if (options.lessonDocsAccess === 'shared') {
+                    paragraph(`${p.observations.length} consultant observation${p.observations.length === 1 ? '' : 's'} recorded in this review period. Observation notes and rubric comments are left out of this shareable report; they are in the full-evidence report with school sign-in.`);
+                    table(['Observation', 'Date'], p.observations.map((v, i) => ['Observation ' + (i + 1), v.date || '—']));
+                }
+                else for (const v of p.observations)
                     table(['Consultant observation', 'Details'], [['Date / subject / topic', [v.date, v.subject, v.topic].filter(Boolean).join(' / ')], ['Strengths', v.strengths || '—'], ['Areas for growth', v.improvements || '—'], ['Agreed actions', v.actions || '—'], ...Object.entries(v.rubrics || {}).map(([key, value]) => [key, typeof value === 'object' ? JSON.stringify(value) : String(value)])]);
             }
         }

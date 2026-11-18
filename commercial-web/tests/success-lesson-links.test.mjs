@@ -89,3 +89,31 @@ test('parent usage report with shareable links: two links per group, and no atta
  assert.ok(uris(priv).some(u=>u.startsWith(baseUrl())),'private reports still link evidence for signed-in reviewers');
 });
 const baseUrl=()=>base.replace(/\/$/,'');
+
+test('shareable parent reports (individual, combined, per-school ZIP) show observation counts and dates only; the full-evidence report keeps the notes',async()=>{
+ const STUDENT='Zephyrine Quillfeather',settings=structuredClone(defaultReportSettings);settings.sections.observations=true;
+ // Fictional consultant observations naming a student in notes and rubric comments, for teachers in both schools.
+ const observation=(id,school,teacher,date)=>({kind:'observation',id,school,teacher,date,grade:'Grade 2 A',subject:'English',topic:'Blending CVC words',
+  rubrics:{Questioning:{score:2,comment:`${STUDENT} answered every question; others waited.`},'Classroom climate':`Praise ${STUDENT} less publicly.`},
+  strengths:`Clear modelling; ${STUDENT} read all six words.`,improvements:`Seat ${STUDENT} away from the door.`,actions:`Share ${STUDENT}'s progress with her parents.`,followup:'',readOnly:true});
+ const entries=[...await entriesP,observation('obs-1','Alpha School','Asha','2026-10-22'),observation('obs-2','Alpha School','Asha','2026-10-27'),observation('obs-3','Beta School','Asha','2026-10-23')];
+ const profiles=buildProfiles(entries,raw().roster,from,to,settings),asha=profiles.find(p=>p.school==='Alpha School'&&p.name==='Asha');
+ assert.deepEqual(asha.observations.map(o=>o.date),['2026-10-22','2026-10-24','2026-10-27'],'two added observations plus the fixture\'s own, in date order; Beta School\'s Asha keeps hers');
+ assert.equal(profiles.find(p=>p.school==='Beta School'&&p.name==='Asha').observations.length,1);
+ const base=docsOption(entries),shared={lessonDocs:p=>base.lessonDocs(p).map((g,i)=>({...g,url:`https://vision.example.test/school-success/shared/0b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f6${i}#${'A'.repeat(43)}`,fullUrl:`https://vision.example.test/school-success/report/1b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f6${i}`})),lessonDocsAccess:'shared'};
+ const text=doc=>pdfText(doc).replace(/\s+/g,' ');
+ // The same lists the Teacher 360° export passes for each format.
+ const reports={individual:[asha],combined:profiles,...Object.fromEntries([...new Set(profiles.map(p=>p.school))].map(s=>['zip:'+s,profiles.filter(p=>p.school===s)]))};
+ for(const [label,list] of Object.entries(reports)){
+  const t=text(createReportPdf(list,from,to,settings,undefined,shared));
+  for(const fragment of [STUDENT,'Zephyrine','Quillfeather','answered every question','away from the door','Clear modelling'])assert.ok(!t.includes(fragment),`${label}: shareable parent omits "${fragment}"`);
+  assert.match(t,/Classroom observation report/,label);
+  assert.match(t,/Observation notes and rubric comments are left out of this shareable report; they are in the full-evidence report with school sign-in\./,label);
+ }
+ const indiv=text(createReportPdf([asha],from,to,settings,undefined,shared));
+ assert.match(indiv,/3 consultant observations recorded in this review period/);assert.match(indiv,/Observation 1 2026-10-22/);assert.match(indiv,/Observation 2 2026-10-24/);assert.match(indiv,/Observation 3 2026-10-27/);
+ // Authorised full-evidence report (sign-in): detailed observations, including the name, are kept.
+ const full=text(createReportPdf([asha],from,to,settings,undefined,base));
+ assert.ok(full.includes(STUDENT),'full report keeps the observation notes');assert.match(full,/answered every question/);assert.match(full,/Clear modelling/);
+ assert.ok(text(createReportPdf(profiles,from,to,settings,undefined,base)).includes(STUDENT),'combined full report too');
+});
