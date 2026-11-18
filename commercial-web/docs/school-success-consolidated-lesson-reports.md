@@ -37,21 +37,32 @@
 - **Scope checks at creation:**
   - Every evidence key must be a media-bucket key (no internal objects).
   - A standard key (`schools/<school>/teachers/<teacher>/…`) must belong to the report's own school and teacher.
-  - Evidence hosted on other websites keeps its original link.
+  - The server reads the saved lessons for the selected school and dates, then verifies every requested key against the teacher, class, section, subject and evidence submission dates. This also covers historical bucket keys that do not name a school or teacher.
+  - Before creating any report, preview and export check all selected attachments. If an external or misfiled attachment needs correction, the exporter sees its lesson, date and file label. The school can migrate that attachment into the correct teacher’s media storage and retry the export.
 - **Fresh links on every export.** Each export creates new IDs and secrets and re-renders the PDF, so its file links belong to the new record. A link revoked meanwhile, by anyone in any session, is never reused. Snapshots remain immutable.
 - **Revocation** (Teacher 360° → "Check or revoke a sharing link", staff of that school) stops the report, **every file link in it**, and any two-minute PDF ticket already issued. It fails closed if storage cannot be checked.
 - **Earlier links keep their original scope:**
   - reduced-content sharing links from PR #11 still open only the reduced copy, with no file access;
   - private `/school-success/report/<id>` links still require sign-in.
-- **Preview consolidated report** (both modes): renders, with the same generator, photos and size fallback, the exact report a recipient of the selected class and subject gets, and opens it in a new tab. Nothing is uploaded. File links in the preview open the files directly for the signed-in exporter.
+- **Preview consolidated report** creates one fresh report link for the chosen teacher, class, section, subject and period. It opens the recipient’s viewer using the selected access option, including for every linked file. The preview link can be revoked in the same way as an exported one.
 - **Parent Teacher 360° PDFs** (individual, combined, per-school ZIP): one "Open lesson documentation" link per group, in the selected mode. Evidence file tables are listed **without** direct links, so no parent link bypasses the chosen access; files open through the lesson report.
 - **Notice at export** for "Anyone with the link": *Anyone who receives or is forwarded these links can view the included student work, photos and recordings, as well as reflections and feedback, without signing in…*
-- **Consultant observations** (not part of lesson reports): "Anyone with the link" parent PDFs show counts and dates only; "Require school sign-in" PDFs show the details.
+- When the exporter selects classroom observations, both parent PDFs include the dates, strengths, areas for growth, agreed actions and rubric details. Observations belong to the teacher and period. Lesson-specific review feedback appears with its lesson.
 
 ## Limits
-- Anyone who has a link (or a one-hour file URL) can open it until it is revoked or expires. Downloaded copies cannot be recalled.
+- Revocation immediately stops new openings through the report and its evidence links. A storage download address already issued remains usable for one hour from issuance. Recipients keep any files they have already downloaded.
 - The media bucket itself remains publicly readable by direct object URL, as before. The report never exposes those permanent URLs.
-- Evidence hosted outside the media bucket is linked as it is.
+- Providers hosting external attachments control access to their files. Preview and export identify these files until the school provides a managed copy.
+
+## Verify file downloads against R2
+
+Run this from `commercial-web` in an environment configured for the school media test. It uses unique synthetic objects and removes them after the run.
+
+```sh
+SCHOOL_SUCCESS_TEST_R2=1 node --test --test-name-pattern='real R2 serves' tests/success-report-share-route.test.cjs
+```
+
+The test opens the signed file addresses issued by the report route for a PNG, a writing PDF and a WAV in each mode. It checks file contents, audio range requests and the response after revocation. The report records and staff session are fixtures. A skipped result means the storage connection was unavailable.
 
 ## Schema
 None. No migration and no new service.

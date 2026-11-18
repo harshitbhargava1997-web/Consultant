@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {snapshotScopeSchema,snapshotId,sealSnapshot,openSnapshot,assertPdfBytes,sha256Hex,isSnapshotId,snapshotFilename,contentDisposition,MAX_SNAPSHOT_BYTES} from '../lib/school-success/report-snapshots.js';
-import {buildDocumentationLinks,storeSnapshot,MAX_DOCUMENTATION_GROUPS} from '../lib/school-success/lesson-snapshots.js';
+import {buildDocumentationLinks,storeSnapshot,checkReportEvidence,MAX_DOCUMENTATION_GROUPS} from '../lib/school-success/lesson-snapshots.js';
 import {openLessonSnapshot} from '../lib/school-success/snapshot-viewer.js';
 import {safeReturnPath} from '../lib/return-path.js';
 import {mapLive} from '../lib/school-success/live-mapping.js';
@@ -117,4 +117,23 @@ test('the durable link signs readers in, returns to the PDF, and opens it direct
  const open=await openLessonSnapshot({id,getSession:async()=>({}),request:reply(200,{url:'/api/school-success/report-snapshots/'+id+'?ticket=t',downloadUrl:'d',filename:'f.pdf'}),navigate});
  assert.equal(open.state,'opening');assert.equal(nav.at(-1),'/api/school-success/report-snapshots/'+id+'?ticket=t');
  for(const bad of ['/school-success/report/not-an-id','/school-success/report/'+id+'/../../admin','https://evil.test/school-success/report/'+id])assert.equal(safeReturnPath(bad,'https://app.test'),'',bad);
+});
+
+
+test('evidence checks list every unmanageable file in the selection before export and omit private URLs', async () => {
+ const entries = await entriesP;
+ const lessons = buildLessonRecords(entries, from, to);
+ assert.doesNotThrow(() => checkReportEvidence(lessons, base));
+ const lesson = structuredClone(lessons.find(l => l.activities.length && l.writing.length));
+ lesson.activities[0].url = 'https://external.example/photo.jpg?token=private-value';
+ lesson.writing[0].url = base + '/schools/Other/teachers/T/sample.jpg';
+ assert.throws(() => checkReportEvidence([lesson], base), error => {
+  for (const field of [lesson.school, lesson.teacher, lesson.grade, lesson.subject, lesson.topic,
+   lesson.activities[0].addedOn, lesson.activities[0].label, lesson.writing[0].label]) assert.ok(error.message.includes(field), field);
+  assert.doesNotMatch(error.message, /external\.example|private-value|https?:/);
+  return true;
+ });
+ lesson.activities = []; lesson.writing = [];
+ lesson.writtenReflections = [{url:'https://external.example/old-reflection.json', answers:{achievement:'They could count.'}}];
+ assert.doesNotThrow(() => checkReportEvidence([lesson], base), 'inline text does not require a file link');
 });

@@ -81,7 +81,7 @@ test('parent usage report: one "Open lesson documentation" link per group in the
   const doc=createReportPdf(profiles,from,to,settings,undefined,accessOption(base,mode)),text=pdfText(doc).replace(/\s+/g,' '),links=uris(doc);
   assert.deepEqual(links.sort(),[...Array(groups).keys()].map(ACCESS[mode]).sort(),mode+': exactly one access link per group, nothing else');
   assert.match(text,/Each link opens the complete lesson report for this teacher and period, saved when this report was created: lesson plans, classroom photos, student writing, attachments, recordings, dated reflections and feedback\./);
-  assert.match(text,mode==='link'?/Anyone with a link can open that report and its files without signing in\. The school can revoke a link; copies already downloaded cannot be recalled\./:/Opening a report or any of its files requires school sign-in\./);
+  assert.match(text,mode==='link'?/Anyone with the link can open the report and its evidence without signing in\. The school can revoke the link\./:/Opening a report or any of its files requires school sign-in\./);
   assert.match(text,/Open lesson\s+documentation/);assert.doesNotMatch(text,/Shareable copy|Full evidence/);
   assert.match(text,/Files are listed here without links; open them from the lesson documentation links/);
  }
@@ -90,23 +90,33 @@ test('parent usage report: one "Open lesson documentation" link per group in the
 });
 const mediaBase=base.replace(/\/$/,'');
 
-test('consultant observations: counts and dates only in anyone-with-the-link exports (individual, combined, per-school); details with school sign-in',async()=>{
- const STUDENT='Zephyrine Quillfeather',settings=structuredClone(defaultReportSettings);settings.sections.observations=true;
- const observation=(id,school,teacher,date)=>({kind:'observation',id,school,teacher,date,grade:'Grade 2 A',subject:'English',topic:'Blending CVC words',
-  rubrics:{Questioning:{score:2,comment:`${STUDENT} answered every question; others waited.`},'Classroom climate':`Praise ${STUDENT} less publicly.`},
-  strengths:`Clear modelling; ${STUDENT} read all six words.`,improvements:`Seat ${STUDENT} away from the door.`,actions:`Share ${STUDENT}'s progress with her parents.`,followup:'',readOnly:true});
- const entries=[...await entriesP,observation('obs-1','Alpha School','Asha','2026-10-22'),observation('obs-2','Alpha School','Asha','2026-10-27'),observation('obs-3','Beta School','Asha','2026-10-23')];
- const profiles=buildProfiles(entries,raw().roster,from,to,settings),asha=profiles.find(p=>p.school==='Alpha School'&&p.name==='Asha');
- assert.deepEqual(asha.observations.map(o=>o.date),['2026-10-22','2026-10-24','2026-10-27']);
- const base=docsOption(entries),text=doc=>pdfText(doc).replace(/\s+/g,' ');
- const reports={individual:[asha],combined:profiles,...Object.fromEntries([...new Set(profiles.map(p=>p.school))].map(s=>['zip:'+s,profiles.filter(p=>p.school===s)]))};
- for(const [label,list] of Object.entries(reports)){
-  const t=text(createReportPdf(list,from,to,settings,undefined,accessOption(base,'link')));
-  for(const fragment of [STUDENT,'Zephyrine','Quillfeather','answered every question','away from the door','Clear modelling'])assert.ok(!t.includes(fragment),`${label}: omits "${fragment}"`);
-  assert.match(t,/Observation notes and rubric comments are left out of reports created for anyone with the link; they appear in reports created with school sign-in\./,label);
-  const s=text(createReportPdf(list,from,to,settings,undefined,accessOption(base,'signin')));
-  assert.ok(s.includes(STUDENT),label+': sign-in report keeps the details');
+test('individual, combined and per-school parents include the selected observations in both access modes', async () => {
+ const settings = structuredClone(defaultReportSettings);
+ settings.sections.observations = true;
+ const alpha = {kind:'observation', id:'alpha', school:'Alpha School', teacher:'Asha', date:'2026-10-22',
+  grade:'Grade 2', subject:'English', topic:'Blending CVC words', strengths:'Modelled six words',
+  improvements:'Give pairs more time', actions:'Revisit the word list',
+  rubrics:{Questioning:{score:2,comment:'Invite a second answer'}}};
+ const beta = {...alpha, id:'beta', school:'Beta School', date:'2026-10-23', strengths:'Beta observation only'};
+ const entries = [...await entriesP, alpha, beta];
+ const profiles = buildProfiles(entries, raw().roster, from, to, settings);
+ const reports = [[profiles.find(p => p.school === alpha.school && p.name === alpha.teacher)], profiles,
+  ...['Alpha School','Beta School'].map(school => profiles.filter(p => p.school === school))];
+ for (const list of reports) {
+  for (const mode of ['link', 'signin']) {
+   const options = accessOption(docsOption(entries), mode);
+   const text = pdfText(createReportPdf(list, from, to, settings, undefined, options)).replace(/\s+/g, ' ');
+   for (const phrase of [alpha.improvements, alpha.actions, alpha.rubrics.Questioning.comment]) assert.ok(text.includes(phrase), mode + ': ' + phrase);
+   for (const observation of [alpha, beta]) {
+    const included = list.some(p => p.school === observation.school && p.name === observation.teacher);
+    assert.equal(text.includes(observation.strengths), included, mode + ': ' + observation.school);
+    assert.equal(text.includes(observation.date + ' / English / Blending CVC words'), included);
+   }
+  }
  }
- const indiv=text(createReportPdf([asha],from,to,settings,undefined,accessOption(base,'link')));
- assert.match(indiv,/3 consultant observations recorded in this review period/);assert.match(indiv,/Observation 1 2026-10-22/);assert.match(indiv,/Observation 3 2026-10-27/);
+ settings.sections.observations = false;
+ for (const mode of ['link', 'signin']) {
+  const text = pdfText(createReportPdf(profiles, from, to, settings, undefined, accessOption(docsOption(entries), mode)));
+  assert.doesNotMatch(text, /Invite a second answer|Beta observation only|Modelled six words/);
+ }
 });

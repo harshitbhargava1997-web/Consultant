@@ -67,7 +67,9 @@ export function evidenceLink(origin,mode,id,n,secret){
 export function evidenceKeyFromUrl(url,mediaBase){
  try{
   const u=new URL(url),b=new URL(String(mediaBase).replace(/\/$/,'')+'/');
-  if(u.origin!==b.origin||!u.pathname.startsWith(b.pathname)||u.search||u.hash)return null;
+  // A download query or a PDF page fragment does not change the stored object.
+  // Only the canonical key is recorded; URL parameters are never copied to a report.
+  if(u.origin!==b.origin||!u.pathname.startsWith(b.pathname)||u.username||u.password)return null;
   const key=u.pathname.slice(b.pathname.length).split('/').map(decodeURIComponent).join('/');
   return isEvidenceKey(key)?key:null;
  }catch{return null;}
@@ -77,7 +79,8 @@ export function isEvidenceKey(key){
  return typeof key==='string'&&key.length>0&&key.length<=1024&&!key.startsWith('/')&&!key.split('/').some(s=>s===''||s==='.'||s==='..')&&!INTERNAL.some(p=>key.startsWith(p))&&!/[\u0000-\u001f]/.test(key);
 }
 // Standard evidence keys name their school and teacher (schools/<school>/teachers/<teacher>/…); such a
-// key must belong to the report's own school and teacher. Other (legacy) keys are accepted as included.
+// key must belong to the report's own school and teacher. The create route also checks all keys,
+// including older ones without this prefix, against the selected lesson records.
 export function evidenceKeyInScope(key,school,teacher){
  if(!key.startsWith('schools/'))return true;
  const [,s,t,name]=key.split('/');

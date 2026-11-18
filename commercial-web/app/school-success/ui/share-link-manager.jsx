@@ -11,7 +11,7 @@ export default function ShareLinkManager(){
  async function call(action){
   const id=parseShareLink(link);
   if(!id){setError('Paste a lesson report link that contains /school-success/shared/ or /school-success/secure/.');setInfo(null);return;}
-  if(action==='revoke'&&!window.confirm('Revoke this link? The report and every file in it will stop opening for everyone who has the link. Copies already downloaded cannot be recalled.'))return;
+  if(action==='revoke'&&!window.confirm('Revoke this report link and its evidence links? A file download address already issued can still be used for up to one hour from issue. Recipients keep any copies they have downloaded.'))return;
   setBusy(true);setError('');
   try{
    const res=await successFetch('/api/school-success/report-shares/'+id+'/manage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
@@ -26,6 +26,6 @@ export default function ShareLinkManager(){
   {error&&<p className="negative" role="alert">{error}</p>}
   {info&&<div role="status" className="share-status"><p><b>{info.revoked?'Revoked':'Active'}</b> · {info.mode==='signin'?'Require school sign-in':'Anyone with the link'}{info.files?' · '+info.files+' file'+(info.files===1?'':'s'):''}{info.revoked&&info.revokedAt?' since '+new Date(info.revokedAt).toLocaleString():''} · created {new Date(info.createdAt).toLocaleString()}</p>
    <p>{s.teacher} · {[s.grade,s.section&&s.section!=='Not Applicable'?'Section '+s.section:''].filter(Boolean).join(' ')} · {s.subject} · {s.from} to {s.to} · {s.school}</p>
-   {info.revoked&&<p className="hint">This link no longer opens. Copies downloaded before revocation cannot be recalled.</p>}</div>}
+   {info.revoked&&<p className="hint">This report link and its evidence links are revoked. A previously issued file download address expires one hour after issue. Recipients keep any downloaded copies.</p>}</div>}
  </details>;
 }

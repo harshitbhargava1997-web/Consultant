@@ -37,6 +37,11 @@ export const optionalLessonSections=[
 export const defaultLessonSections=Object.fromEntries(optionalLessonSections.map(([key])=>[key,true]));
 export const MAX_LESSONS_PER_PDF=400;
 
+// These sections contain clickable files. Written reflections and academic feedback render as text.
+export function lessonEvidenceFiles(lesson) {
+ return [...lesson.planFiles, ...lesson.activities, ...lesson.writing, ...lesson.audio, ...lesson.reflections, ...lesson.additional];
+}
+
 const clean=value=>value==null?'':String(value).trim();
 const safeUrl=url=>{try{const u=new URL(String(url));return /^https?:$/.test(u.protocol)?u.href:'';}catch{return '';}};
 const extension=url=>{try{return new URL(url).pathname.split('.').pop().toLowerCase();}catch{return '';}};

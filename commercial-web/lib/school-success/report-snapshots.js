@@ -19,8 +19,7 @@ const text=z.string().max(200);
 export const snapshotScopeSchema=z.object({
  kind:z.literal('teacher-lesson-documentation'),school:text.min(1),teacher:text.min(1),grade:text,section:text,subject:text,
  from:day,to:day,generatedAt:z.string().datetime(),includeArchived:z.boolean().default(false),
- // 'full': complete evidence, opened only with school sign-in. 'shareable': redacted copy (no student
- // evidence, attachment links, reflection or review text) that may be opened through a sharing link.
+ // Current exports use full snapshots. Older reduced copies retain the 'shareable' variant.
  variant:z.enum(['full','shareable']).default('full')
 }).strict().refine(s=>s.from<=s.to&&(Date.parse(s.to)-Date.parse(s.from))/86400000<=99,'Use a reporting period of at most 100 days');
 export const isSnapshotId=id=>typeof id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id);

@@ -90,7 +90,7 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                 if (!groups.length) paragraph('No lesson plans or classroom evidence were recorded in this review period.');
                 else {
                     const cls = g => [g.grade, g.section && g.section !== 'Not Applicable' ? 'Section\u00a0' + g.section : ''].filter(Boolean).join('\n') || '—', period = from === to ? from : from + ' to ' + to;
-                    const access = options.lessonDocsAccess === 'link' ? 'Anyone with a link can open that report and its files without signing in. The school can revoke a link; copies already downloaded cannot be recalled.' : options.lessonDocsAccess === 'signin' ? 'Opening a report or any of its files requires school sign-in.' : 'Sign-in is required.';
+                    const access = options.lessonDocsAccess === 'link' ? 'Anyone with the link can open the report and its evidence without signing in. The school can revoke the link.' : options.lessonDocsAccess === 'signin' ? 'Opening a report or any of its files requires school sign-in.' : 'Sign-in is required.';
                     paragraph('Lessons are grouped by class, section and subject. Each link opens the complete lesson report for this teacher and period, saved when this report was created: lesson plans, classroom photos, student writing, attachments, recordings, dated reflections and feedback. ' + access);
                     table(['Class / section', 'Subject', 'Reporting period', 'Lessons documented', 'Lesson documentation'], groups.map(g => [cls(g), g.subject || '—', period, String(g.lessons), 'Open lesson documentation\u00a0↗'].map(String)), groups.map(g => g.url), 4, { 0: { cellWidth: 32 }, 1: { cellWidth: 29 }, 2: { cellWidth: 29 }, 3: { cellWidth: 30, halign: 'center' }, 4: { cellWidth: 58 } });
                 }
@@ -124,12 +124,6 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                 heading('Classroom observation report');
                 if (!p.observations.length)
                     paragraph('No consultant observations recorded in this review period.');
-                // "Anyone with the link" exports: consultant notes and rubric comments are not part of the lesson
-                // reports, so only counts and dates appear; the details stay in sign-in reports.
-                else if (options.lessonDocsAccess === 'link') {
-                    paragraph(`${p.observations.length} consultant observation${p.observations.length === 1 ? '' : 's'} recorded in this review period. Observation notes and rubric comments are left out of reports created for anyone with the link; they appear in reports created with school sign-in.`);
-                    table(['Observation', 'Date'], p.observations.map((v, i) => ['Observation ' + (i + 1), v.date || '—']));
-                }
                 else for (const v of p.observations)
                     table(['Consultant observation', 'Details'], [['Date / subject / topic', [v.date, v.subject, v.topic].filter(Boolean).join(' / ')], ['Strengths', v.strengths || '—'], ['Areas for growth', v.improvements || '—'], ['Agreed actions', v.actions || '—'], ...Object.entries(v.rubrics || {}).map(([key, value]) => [key, typeof value === 'object' ? JSON.stringify(value) : String(value)])]);
             }

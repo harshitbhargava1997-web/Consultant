@@ -46,7 +46,8 @@ test('links: report and file links per mode; secrets only in fragments; parsing 
 test('evidence scoping: only media-bucket keys are routed; internal objects never; school/teacher must match',()=>{
  const url=MEDIA+'/schools/Alpha%2520School/teachers/AKANSHA%2520PAL/2026-11-05/submission_x/implementation_y/activity/p.jpg';
  assert.equal(evidenceKeyFromUrl(url,MEDIA),'schools/Alpha%20School/teachers/AKANSHA%20PAL/2026-11-05/submission_x/implementation_y/activity/p.jpg');
- assert.equal(evidenceKeyFromUrl('https://drive.example.com/file/1',MEDIA),null,'other websites keep their own links');
+ assert.equal(evidenceKeyFromUrl('https://drive.example.com/file/1',MEDIA),null,'external URLs are not school media keys');
+ assert.equal(evidenceKeyFromUrl(MEDIA+'/legacy/sample.pdf?download=1#page=2',MEDIA),'legacy/sample.pdf');
  assert.equal(evidenceKeyFromUrl(MEDIA+'/school-success/report-snapshots/v1/a.bin',MEDIA),null);
  assert.equal(evidenceKeyFromUrl(MEDIA+'/a/../b.jpg',MEDIA),'b.jpg','URL dot segments are resolved by the URL parser');assert.equal(evidenceKeyFromUrl(MEDIA+'/schools/x%2F..%2F..%2Fschool-success/y.jpg',MEDIA),null,'encoded traversal is refused');
  for(const bad of ['','/abs','a//b','a/../b','school-success/report-shares/v1/x.bin','portal-connection-check/x.txt'])assert.equal(isEvidenceKey(bad),false,bad);
@@ -62,10 +63,10 @@ test('per-export access session: fresh ID and secret, deduplicated evidence mani
  assert.equal(s1.linkFor(photo),`https://v.test/school-success/shared/${ID}/file/0#${s1.secret}`);
  assert.equal(s1.linkFor(audio),`https://v.test/school-success/shared/${ID}/file/1#${s1.secret}`);
  assert.equal(s1.linkFor(photo),`https://v.test/school-success/shared/${ID}/file/0#${s1.secret}`,'same file, same index');
- assert.equal(s1.linkFor(ext),ext);assert.deepEqual(s1.evidence,['schools/A/teachers/T/p.jpg','schools/A/teachers/T/a.m4a']);
+ assert.throws(()=>s1.linkFor(ext),/school media storage/);assert.deepEqual(s1.evidence,['schools/A/teachers/T/p.jpg','schools/A/teachers/T/a.m4a']);
  s1.reset();assert.deepEqual(s1.evidence,[]);
  const s2=reportAccessSession({mode:'signin',origin:'https://v.test',mediaBase:MEDIA,newId:()=>'1b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f60'});
- assert.equal(s2.secret,null);assert.equal(s2.url(),'https://v.test/school-success/secure/1b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f60');
+ assert.throws(()=>s2.linkFor(ext),/school media storage/);assert.equal(s2.secret,null);assert.equal(s2.url(),'https://v.test/school-success/secure/1b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f60');
  assert.equal(s2.linkFor(photo),'https://v.test/school-success/secure/1b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f60/file/0');
 });
 
