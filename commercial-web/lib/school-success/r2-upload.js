@@ -1,5 +1,5 @@
 import {AwsClient} from 'aws4fetch';
-import {r2UploadsConfigured} from './r2-evidence';
+import {r2UploadsConfigured} from './r2-evidence.js';
 function urlFor(config,path=''){
  const endpoint=new URL(config.R2_ENDPOINT_URL);if(endpoint.protocol!=='https:'||!endpoint.hostname.endsWith('.r2.cloudflarestorage.com')||config.R2_BUCKET_NAME!=='onelern-media')throw Error('503:Unexpected media storage');
  return new URL(endpoint.origin+'/'+encodeURIComponent(config.R2_BUCKET_NAME)+path);
