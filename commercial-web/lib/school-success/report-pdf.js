@@ -30,11 +30,12 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
         text(line, 16, y, 9, '#51616a');
         y += 4.5;
     } y += 3; };
-    const table = (head, body, links, linkColumn = 0, columnStyles) => { if (!body.length) {
+    // links: URLs for column linkColumn, or {columnIndex: URLs} for several link columns.
+    const table = (head, body, links, linkColumn = 0, columnStyles) => { const linkMap = Array.isArray(links) ? (linkColumn ? { [linkColumn]: links } : { 0: links }) : (links || {}); if (!body.length) {
         paragraph('No records in this review period.');
         return;
-    } room(20); autoTable(doc, { startY: y, head: [head], body: body.length ? body : [['No records in this review period', ...head.slice(1).map(() => '')]], margin: { left: 16, right: 16, top: 22, bottom: 20 }, styles: { font: 'Report', fontSize: 8, cellPadding: 2.6, textColor: '#243e48', overflow: 'linebreak' }, headStyles: { fillColor: navy, textColor: '#ffffff', fontStyle: 'bold' }, alternateRowStyles: { fillColor: '#f1f7f6' }, ...(columnStyles ? { columnStyles } : {}), rowPageBreak: 'avoid', didParseCell: data => { if (linkColumn && data.section === 'body' && data.column.index === linkColumn) { data.cell.styles.textColor = teal; data.cell.styles.fontStyle = 'bold'; } }, didDrawCell: data => { if (links && data.section === 'body' && data.column.index === linkColumn && links[data.row.index])
-            doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: links[data.row.index] }); } }); y = doc.lastAutoTable.finalY + 9; };
+    } room(20); autoTable(doc, { startY: y, head: [head], body: body.length ? body : [['No records in this review period', ...head.slice(1).map(() => '')]], margin: { left: 16, right: 16, top: 22, bottom: 20 }, styles: { font: 'Report', fontSize: 8, cellPadding: 2.6, textColor: '#243e48', overflow: 'linebreak' }, headStyles: { fillColor: navy, textColor: '#ffffff', fontStyle: 'bold' }, alternateRowStyles: { fillColor: '#f1f7f6' }, ...(columnStyles ? { columnStyles } : {}), rowPageBreak: 'avoid', didParseCell: data => { if (data.section === 'body' && linkMap[data.column.index]) { data.cell.styles.textColor = teal; data.cell.styles.fontStyle = 'bold'; } }, didDrawCell: data => { const url = data.section === 'body' && linkMap[data.column.index]?.[data.row.index]; if (url)
+            doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url }); } }); y = doc.lastAutoTable.finalY + 9; };
     const banner = (kicker, title, subtitle) => { doc.setFillColor(navy); doc.rect(0, 0, 210, 8, 'F'); text('ONELERN  /  SCHOOL SUCCESS', 16, 19, 9, teal, true); text(kicker.toUpperCase(), 16, 32, 9, '#647780', true); doc.setFont('Report', 'bold'); doc.setFontSize(23); const lines = doc.splitTextToSize(title, 178); text(lines, 16, 43, 23, navy, true); y = 45 + lines.length * 8; paragraph(subtitle); doc.setDrawColor('#c6ded9'); doc.line(16, y, 194, y); y += 10; };
     const usageKpis = [0, 1, 2, 3].filter(i => settings.quantitative && settings.daily[i] > 0 && includedMetric(i, settings));
     const evidenceKpis = [0, 1, 2, 3, 4].filter(i => settings.qualitative && settings.sections.evidence && settings.evidence[i] > 0);
@@ -88,8 +89,15 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                 heading('Lesson documentation');
                 if (!groups.length) paragraph('No lesson plans or classroom evidence were recorded in this review period.');
                 else {
-                    paragraph('Lessons are grouped by class, section and subject. Each link opens the matching lesson documentation PDF for this teacher and period, saved when this report was created, with plans, evidence, reflections and review. Sign-in is required.');
-                    table(['Class / section', 'Subject', 'Reporting period', 'Lessons documented', 'Lesson documentation'], groups.map(g => [[g.grade, g.section && g.section !== 'Not Applicable' ? 'Section\u00a0' + g.section : ''].filter(Boolean).join('\n') || '—', g.subject || '—', from === to ? from : from + ' to ' + to, String(g.lessons), 'Open lesson documentation\u00a0↗'].map(String)), groups.map(g => g.url), 4, { 0: { cellWidth: 32 }, 1: { cellWidth: 29 }, 2: { cellWidth: 29 }, 3: { cellWidth: 30, halign: 'center' }, 4: { cellWidth: 58 } });
+                    const shared = options.lessonDocsAccess === 'shared', cls = g => [g.grade, g.section && g.section !== 'Not Applicable' ? 'Section\u00a0' + g.section : ''].filter(Boolean).join('\n') || '—', period = from === to ? from : from + ' to ' + to;
+                    if (shared) {
+                        paragraph('Lessons are grouped by class, section and subject, saved when this report was created. "Shareable copy" opens without signing in: anyone with the link can view it. It shows lesson plans and counts and leaves out photos, videos, recordings, student work, attachment links, reflection text and review comments. The school can revoke a link; copies already downloaded cannot be recalled. "Full evidence" opens the complete lesson documentation with school sign-in.');
+                        table(['Class / section', 'Subject', 'Reporting period', 'Lessons', 'Shareable copy', 'Full evidence'], groups.map(g => [cls(g), g.subject || '—', period, String(g.lessons), 'Open shareable copy\u00a0↗\n(no sign-in)', 'Open full evidence\u00a0↗\n(school sign-in)'].map(String)), { 4: groups.map(g => g.url), 5: groups.map(g => g.fullUrl) }, 0, { 0: { cellWidth: 25 }, 1: { cellWidth: 23 }, 2: { cellWidth: 25 }, 3: { cellWidth: 19, halign: 'center' }, 4: { cellWidth: 43 }, 5: { cellWidth: 43 } });
+                    }
+                    else {
+                        paragraph('Lessons are grouped by class, section and subject. Each link opens the matching lesson documentation PDF for this teacher and period, saved when this report was created, with plans, evidence, reflections and review. Sign-in is required.');
+                        table(['Class / section', 'Subject', 'Reporting period', 'Lessons documented', 'Lesson documentation'], groups.map(g => [cls(g), g.subject || '—', period, String(g.lessons), 'Open lesson documentation\u00a0↗'].map(String)), groups.map(g => g.url), 4, { 0: { cellWidth: 32 }, 1: { cellWidth: 29 }, 2: { cellWidth: 29 }, 3: { cellWidth: 30, halign: 'center' }, 4: { cellWidth: 58 } });
+                    }
                 }
             }
             heading('Book / chapter breakdown');
@@ -105,20 +113,28 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                     heading('Teacher evidence');
                     table(['Category', 'Files', 'Period target', 'Status'], evidenceKpis.map(i => { const e = p.evidence[i]; return [e.label, e.actual, e.target, e.status]; }));
                 }
-                paragraph('File counts indicate submission coverage only. Open the linked files below to review teaching practice.');
+                paragraph(options.lessonDocsAccess === 'shared' ? 'File counts indicate submission coverage only. This report was created with shareable lesson links, so evidence files are listed without links; open them in Teacher 360° with school sign-in.' : 'File counts indicate submission coverage only. Open the linked files below to review teaching practice.');
                 const fileOrder=['Lesson preparation PDFs','Audio recordings','Activity files','Writing samples','Phonics evidence'];
                 const order=label=>{const i=fileOrder.indexOf(label);return i<0?fileOrder.length:i;};
                 for (const e of reportEvidenceGroups(p).sort((a,b)=>order(a.label)-order(b.label)))
                     if (e.files.length && !LESSON_DOCUMENTATION_ONLY.includes(e.label)) {
                         heading(e.label);
-                        table(['Open evidence', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => ['Open file ' + (i + 1), f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]), e.files.map(f => f.url));
+                        // A report with shareable lesson links carries no attachment links at all.
+                        if (options.lessonDocsAccess === 'shared') table(['File', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => ['File ' + (i + 1) + ' · school sign-in', f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]));
+                        else table(['Open evidence', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => ['Open file ' + (i + 1), f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]), e.files.map(f => f.url));
                     }
             }
             if (settings.sections.observations) {
                 heading('Classroom observation report');
                 if (!p.observations.length)
                     paragraph('No consultant observations recorded in this review period.');
-                for (const v of p.observations)
+                // Shareable exports: notes and rubric comments can identify students, so only counts and dates
+                // appear; the detailed observations stay in the signed-in full-evidence report.
+                else if (options.lessonDocsAccess === 'shared') {
+                    paragraph(`${p.observations.length} consultant observation${p.observations.length === 1 ? '' : 's'} recorded in this review period. Observation notes and rubric comments are left out of this shareable report; they are in the full-evidence report with school sign-in.`);
+                    table(['Observation', 'Date'], p.observations.map((v, i) => ['Observation ' + (i + 1), v.date || '—']));
+                }
+                else for (const v of p.observations)
                     table(['Consultant observation', 'Details'], [['Date / subject / topic', [v.date, v.subject, v.topic].filter(Boolean).join(' / ')], ['Strengths', v.strengths || '—'], ['Areas for growth', v.improvements || '—'], ['Agreed actions', v.actions || '—'], ...Object.entries(v.rubrics || {}).map(([key, value]) => [key, typeof value === 'object' ? JSON.stringify(value) : String(value)])]);
             }
         }

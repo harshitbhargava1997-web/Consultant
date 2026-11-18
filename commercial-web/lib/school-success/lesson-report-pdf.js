@@ -16,10 +16,16 @@ const plural=(n,one,many=one+'s')=>n+' '+(n===1?one:many);
 const reflectionQuestions={achievement:'Did students achieve the learning outcome, and what went well in your class?',nextStep:'Which students need support, what learning gaps do they have, and what will you do next to support them?'};
 const periodText=(from,to)=>from===to?formatDay(from):formatDay(from)+' – '+formatDay(to);
 
-export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sections=defaultLessonSections,images=new Map(),raster=null,generatedAt=new Date(),thumbnailsPerSection=6}){
+export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sections=defaultLessonSections,images=new Map(),raster=null,generatedAt=new Date(),thumbnailsPerSection=6,audience='full'}){
  if(!Array.isArray(lessons)||!lessons.length)throw Error('No lessons match the selected filters.');
  if(lessons.length>MAX_LESSONS_PER_PDF)throw Error(`This selection has ${lessons.length} lessons. Narrow the teacher, class, subject or dates to ${MAX_LESSONS_PER_PDF} lessons or fewer per PDF.`);
  if(kind==='lesson'&&lessons.length!==1)throw Error('Choose one lesson for an individual lesson PDF.');
+ // Shareable copy (opened without sign-in): no thumbnails, no links to stored evidence, no written
+ // reflection or review text (they can identify students). Plan details and counts remain.
+ const shareable=audience==='shareable';
+ if(!['full','shareable'].includes(audience))throw Error('Unknown lesson documentation audience');
+ if(shareable){images=new Map();thumbnailsPerSection=0;}
+ const FULL_VERSION='They are in the full evidence version, available with school sign-in.';
  if(kind==='teacher'&&new Set(lessons.map(l=>l.teacherKey)).size!==1)throw Error('Choose one teacher for a teacher lesson PDF.');
  if(kind==='school'&&new Set(lessons.map(l=>l.school)).size!==1)throw Error('Choose one school for a school lesson PDF.');
  const scope=lessons[0].scope||'period';
@@ -83,7 +89,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  }
  function rule(y=state.y,color=palette.hair,width=0.2){if(state.dry)return;doc.setDrawColor(color);doc.setLineWidth(width);doc.line(M,y,PAGE_W-M,y);}
  function rect(x,y,w,h,fill,r=1.6){if(state.dry)return;doc.setFillColor(fill);r?doc.roundedRect(x,y,w,h,r,r,'F'):doc.rect(x,y,w,h,'F');}
- function link(x,y,w,h,target){if(state.dry||!target)return;if(typeof target==='number')doc.link(x,y,w,h,{pageNumber:target});else if(/^https?:\/\//i.test(target))doc.link(x,y,w,h,{url:target});}
+ function link(x,y,w,h,target){if(state.dry||!target||shareable&&typeof target!=='number')return;if(typeof target==='number')doc.link(x,y,w,h,{pageNumber:target});else if(/^https?:\/\//i.test(target))doc.link(x,y,w,h,{url:target});}
  function kicker(text,x=M,color=palette.teal){drawLine(text.toUpperCase(),x,state.y,7.6,{bold:true,color,spacing:0.35});state.y+=lineHeight(7.6)+0.6;}
 
  // ---------- components ----------
@@ -160,6 +166,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   }
  }
  function evidenceSection(label,files,style,{action='Open',note=''}={}){
+  if(shareable){sectionHeading(label,files.length,style,18);paragraph(`${plural(files.length,'file')} recorded. Photos, videos, recordings and files are left out of this shareable copy. ${FULL_VERSION}`,{size:8.6,color:palette.muted,after:2});state.y+=2;return;}
   const firstPictured=isImageUrl(files[0].url)&&images.has(files[0].url);
   sectionHeading(label,files.length,style,(note?wrap(note,W,8.4).length*lineHeight(8.4)+1.5:0)+(firstPictured?56:11));
   if(note)paragraph(note,{size:8.4,color:palette.muted,after:1.5});
@@ -169,6 +176,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   state.y+=2;
  }
  function reviewPanel(feedback){
+  if(shareable){sectionHeading('Academic Review',undefined,sectionStyle.reflections,18);paragraph(`${feedback.date?'Review recorded on '+formatDay(feedback.date):'Review recorded'}. Review comments are left out of this shareable copy. ${FULL_VERSION}`,{size:8.6,color:palette.muted,after:2});state.y+=2;return;}
   const size=9.8,h=lineHeight(size),lines=wrap(feedback.text,W-12,size),total=lines.length*h+15;
   sectionHeading('Academic Review',undefined,sectionStyle.reflections,Math.min(total,40));
   const draw=(segment,isFirst)=>{
@@ -189,6 +197,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  // Written after-class reflections (text) inline; earlier PDF-only reflections and recordings as links.
  function reflectionSection(lesson){
   const written=lesson.writtenReflections||[],files=lesson.reflections;
+  if(shareable){const days=[...new Set([...written,...files].map(r=>r.date||r.addedOn).filter(Boolean))].sort().map(formatDay);sectionHeading('Teacher reflections',written.length+files.length,sectionStyle.reflections,18);paragraph(`${plural(written.length+files.length,'reflection')} recorded${days.length?' ('+days.join(', ')+')':''}. Reflection text and recordings are left out of this shareable copy because they can identify students. ${FULL_VERSION}`,{size:8.6,color:palette.muted,after:2});state.y+=2;return;}
   sectionHeading('Teacher reflections',written.length+files.length,sectionStyle.reflections,written.length?30:11);
   for(const r of written){
    ensure(24);
@@ -230,7 +239,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   const visible=visibleLessonSections(lesson,sections);
   if(visible.plan){
    sectionHeading('Lesson plan',undefined,sectionStyle.plan,20);
-   if(lesson.planFiles.length){for(const file of lesson.planFiles)linkRow(file,{style:sectionStyle.plan});state.y+=3;}
+   if(lesson.planFiles.length){if(shareable)paragraph(`${plural(lesson.planFiles.length,'uploaded plan file')} left out of this shareable copy. ${FULL_VERSION}`,{size:8.6,color:palette.muted,after:2});else for(const file of lesson.planFiles)linkRow(file,{style:sectionStyle.plan});state.y+=3;}
    for(const field of lesson.plan.fields)fieldRow(field.label,field.text);
    if(lesson.plan.notes)fieldRow('Lesson notes',lesson.plan.notes);
   }
@@ -304,7 +313,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   for(const note of [
    `Reporting period ${periodText(from,to)}: evidence files, recordings, reflections and Academic Review appear only when they were submitted or recorded in this period, matching School 360° and Teacher 360° counts. Lesson plan details are shown in full for every lesson with activity in the period.`,
    'Lessons appear in the order they were first submitted. Evidence added later stays with its original lesson and does not change that order. Lessons with items outside the period say so; the complete history is available as an individual lesson PDF.',
-   'Each file is listed once under the lesson it was uploaded for. Links open the original stored evidence and need an internet connection.',
+   shareable?'SHAREABLE COPY — this PDF can be opened without signing in. It omits photos, videos, recordings, student work, attachment links, reflection text and review comments; it shows lesson plans and counts. The full evidence version is available with school sign-in.':'Each file is listed once under the lesson it was uploaded for. Links open the original stored evidence and need an internet connection.',
    'Counts describe what was submitted. They are not ratings of teaching quality.',
    'Included sections: '+included.join(', ')+'.'
   ])paragraph('•  '+note,{size:8.8,color:palette.ink,after:1.2});
