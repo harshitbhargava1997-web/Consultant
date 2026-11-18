@@ -66,7 +66,7 @@ export default function TeacherPortal({ data, school, refresh }) {
                 const response = await successFetch('/api/school-success/evidence/upload', { method: 'POST', headers: { 'X-Evidence-Token': file.token, 'Content-Type': 'application/octet-stream', ...contextHeaders() }, body: actual.file });
                 if (!response.ok) {
                     const value = await response.json();
-                    throw Error(value.error || 'Evidence upload failed');
+                    throw Error(`File ${i + 1} of ${plan.files.length}: ${value.error || 'Evidence upload failed'}`);
                 }
             }
             setBusy('Saving your class periods');

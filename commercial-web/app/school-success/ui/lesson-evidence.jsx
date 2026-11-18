@@ -87,7 +87,7 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
                 const r = await successFetch('/api/school-success/evidence/upload', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/octet-stream', 'X-Evidence-Token': f.token }, body: actual.file });
                 if (!r.ok) {
                     const d = await r.json();
-                    throw Error(d.error || 'Upload failed');
+                    throw Error(`File ${i + 1} of ${prepared.files.length}: ${d.error || 'Upload failed'}`);
                 }
             }
             setBusy('Saving classroom update');
