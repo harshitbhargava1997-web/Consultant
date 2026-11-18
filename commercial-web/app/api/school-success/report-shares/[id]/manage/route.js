@@ -22,7 +22,7 @@ async function handlePOST(req,id){
   assertSchool(a,record.school);
   if(input.action==='revoke'){const result=await revokeShareObject({config,secret,id,revokedBy:a.email});console.info(JSON.stringify({event:'report-share-revoked',alreadyRevoked:result.alreadyRevoked}));}
   const revoked=await shareRevocation({config,secret,id}),{meta}=await loadSnapshotObject({config,secret,id:record.snapshotId});
-  return Response.json({id,createdAt:record.createdAt,revoked:Boolean(revoked),revokedAt:revoked?.revokedAt||null,
+  return Response.json({id,mode:record.mode==='signin'?'signin':'link',files:Array.isArray(record.evidence)?record.evidence.length:0,createdAt:record.createdAt,revoked:Boolean(revoked),revokedAt:revoked?.revokedAt||null,
    scope:{school:meta.school,teacher:meta.teacher,grade:meta.grade,section:meta.section,subject:meta.subject,from:meta.from,to:meta.to,generatedAt:meta.generatedAt}},{headers:noStore});
  }catch(e){return fail(e);}
 }

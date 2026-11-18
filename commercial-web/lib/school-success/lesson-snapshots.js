@@ -2,8 +2,9 @@
 // (teacher × class × section × subject × period) is rendered with the existing Teacher Lesson PDF
 // generator, stored, and only then linked. Any group that still fails after retries stops the export,
 // so a parent report never contains a broken link or silently omits a teacher's documentation.
-import {buildLessonRecords,lessonDocumentationGroups} from './lesson-records.js';
+import {buildLessonRecords,lessonDocumentationGroups,lessonEvidenceFiles} from './lesson-records.js';
 import {MAX_SNAPSHOT_BYTES} from './report-snapshots.js';
+import {evidenceKeyFromUrl,evidenceKeyInScope,evidenceLink,reportLink} from './report-shares.js';
 
 export const MAX_DOCUMENTATION_GROUPS=300;
 // Thumbnail budgets tried in order until the PDF fits the storage limit (0 = links only, as before).
@@ -16,14 +17,32 @@ export function documentationGroups(entries,from,to,teacherKeys){
  return {lessons,groups:lessonDocumentationGroups(lessons).filter(g=>keys.has(g.teacherKey))};
 }
 
-// render(lessons, {thumbnailsPerSection, audience}) → Uint8Array PDF; store(bytes, scope) → {id, url};
-// link(stored, group) → {url, fullUrl?} where stored = {full?, shareable?}; all injected.
-// audiences: which versions to store per group ('full' always opens with sign-in; 'shareable' is the
-// redacted copy). cache: Map reused while the loaded data is unchanged. Only immutable snapshots are
-// cached — link() runs on every export, so a sharing link revoked meanwhile (by anyone, anywhere) is
-// never put into a new report. Returns Map(teacherKey → [{...group, url, fullUrl?}]).
-export async function buildDocumentationLinks({entries,from,to,teacherKeys,includeArchived=false,generatedAt,render,store,link=stored=>({url:stored.full.url}),audiences=['full'],cache=new Map(),onProgress=()=>{},concurrency=2,attempts=3,wait=ms=>new Promise(r=>setTimeout(r,ms))}){
- const {lessons,groups}=documentationGroups(entries,from,to,teacherKeys);
+// Check the whole selection before fetching thumbnails or storing the first group's PDF.
+export function checkReportEvidence(lessons, mediaBase) {
+ const issues = [];
+ for (const lesson of lessons) {
+  const location = [lesson.school, lesson.teacher, lesson.grade, lesson.section, lesson.subject, lesson.topic].filter(Boolean).join(' · ');
+  for (const file of lessonEvidenceFiles(lesson)) {
+   const key = evidenceKeyFromUrl(file.url, mediaBase);
+   if (key && evidenceKeyInScope(key, lesson.school, lesson.teacher)) continue;
+   issues.push([location, file.addedOn || lesson.firstDate, file.label].filter(Boolean).join(' · '));
+  }
+ }
+ if (issues.length) throw Error('These attachments need a copy in the correct teacher’s school media storage before the complete report can be created. Ask your school administrator to correct the listed files.\n' + issues.join('\n'));
+}
+
+// Builds one complete consolidated lesson report (full evidence) per teacher/class/section/subject group
+// and its access link, for the Teacher 360° usage PDFs. Injected:
+//   begin(group) → session: a FRESH access ID (and secret) for this export, plus session.linkFor(url) that
+//                  maps every evidence URL in the PDF to that access link and records it (session.reset()
+//                  clears the record between size-fallback renders);
+//   render(lessons, {thumbnailsPerSection, session}) → Uint8Array PDF;
+//   store(bytes, scope) → {id, url};   link(stored, group, session) → {url}.
+// Nothing is cached across exports: every export gets new access links (a link revoked meanwhile, by
+// anyone, is never reused) and a PDF whose evidence links belong to that new access record.
+// Returns Map(teacherKey → [{...group, url}]); throws (no report) if any group fails after retries.
+export async function buildDocumentationLinks({entries,from,to,teacherKeys,selection=documentationGroups(entries,from,to,teacherKeys),includeArchived=false,generatedAt,render,store,link=stored=>({url:stored.url}),begin=()=>({linkFor(){throw Error('This evidence needs a report access link.');},reset(){}}),onProgress=()=>{},concurrency=2,attempts=3,wait=ms=>new Promise(r=>setTimeout(r,ms))}){
+ const {lessons,groups}=selection;
  if(groups.length>MAX_DOCUMENTATION_GROUPS)throw Error(`This export has ${groups.length} class and subject groups. Choose fewer schools or a shorter period (at most ${MAX_DOCUMENTATION_GROUPS}).`);
  const links=new Map(),failures=[];let done=0;
  onProgress({done,total:groups.length});
@@ -35,22 +54,14 @@ export async function buildDocumentationLinks({entries,from,to,teacherKeys,inclu
   }
   throw lastError||Error('storage failed');
  }
- async function snapshot(g,subset,audience){
-  const scopeKey=JSON.stringify([groupKey(g),from,to,includeArchived,audience]);
-  const cached=cache.get(scopeKey);if(cached)return cached;
-  let bytes=null;
-  // The shareable copy never carries thumbnails; the full version falls back to fewer to fit.
-  for(const level of audience==='shareable'?[0]:THUMBNAIL_LEVELS){bytes=await render(subset,{thumbnailsPerSection:level,audience});if(bytes.length<=MAX_SNAPSHOT_BYTES)break;}
-  if(bytes.length>MAX_SNAPSHOT_BYTES)throw Error('the lesson documentation is larger than 4 MB even without photo thumbnails; choose a shorter period');
-  const scope={kind:'teacher-lesson-documentation',school:g.school,teacher:g.teacher,grade:g.grade,section:g.section,subject:g.subject,from,to,generatedAt,includeArchived,variant:audience};
-  const stored=await retrying(()=>store(bytes,scope));
-  cache.set(scopeKey,stored);
-  return stored;
- }
  async function one(g){
-  const subset=groupLessons(lessons,g),stored={};
-  for(const audience of audiences)stored[audience]=await snapshot(g,subset,audience);
-  const urls=await retrying(()=>link(stored,g));
+  const subset=groupLessons(lessons,g),session=await begin(g);
+  let bytes=null;
+  for(const level of THUMBNAIL_LEVELS){session.reset?.();bytes=await render(subset,{thumbnailsPerSection:level,session});if(bytes.length<=MAX_SNAPSHOT_BYTES)break;}
+  if(bytes.length>MAX_SNAPSHOT_BYTES)throw Error('the lesson documentation is larger than 4 MB even without photo thumbnails; choose a shorter period');
+  const scope={kind:'teacher-lesson-documentation',school:g.school,teacher:g.teacher,grade:g.grade,section:g.section,subject:g.subject,from,to,generatedAt,includeArchived,variant:'full'};
+  const stored=await retrying(()=>store(bytes,scope));
+  const urls=await retrying(()=>link(stored,g,session,subset));
   if(!links.has(g.teacherKey))links.set(g.teacherKey,[]);
   links.get(g.teacherKey).push({...g,...urls});
  }
@@ -72,11 +83,24 @@ export async function storeSnapshot(fetcher,bytes,scope){
  return body;
 }
 
-// Creates a sharing link (no sign-in for holders of the link) for a stored snapshot. Same retry
-// semantics as storeSnapshot: 4xx other than 408/429 are permanent.
-export async function createShareLink(fetcher,snapshotId){
- const response=await fetcher('/api/school-success/report-shares',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snapshotId})});
+// Saves the access record for one exported report (see report-shares.js). Same retry semantics as
+// storeSnapshot: 4xx other than 408/429 are permanent.
+export async function createReportAccess(fetcher,record){
+ const response=await fetcher('/api/school-success/report-shares',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(record)});
  let body={};try{body=await response.json();}catch{}
- if(!response.ok){const error=Error(body.error||'sharing link could not be created');error.permanent=response.status>=400&&response.status<500&&![408,429].includes(response.status);throw error;}
+ if(!response.ok){const error=Error(body.error||'the report link could not be created');error.permanent=response.status>=400&&response.status<500&&![408,429].includes(response.status);throw error;}
  return body;
+}
+// Per-export access session: fresh ID and secret, and the evidence manifest the PDF's links point to.
+export function reportAccessSession({mode,origin,mediaBase,newId=()=>crypto.randomUUID(),newSecret}){
+ const id=newId(),secret=mode==='link'?newSecret():null,evidence=[],index=new Map();
+ return {id,secret,mode,evidence,
+  reset(){evidence.length=0;index.clear();},
+  linkFor(url) {
+   const key = evidenceKeyFromUrl(url, mediaBase);
+   if (!key) throw Error('This evidence file needs a copy in school media storage before it can be shared.');
+   if (!index.has(key)) { index.set(key, evidence.length); evidence.push(key); }
+   return evidenceLink(origin, mode, id, index.get(key), secret);
+  },
+  url:()=>reportLink(origin,mode,id,secret)};
 }

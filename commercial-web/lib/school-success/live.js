@@ -11,6 +11,18 @@ async function request(path, method = 'GET', body, extra = {}, metadata=false) {
     throw Error('Database request failed: ' + r.status + ' ' + (await r.text()).slice(0, 400)); const text = await r.text(),data=text?JSON.parse(text):null;
     const total=r.headers.get('content-range')?.match(/\/(\d+)$/)?.[1];return metadata?{rows:data,count:total===undefined?null:Number(total)}:data; }
 async function all(table,order,scope={}){return readAllPages(async(offset,metadata)=>{const result=await request('/rest/v1/'+table+'?'+new URLSearchParams({select:'*',order,...scope,limit:'1000',offset:String(offset)}),'GET',undefined,{},metadata);return metadata?result:{rows:result,count:null};});}
+
+// Re-read just the selected lessons when issuing file access. Older clients omit the row IDs.
+export async function reportLessonRows({school, from, to}, recordIds) {
+    const query = recordQuery(from, to, {role: 'admin', allowedSchools: [school]});
+    if (!recordIds?.length) return all('teacher_records', 'id', query);
+    const batches = [];
+    for (let i = 0; i < recordIds.length; i += 80) {
+        const ids = recordIds.slice(i, i + 80);
+        batches.push(all('teacher_records', 'id', {...query, id: 'in.(' + ids.join(',') + ')'}));
+    }
+    return (await Promise.all(batches)).flat();
+}
 async function hash(s) { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map(x => x.toString(16).padStart(2, '0')).join(''); }
 async function storage(name) { const saved = await service().from('success_import_state').select('value').eq('key', 'legacy:' + name).maybeSingle(); if (saved.error)
     throw saved.error; return saved.data?.value || (name === 'school_crm_data.json' ? { contacts: {} } : []); }

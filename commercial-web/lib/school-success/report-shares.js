@@ -20,7 +20,7 @@ export const revokedKey=id=>SHARE_PREFIX+check(id)+'.revoked';
 export const sharePagePath=id=>'/school-success/shared/'+check(id);
 export const shareLink=(origin,id,secret)=>new URL(sharePagePath(id),origin).href+'#'+secret;
 // Accepts a pasted sharing link and returns its share ID (the secret is not needed to manage a share).
-export function parseShareLink(text){const m=String(text||'').match(/\/school-success\/shared\/([0-9a-f-]{36})(?:[/?#]|$)/);return m&&isShareId(m[1])?m[1]:null;}
+export function parseShareLink(text){const m=String(text||'').match(/\/school-success\/(?:shared|secure)\/([0-9a-f-]{36})(?:[/?#]|$)/);return m&&isShareId(m[1])?m[1]:null;}
 
 const b64url=bytes=>{let s='';for(const b of bytes)s+=String.fromCharCode(b);return btoa(s).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');};
 export const newShareSecret=()=>b64url(crypto.getRandomValues(new Uint8Array(32)));
@@ -47,4 +47,42 @@ export async function openShareRecord(secret,id,purpose,envelope){
  catch{throw Error('404:This sharing link is not valid');}
  if(value?.id!==id)throw Error('404:This sharing link is not valid');
  return value;
+}
+
+// ── Consolidated-report access records (v2) ──────────────────────────────────────────────────────────
+// One record per exported teacher/class/subject group: the full-evidence snapshot, its school and
+// teacher, the access mode and the exact storage keys of the evidence the PDF links to. Evidence links
+// inside the PDF go through the same record, so the chosen mode governs the report AND its evidence.
+//   'link'   — anyone holding the link (secret in the #fragment) may open it, no account;
+//   'signin' — School Success sign-in with access to the record's school is required.
+export const ACCESS_MODES=['link','signin'];
+export const MAX_EVIDENCE_PER_REPORT=2000;
+export const securePagePath=id=>'/school-success/secure/'+check(id);
+export function reportLink(origin,mode,id,secret){return mode==='signin'?new URL(securePagePath(id),origin).href:shareLink(origin,id,secret);}
+export function evidenceLink(origin,mode,id,n,secret){
+ const path=(mode==='signin'?securePagePath(id):sharePagePath(id))+'/file/'+n;
+ return new URL(path,origin).href+(mode==='signin'?'':'#'+secret);
+}
+// Storage key of an evidence URL served from the media bucket, or null for anything else.
+export function evidenceKeyFromUrl(url,mediaBase){
+ try{
+  const u=new URL(url),b=new URL(String(mediaBase).replace(/\/$/,'')+'/');
+  // A download query or a PDF page fragment does not change the stored object.
+  // Only the canonical key is recorded; URL parameters are never copied to a report.
+  if(u.origin!==b.origin||!u.pathname.startsWith(b.pathname)||u.username||u.password)return null;
+  const key=u.pathname.slice(b.pathname.length).split('/').map(decodeURIComponent).join('/');
+  return isEvidenceKey(key)?key:null;
+ }catch{return null;}
+}
+const INTERNAL=['school-success/report-snapshots/','school-success/report-shares/','portal-connection-check/'];
+export function isEvidenceKey(key){
+ return typeof key==='string'&&key.length>0&&key.length<=1024&&!key.startsWith('/')&&!key.split('/').some(s=>s===''||s==='.'||s==='..')&&!INTERNAL.some(p=>key.startsWith(p))&&!/[\u0000-\u001f]/.test(key);
+}
+// Standard evidence keys name their school and teacher (schools/<school>/teachers/<teacher>/…); such a
+// key must belong to the report's own school and teacher. The create route also checks all keys,
+// including older ones without this prefix, against the selected lesson records.
+export function evidenceKeyInScope(key,school,teacher){
+ if(!key.startsWith('schools/'))return true;
+ const [,s,t,name]=key.split('/');
+ try{return decodeURIComponent(s)===school&&t==='teachers'&&decodeURIComponent(name)===teacher;}catch{return false;}
 }
