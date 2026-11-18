@@ -88,7 +88,7 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                 heading('Lesson documentation');
                 if (!groups.length) paragraph('No lesson plans or classroom evidence were recorded in this review period.');
                 else {
-                    paragraph('Lessons are grouped by class, section and subject. Each link opens the matching lesson documentation PDF for this teacher and period, saved when this report was created, with plans, evidence, reflections and review. Sign-in is required.');
+                    paragraph('Lessons are grouped by class, section and subject. Each link opens the matching lesson documentation PDF for this teacher and period, saved when this report was created, with plans, evidence, reflections and review. ' + (options.lessonDocsAccess === 'shared' ? 'Anyone with a link can open that PDF without signing in. The school can revoke a link; copies already downloaded cannot be recalled.' : 'Sign-in is required.'));
                     table(['Class / section', 'Subject', 'Reporting period', 'Lessons documented', 'Lesson documentation'], groups.map(g => [[g.grade, g.section && g.section !== 'Not Applicable' ? 'Section\u00a0' + g.section : ''].filter(Boolean).join('\n') || '—', g.subject || '—', from === to ? from : from + ' to ' + to, String(g.lessons), 'Open lesson documentation\u00a0↗'].map(String)), groups.map(g => g.url), 4, { 0: { cellWidth: 32 }, 1: { cellWidth: 29 }, 2: { cellWidth: 29 }, 3: { cellWidth: 30, halign: 'center' }, 4: { cellWidth: 58 } });
                 }
             }
