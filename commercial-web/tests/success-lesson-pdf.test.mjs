@@ -149,3 +149,22 @@ test('shareable copy omits thumbnails, every attachment link, reflection text an
  assert.match(flat,/Counting in tens/);assert.ok(flat.indexOf('Counting in tens')<flat.lastIndexOf('Blending CVC words'));
  assert.throws(()=>createLessonDocumentationPdf({kind:'teacher',lessons:list,from,to,audience:'public'}),/Unknown lesson documentation audience/);
 });
+
+test('consolidated report: complete content, and every evidence link routed through the report\'s own access link',async()=>{
+ const lessons=await lessonsP,list=filterLessons(lessons,{teacher:asha}).map(l=>structuredClone(l));
+ const target=list.find(l=>l.activities.length)||list[0];
+ target.writtenReflections=[{label:'After-class reflection',date:'2026-10-22',answers:{achievement:'Most children blended CVC words on their own.',nextStep:'Four children need more practice with short vowels.'}}];
+ target.feedback={text:'Strong modelling; add one more check for understanding.',date:'2026-10-24'};
+ const evidence=list.flatMap(l=>[...l.planFiles,...l.activities,...l.writing,...l.audio,...l.reflections,...l.additional].map(f=>f.url));
+ const images=new Map(list.flatMap(l=>l.activities).map(f=>[f.url,{data:PNG,width:1,height:1,format:'PNG'}]));
+ const routed=[];const linkFor=url=>{routed.push(url);return 'https://vision.example.test/school-success/shared/0b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f60/file/'+(routed.indexOf(url))+'#'+'A'.repeat(43);};
+ const {doc,text}=await make('teacher',{lessons:list,images,raster:null,sections:{...defaultLessonSections,reflections:true,feedback:true},linkFor});
+ const links=uris(doc),flat=text.replace(/\s+/g,' ');
+ assert.ok(links.length>0&&links.every(u=>u.startsWith('https://vision.example.test/school-success/shared/0b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f60/file/')),'every external link goes through the access link');
+ assert.ok(evidence.every(u=>!doc.output().includes(u)),'no raw storage URL remains in the PDF');
+ assert.deepEqual([...new Set(routed)].sort(),[...new Set(evidence)].sort(),'every included file is linked');
+ assert.ok(doc.output().includes('/Subtype /Image'),'classroom photos embedded');
+ assert.match(flat,/Most children blended CVC words on their own\./);assert.match(flat,/Four children need more practice/);
+ assert.match(flat,/Strong modelling; add one more check for understanding\./);
+ assert.ok(flat.indexOf('Counting in tens')<flat.lastIndexOf('Blending CVC words'),'submission order preserved');
+});

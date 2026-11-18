@@ -16,7 +16,7 @@ const plural=(n,one,many=one+'s')=>n+' '+(n===1?one:many);
 const reflectionQuestions={achievement:'Did students achieve the learning outcome, and what went well in your class?',nextStep:'Which students need support, what learning gaps do they have, and what will you do next to support them?'};
 const periodText=(from,to)=>from===to?formatDay(from):formatDay(from)+' – '+formatDay(to);
 
-export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sections=defaultLessonSections,images=new Map(),raster=null,generatedAt=new Date(),thumbnailsPerSection=6,audience='full'}){
+export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sections=defaultLessonSections,images=new Map(),raster=null,generatedAt=new Date(),thumbnailsPerSection=6,audience='full',linkFor=url=>url}){
  if(!Array.isArray(lessons)||!lessons.length)throw Error('No lessons match the selected filters.');
  if(lessons.length>MAX_LESSONS_PER_PDF)throw Error(`This selection has ${lessons.length} lessons. Narrow the teacher, class, subject or dates to ${MAX_LESSONS_PER_PDF} lessons or fewer per PDF.`);
  if(kind==='lesson'&&lessons.length!==1)throw Error('Choose one lesson for an individual lesson PDF.');
@@ -89,7 +89,9 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  }
  function rule(y=state.y,color=palette.hair,width=0.2){if(state.dry)return;doc.setDrawColor(color);doc.setLineWidth(width);doc.line(M,y,PAGE_W-M,y);}
  function rect(x,y,w,h,fill,r=1.6){if(state.dry)return;doc.setFillColor(fill);r?doc.roundedRect(x,y,w,h,r,r,'F'):doc.rect(x,y,w,h,'F');}
- function link(x,y,w,h,target){if(state.dry||!target||shareable&&typeof target!=='number')return;if(typeof target==='number')doc.link(x,y,w,h,{pageNumber:target});else if(/^https?:\/\//i.test(target))doc.link(x,y,w,h,{url:target});}
+ // linkFor maps each evidence URL to the link printed in the PDF (consolidated reports route evidence
+ // through the report's own access link; null drops the link). Internal page links are unaffected.
+ function link(x,y,w,h,target){if(state.dry||!target||shareable&&typeof target!=='number')return;if(typeof target!=='number'){target=linkFor(target);if(!target)return;}if(typeof target==='number')doc.link(x,y,w,h,{pageNumber:target});else if(/^https?:\/\//i.test(target))doc.link(x,y,w,h,{url:target});}
  function kicker(text,x=M,color=palette.teal){drawLine(text.toUpperCase(),x,state.y,7.6,{bold:true,color,spacing:0.35});state.y+=lineHeight(7.6)+0.6;}
 
  // ---------- components ----------

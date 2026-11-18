@@ -11,3 +11,9 @@ export async function presignUpload(config,key,type){
  const signed=await client(config).sign(url,{method:'PUT',headers:{'Content-Type':type},aws:{signQuery:true}});return signed.url;
 }
 export async function bucketCors(config,method='GET',body){return client(config).fetch(urlFor(config,'?cors'),{method,headers:body?{'Content-Type':'application/xml'}:{},body});}
+// Short-lived signed GET for one evidence object (served only after the caller's access was checked).
+export async function presignDownload(config,key,expires=3600){
+ if(!r2UploadsConfigured(config))throw Error('503:Media storage is not configured');
+ const url=urlFor(config,'/'+key.split('/').map(encodeURIComponent).join('/'));url.searchParams.set('X-Amz-Expires',String(expires));
+ const signed=await client(config).sign(url,{method:'GET',aws:{signQuery:true}});return signed.url;
+}

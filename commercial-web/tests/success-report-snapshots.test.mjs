@@ -76,15 +76,15 @@ test('transient storage failures retry; permanent or persistent failures stop th
  assert.equal(attempts,9,'three attempts per group, then stop');
 });
 
-test('oversized PDFs fall back to fewer thumbnails, then links only; repeat exports reuse stored snapshots',async()=>{
- const entries=await entriesP,levels=[],cache=new Map();let stores=0;
+test('oversized PDFs fall back to fewer thumbnails, then links only; every export renders afresh for its new links',async()=>{
+ const entries=await entriesP,levels=[];let stores=0,resets=0;
  const big=new Uint8Array(4_100_000);big.set(pdf());
- const common={entries,from,to,teacherKeys:[JSON.stringify(['Beta School','Asha'])],generatedAt:'2026-11-17T06:00:00.000Z',cache,store:async()=>({url:'u'+(++stores)})};
+ const common={entries,from,to,teacherKeys:[JSON.stringify(['Beta School','Asha'])],generatedAt:'2026-11-17T06:00:00.000Z',store:async()=>({id:'s',url:'u'+(++stores)}),begin:()=>({linkFor:u=>u,reset(){resets++;}})};
  await buildDocumentationLinks({...common,render:async(l,{thumbnailsPerSection})=>{levels.push(thumbnailsPerSection);return thumbnailsPerSection>2?big:pdf();}});
- assert.deepEqual(levels,[6,2]);
- await buildDocumentationLinks({...common,render:async()=>{throw Error('should not render again');}});
- assert.equal(stores,1,'cached snapshot reused, no duplicate');
- await assert.rejects(buildDocumentationLinks({...common,cache:new Map(),render:async()=>big}),/larger than 4 MB even without photo thumbnails/);
+ assert.deepEqual(levels,[6,2]);assert.equal(resets,2,'the evidence manifest is reset before each fallback render');
+ await buildDocumentationLinks({...common,render:async()=>pdf()});
+ assert.equal(stores,2,'a second export renders and stores again (its links are new)');
+ await assert.rejects(buildDocumentationLinks({...common,render:async()=>big}),/larger than 4 MB even without photo thumbnails/);
 });
 
 test('bulk limits, bounded concurrency and progress reporting',async()=>{

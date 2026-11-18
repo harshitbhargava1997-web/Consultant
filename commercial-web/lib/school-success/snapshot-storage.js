@@ -54,6 +54,12 @@ export async function createShareObject({config,secret,snapshotId,school,created
  await putOnce(config,shareKey(id),await sealShareRecord(secret,id,'share',record),'share-put','The sharing link could not be saved');
  return {id,shareSecret,record};
 }
+// v2 consolidated-report access record, with a client-chosen ID (the PDF already links to it).
+export async function createAccessRecord({config,secret,record}){
+ const created=await putOnce(config,shareKey(record.id),await sealShareRecord(secret,record.id,'share',record),'share-put','The report link could not be saved');
+ if(!created)throw Error('409:That report link ID is already in use. Export the report again.');
+ return record;
+}
 export async function loadShareObject({config,secret,id}){
  const res=await r2Request(config,shareKey(id),'GET');
  if(res.status===404){discard(res);throw Error('404:This sharing link is not valid');}
