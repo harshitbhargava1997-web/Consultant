@@ -1,7 +1,7 @@
 import {withRequest,actor,database,checkOrigin,failure,assertSchool} from '@/lib/school-success/server';
 import {env} from '@/lib/school-success/environment';
 import {loadR2Config,r2UploadsConfigured} from '@/lib/school-success/r2-evidence';
-import {snapshotScopeSchema,MAX_SNAPSHOT_BYTES,assertPdfBytes,snapshotPagePath} from '@/lib/school-success/report-snapshots';
+import {snapshotScopeSchema,MAX_SNAPSHOT_BYTES,assertPdfBytes,assertShareablePdf,snapshotPagePath} from '@/lib/school-success/report-snapshots';
 import {storeSnapshotObject} from '@/lib/school-success/snapshot-storage';
 export const runtime='nodejs';
 const noStore={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
@@ -15,7 +15,7 @@ async function handlePOST(req){
   const scope=decodeScope(req.headers.get('X-Snapshot-Scope'));
   assertSchool(a,scope.school);
   if(Number(req.headers.get('content-length')||0)>MAX_SNAPSHOT_BYTES)throw Error('413:Lesson documentation PDF is larger than 4 MB');
-  const bytes=new Uint8Array(await req.arrayBuffer());assertPdfBytes(bytes);
+  const bytes=new Uint8Array(await req.arrayBuffer());assertPdfBytes(bytes);if(scope.variant==='shareable')assertShareablePdf(bytes);
   const config=await loadR2Config(env,database()),secret=config.SUPABASE_GATEWAY_TOKEN;
   if(!r2UploadsConfigured(config))throw Error('503:Report storage is not configured');
   // Never overwrites; storage failures surface the R2 status, code and request reference (no secrets).

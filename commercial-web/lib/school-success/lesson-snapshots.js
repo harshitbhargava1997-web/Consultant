@@ -16,33 +16,43 @@ export function documentationGroups(entries,from,to,teacherKeys){
  return {lessons,groups:lessonDocumentationGroups(lessons).filter(g=>keys.has(g.teacherKey))};
 }
 
-// render(lessons, {thumbnailsPerSection}) → Uint8Array PDF; store(bytes, scope) → {url}; both injected.
-// cache: Map reused across exports while the loaded data is unchanged, so repeat exports do not
-// create duplicate snapshots. Returns Map(teacherKey → [{...group, url}]).
-export async function buildDocumentationLinks({entries,from,to,teacherKeys,includeArchived=false,generatedAt,render,store,cache=new Map(),onProgress=()=>{},concurrency=2,attempts=3,wait=ms=>new Promise(r=>setTimeout(r,ms))}){
+// render(lessons, {thumbnailsPerSection, audience}) → Uint8Array PDF; store(bytes, scope) → {id, url};
+// link(stored, group) → {url, fullUrl?} where stored = {full?, shareable?}; all injected.
+// audiences: which versions to store per group ('full' always opens with sign-in; 'shareable' is the
+// redacted copy). cache: Map reused while the loaded data is unchanged. Only immutable snapshots are
+// cached — link() runs on every export, so a sharing link revoked meanwhile (by anyone, anywhere) is
+// never put into a new report. Returns Map(teacherKey → [{...group, url, fullUrl?}]).
+export async function buildDocumentationLinks({entries,from,to,teacherKeys,includeArchived=false,generatedAt,render,store,link=stored=>({url:stored.full.url}),audiences=['full'],cache=new Map(),onProgress=()=>{},concurrency=2,attempts=3,wait=ms=>new Promise(r=>setTimeout(r,ms))}){
  const {lessons,groups}=documentationGroups(entries,from,to,teacherKeys);
  if(groups.length>MAX_DOCUMENTATION_GROUPS)throw Error(`This export has ${groups.length} class and subject groups. Choose fewer schools or a shorter period (at most ${MAX_DOCUMENTATION_GROUPS}).`);
  const links=new Map(),failures=[];let done=0;
  onProgress({done,total:groups.length});
- async function one(g){
-  const scopeKey=JSON.stringify([groupKey(g),from,to,includeArchived]);
-  let url=cache.get(scopeKey);
-  if(!url){
-   const subset=groupLessons(lessons,g);
-   let bytes=null;
-   for(const level of THUMBNAIL_LEVELS){bytes=await render(subset,{thumbnailsPerSection:level});if(bytes.length<=MAX_SNAPSHOT_BYTES)break;}
-   if(bytes.length>MAX_SNAPSHOT_BYTES)throw Error('the lesson documentation is larger than 4 MB even without photo thumbnails; choose a shorter period');
-   const scope={kind:'teacher-lesson-documentation',school:g.school,teacher:g.teacher,grade:g.grade,section:g.section,subject:g.subject,from,to,generatedAt,includeArchived};
-   let lastError;
-   for(let attempt=1;attempt<=attempts&&!url;attempt++){
-    try{url=(await store(bytes,scope)).url;}
-    catch(e){lastError=e;if(e.permanent)break;if(attempt<attempts)await wait(500*attempt);}
-   }
-   if(!url)throw lastError||Error('storage failed');
-   cache.set(scopeKey,url);
+ async function retrying(task){
+  let lastError;
+  for(let attempt=1;attempt<=attempts;attempt++){
+   try{return await task();}
+   catch(e){lastError=e;if(e.permanent)break;if(attempt<attempts)await wait(500*attempt);}
   }
+  throw lastError||Error('storage failed');
+ }
+ async function snapshot(g,subset,audience){
+  const scopeKey=JSON.stringify([groupKey(g),from,to,includeArchived,audience]);
+  const cached=cache.get(scopeKey);if(cached)return cached;
+  let bytes=null;
+  // The shareable copy never carries thumbnails; the full version falls back to fewer to fit.
+  for(const level of audience==='shareable'?[0]:THUMBNAIL_LEVELS){bytes=await render(subset,{thumbnailsPerSection:level,audience});if(bytes.length<=MAX_SNAPSHOT_BYTES)break;}
+  if(bytes.length>MAX_SNAPSHOT_BYTES)throw Error('the lesson documentation is larger than 4 MB even without photo thumbnails; choose a shorter period');
+  const scope={kind:'teacher-lesson-documentation',school:g.school,teacher:g.teacher,grade:g.grade,section:g.section,subject:g.subject,from,to,generatedAt,includeArchived,variant:audience};
+  const stored=await retrying(()=>store(bytes,scope));
+  cache.set(scopeKey,stored);
+  return stored;
+ }
+ async function one(g){
+  const subset=groupLessons(lessons,g),stored={};
+  for(const audience of audiences)stored[audience]=await snapshot(g,subset,audience);
+  const urls=await retrying(()=>link(stored,g));
   if(!links.has(g.teacherKey))links.set(g.teacherKey,[]);
-  links.get(g.teacherKey).push({...g,url});
+  links.get(g.teacherKey).push({...g,...urls});
  }
  let next=0;
  async function worker(){while(next<groups.length){const g=groups[next++];try{await one(g);}catch(e){failures.push(`${g.teacher} · ${[g.grade,g.section].filter(Boolean).join(' ')} · ${g.subject}: ${e.message}`);}finally{done++;onProgress({done,total:groups.length,group:g});}}}

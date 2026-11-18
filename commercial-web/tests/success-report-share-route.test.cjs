@@ -41,7 +41,7 @@ function harness(){
   snapshotTicket:async id=>json(await snapOne.POST(new Request('https://app.test/api/school-success/report-snapshots/'+id,{method:'POST'}),p(id)))};
 }
 async function shared(h,text='AKANSHA PAL · Grade 1 · Mathematics',over){
- const s=await h.storeSnapshot(h.pdf(text),h.scope(over));assert.equal(s.status,200,JSON.stringify(s.body));
+ const s=await h.storeSnapshot(h.pdf(text),h.scope({variant:'shareable',...over}));assert.equal(s.status,200,JSON.stringify(s.body));
  const c=await h.createShare({snapshotId:s.body.id});assert.equal(c.status,200,JSON.stringify(c.body));
  return {snapshotId:s.body.id,id:c.body.id,secret:c.body.secret,path:c.body.path,bytes:h.pdf(text)};
 }
@@ -52,7 +52,7 @@ test('a signed-out holder of the link opens exactly that PDF; storage holds only
  assert.match(s.path,/^\/school-success\/shared\/[0-9a-f-]{36}$/);assert.match(s.secret,/^[A-Za-z0-9_-]{43}$/);assert.notEqual(s.id,s.snapshotId,'separate credential, not the snapshot ID');
  h.state.actor=null;
  const o=await h.open(s.id,{secret:s.secret});assert.equal(o.status,200,JSON.stringify(o.body));
- assert.equal(o.body.filename,'Lesson_Documentation_AKANSHA_PAL_Grade_1_A_Mathematics_2026-11-01_2026-11-17.pdf');
+ assert.equal(o.body.filename,'Lesson_Documentation_AKANSHA_PAL_Grade_1_A_Mathematics_2026-11-01_2026-11-17_Shareable.pdf');
  assert.ok(!o.body.url.includes(s.secret),'the link secret is never echoed into URLs');
  const r=await h.get(s.id,query(o.body.url));
  assert.equal(r.status,200);assert.equal(r.headers.get('content-type'),'application/pdf');
@@ -64,7 +64,7 @@ test('a signed-out holder of the link opens exactly that PDF; storage holds only
 });
 
 test('only signed-in administrators for the snapshot\'s stored school can create sharing links',async()=>{
- const h=harness(),s=await h.storeSnapshot(h.pdf('x'));const body={snapshotId:s.body.id};
+ const h=harness(),s=await h.storeSnapshot(h.pdf('x'),h.scope({variant:'shareable'}));const body={snapshotId:s.body.id};
  h.state.actor=OTHER;assert.equal((await h.createShare(body)).status,403);
  h.state.actor=TEACHER;assert.equal((await h.createShare(body)).status,403);
  h.state.actor=null;assert.equal((await h.createShare(body)).status,401);
@@ -136,4 +136,49 @@ test('existing private links are unchanged: snapshot routes still require sign-i
  h.state.actor=null;assert.equal((await h.snapshotTicket(s.snapshotId)).status,401);
  h.state.actor=OTHER;assert.equal((await h.snapshotTicket(s.snapshotId)).status,403);
  h.state.actor=ADMIN;assert.equal((await h.snapshotTicket(s.snapshotId)).status,200);
+});
+
+test('only the shareable copy can be shared: full-evidence and older snapshots stay behind sign-in; shareable PDFs cannot carry links',async()=>{
+ const h=harness();
+ const full=await h.storeSnapshot(h.pdf('full evidence with /Annots'));assert.equal(full.status,200);
+ const refused=await h.createShare({snapshotId:full.body.id});assert.equal(refused.status,403);assert.match(refused.body.error,/Only the shareable copy can be shared without sign-in/);
+ // A snapshot stored before the variant existed (no variant field) is treated as full evidence.
+ const legacy=await h.storeSnapshot(h.pdf('legacy'),(({variant,...rest})=>rest)(h.scope()));assert.equal((await h.createShare({snapshotId:legacy.body.id})).status,403);
+ const withLink=await h.storeSnapshot(h.pdf('<< /S /URI /URI (https://media.example.test/schools/a/photo.jpg) >>'),h.scope({variant:'shareable'}));
+ assert.equal(withLink.status,400);assert.match(withLink.body.error,/must not contain attachment links/);
+ assert.equal(h.writes.filter(k=>k.includes('report-shares')).length,0);
+ // The full version still opens for signed-in staff of the school.
+ assert.equal((await h.snapshotTicket(full.body.id)).status,200);
+});
+
+test('export → revoke (another admin, another session) → re-export without refreshing: the old link stays revoked, the new one opens the right PDF',async()=>{
+ const h=harness();
+ const {buildDocumentationLinks}=await import(path.join(root,'lib/school-success/lesson-snapshots.js'));
+ const {mapLive}=await import(path.join(root,'lib/school-success/live-mapping.js'));
+ const fx=await import(path.join(root,'tests/fixtures/lesson-records.mjs')),entries=(await mapLive(fx.raw(),fx.base)).entries;
+ // The exact selection: Asha (Alpha School), Grade 3 · B · Hindi.
+ const teacherKeys=[JSON.stringify(['Alpha School','Asha'])],pick=list=>list.filter(l=>l.grade==='Grade 3'&&l.section==='B'&&l.subject==='Hindi');
+ // Browser side of the export, wired to the real routes as a signed-in admin; one snapshot cache for the session.
+ const cache=new Map(),renders=[];
+ const render=async(lessons,{audience})=>{renders.push(audience);return h.pdf(`${audience} · ${lessons.map(l=>l.subject+' '+l.topic).join(' | ')}`);};
+ const store=async(bytes,scope)=>{const r=await h.storeSnapshot(bytes,scope);if(r.status!==200)throw Object.assign(Error(r.body.error),{permanent:true});return {id:r.body.id,url:'https://app.test'+r.body.url};};
+ const link=async stored=>{const r=await h.createShare({snapshotId:stored.shareable.id});if(r.status!==200)throw Object.assign(Error(r.body.error),{permanent:true});return {url:`https://app.test/school-success/shared/${r.body.id}#${r.body.secret}`,fullUrl:stored.full.url};};
+ const exportOnce=async()=>pick([...(await buildDocumentationLinks({entries,from:fx.from,to:fx.to,teacherKeys,generatedAt:'2026-11-17T06:00:00.000Z',render,store,link,audiences:['shareable','full'],cache,wait:async()=>{}})).values()].flat());
+ const first=await exportOnce();assert.equal(first.length,1);const rendersAfterFirst=renders.length;
+ const [id1,secret1]=first[0].url.split('/shared/')[1].split('#');
+ // Another administrator of the same school revokes it from their own session.
+ h.state.actor={role:'admin',email:'second-admin@example.test',allowedSchools:['Alpha School']};
+ assert.equal((await h.manage(id1,'revoke')).body.revoked,true);
+ // The first administrator exports the same selection again, without refreshing the data.
+ h.state.actor=ADMIN;
+ const second=await exportOnce(),[id2,secret2]=second[0].url.split('/shared/')[1].split('#');
+ assert.notEqual(id2,id1,'a fresh sharing link');assert.notEqual(secret2,secret1);
+ assert.equal(second[0].fullUrl,first[0].fullUrl,'the immutable full-evidence snapshot is reused');
+ assert.equal(renders.length,rendersAfterFirst,'nothing re-rendered or re-stored: immutable snapshots are reused');
+ h.state.actor=null;
+ const old=await h.open(id1,{secret:secret1});assert.equal(old.status,410,'the old link stays revoked');
+ const o=await h.open(id2,{secret:secret2});assert.equal(o.status,200);
+ assert.equal(o.body.filename,'Lesson_Documentation_Asha_Grade_3_B_Hindi_'+fx.from+'_'+fx.to+'_Shareable.pdf','same exact selection');
+ const pdf=await h.get(id2,query(o.body.url));assert.equal(pdf.status,200);
+ assert.match(Buffer.from(await pdf.arrayBuffer()).toString(),/^%PDF-1\.3\nshareable · Hindi /,'the new link opens the shareable copy of that selection');
 });

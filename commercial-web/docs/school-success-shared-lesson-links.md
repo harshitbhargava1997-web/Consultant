@@ -38,6 +38,39 @@
   - A share is created and confirmed in storage before the report is produced. If any group's snapshot or share fails after retries, **no report is produced**, so there are still no broken links.
   - Private exports keep the earlier sign-in links and wording.
 
+## Review round 1
+
+### 1. A fresh export never reuses a sharing link
+- **Before:** the export cache stored each group's finished link, so re-exporting the same selection without refreshing could put a link revoked meanwhile into a new report, including one revoked by another administrator in another session.
+- **Now:** only the immutable snapshots, full and shareable, are cached. `buildDocumentationLinks` calls `link()` on **every** export, and it creates a fresh sharing link each time. The snapshot is reused; the link is not.
+- **Test:** `tests/success-report-share-route.test.cjs` exports, then has a second administrator revoke the link, then re-exports the same selection with the same cache. It asserts:
+  - a new share ID and secret;
+  - the same full-evidence snapshot, with nothing re-rendered;
+  - the old link answers 410 Gone;
+  - the new link opens the shareable copy of the same selection while signed out.
+
+### 2. A shareable copy without sensitive student evidence; full evidence behind sign-in
+- **Two versions per group:** in **Shareable copy** mode each group is stored twice.
+  - The **shareable copy** (`variant: 'shareable'`, filename suffix `_Shareable`) is opened by the sharing link without sign-in. It contains lesson plans, counts and dates. It leaves out:
+    - embedded thumbnails and any other photos;
+    - every attachment link (plan files, activities, student work, recordings, further evidence);
+    - written reflection text and reflection recordings;
+    - Academic Review comments.
+    It says what was left out and where the full version is.
+  - The **full evidence** version (`variant: 'full'`) is opened by a second link in the same row, which needs school sign-in.
+- **Parent usage report:** in this mode it has two links per group, "Open shareable copy (no sign-in)" and "Open full evidence (school sign-in)", and **no attachment links at all**. Evidence file tables list files without links and point to Teacher 360°. An attachment link in the parent therefore cannot bypass the choice.
+- **Review before sharing:** **Review shareable copy · <teacher>** builds that teacher's shareable copy locally, with the same generator and no upload, so it can be checked first.
+- **Server-side guards:**
+  - a sharing link can only be created for a **shareable** snapshot; full-evidence snapshots, and every snapshot stored before this change, are refused with 403;
+  - a shareable snapshot that contains any `/URI` link annotation is refused at storage with 400.
+  - The server cannot read rendered page content, so thumbnail and reflection omission rest on the generator. That is covered by tests.
+- **Full evidence only** mode is the earlier private behaviour: sign-in links only, with evidence links in the usage report.
+- The KPI workbook is unaffected; it still lists evidence file links and should be kept internal. The export notice says so.
+- **Tests:**
+  - `tests/success-lesson-pdf.test.mjs` gives the generator real photos, reflections naming students and review text. The full version keeps them; the shareable copy has no `/URI`, no embedded image, none of the names or URLs, and the "left out" notes, while plans and chronology are unchanged.
+  - `tests/success-lesson-links.test.mjs`: the parent's only links are sharing links and app sign-in links.
+  - `tests/success-report-share-route.test.cjs`: full and legacy snapshots cannot be shared; a shareable PDF with a link is refused.
+
 ## Schema
 
 **No database change is required.** Shares and revocation markers are encrypted objects in the existing bucket, like snapshots.

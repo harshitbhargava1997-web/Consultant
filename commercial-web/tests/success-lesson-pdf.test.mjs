@@ -119,3 +119,33 @@ test('every line of a canvas-wrapped mixed Hindi–English paragraph is drawn by
  assert.ok(raster.calls.includes(latinLine),'Latin-only line from a mixed paragraph is rasterised');
  assert.ok(!text.includes('a-very-long-unbroken'),'and not also written as PDF text');
 });
+
+test('shareable copy omits thumbnails, every attachment link, reflection text and review comments; the full version keeps them',async()=>{
+ const lessons=await lessonsP,list=filterLessons(lessons,{teacher:asha}).map(l=>structuredClone(l));
+ const withEvidence=list.find(l=>l.activities.length)||list[0];
+ withEvidence.writtenReflections=[{label:'After-class reflection',date:'2026-10-22',answers:{achievement:'Riya Sharma read five words aloud.',nextStep:'Aman Verma needs support with blends.'}}];
+ withEvidence.feedback={text:'Discuss Riya Sharma’s progress with her parents.',date:'2026-10-24'};
+ const evidenceUrls=list.flatMap(l=>[...l.planFiles,...l.activities,...l.writing,...l.audio,...l.reflections,...l.additional].map(f=>f.url));
+ assert.ok(evidenceUrls.length>2,'fixture has attachments');
+ const images=new Map(list.flatMap(l=>l.activities).map(f=>[f.url,{data:PNG,width:1,height:1,format:'PNG'}]));
+ const sections={...defaultLessonSections,reflections:true,feedback:true};
+ const full=await make('teacher',{lessons:list,images,sections,raster:null});
+ const share=await make('teacher',{lessons:list,images,sections,raster:null,audience:'shareable'});
+ // Full version (school sign-in): links, thumbnails, reflection and review text present.
+ assert.ok(uris(full.doc).some(u=>evidenceUrls.includes(u)),'full version links evidence');
+ assert.ok(full.doc.output().includes('/Subtype /Image'),'full version embeds thumbnails');
+ assert.match(full.text,/Riya Sharma read five words/);assert.match(full.text,/Discuss Riya Sharma/);
+ // Shareable copy: no external links at all, no embedded images, no reflection or review text.
+ const out=share.doc.output();
+ assert.deepEqual(uris(share.doc),[],'no attachment (or any external) links');assert.ok(!out.includes('/URI'));
+ assert.ok(!out.includes('/Subtype /Image'),'no thumbnails or other embedded images');
+ for(const sensitive of ['Riya Sharma','Aman Verma','Discuss Riya',...evidenceUrls])assert.ok(!share.text.includes(sensitive)&&!out.includes(sensitive),`omits ${sensitive}`);
+ const flat=share.text.replace(/\s+/g,' ');
+ assert.match(flat,/SHAREABLE COPY — this PDF can be opened without signing in\./);
+ assert.match(flat,/left out of this shareable copy/);assert.match(flat,/full evidence version, available with school sign-in/);
+ assert.match(flat,/Reflection text and recordings are left out of this shareable copy because they can identify students/);
+ assert.match(flat,/Review recorded on .*Review comments are left out of this shareable copy/);
+ // Lesson plans and chronology are unchanged.
+ assert.match(flat,/Counting in tens/);assert.ok(flat.indexOf('Counting in tens')<flat.lastIndexOf('Blending CVC words'));
+ assert.throws(()=>createLessonDocumentationPdf({kind:'teacher',lessons:list,from,to,audience:'public'}),/Unknown lesson documentation audience/);
+});

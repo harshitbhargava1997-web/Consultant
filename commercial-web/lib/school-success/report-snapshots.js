@@ -18,7 +18,10 @@ const day=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s=>Number.isFinite(Date
 const text=z.string().max(200);
 export const snapshotScopeSchema=z.object({
  kind:z.literal('teacher-lesson-documentation'),school:text.min(1),teacher:text.min(1),grade:text,section:text,subject:text,
- from:day,to:day,generatedAt:z.string().datetime(),includeArchived:z.boolean().default(false)
+ from:day,to:day,generatedAt:z.string().datetime(),includeArchived:z.boolean().default(false),
+ // 'full': complete evidence, opened only with school sign-in. 'shareable': redacted copy (no student
+ // evidence, attachment links, reflection or review text) that may be opened through a sharing link.
+ variant:z.enum(['full','shareable']).default('full')
 }).strict().refine(s=>s.from<=s.to&&(Date.parse(s.to)-Date.parse(s.from))/86400000<=99,'Use a reporting period of at most 100 days');
 export const isSnapshotId=id=>typeof id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id);
 export const snapshotKey=id=>{if(!isSnapshotId(id))throw Error('404:Lesson documentation not found');return SNAPSHOT_PREFIX+id+'.bin';};
@@ -37,7 +40,7 @@ const idKey=secret=>hkdf(secret,'report-snapshot-id-v1',['sign'],{name:'HMAC',ha
 // Deterministic, unguessable ID: retries of identical bytes and scope map to the same snapshot (no
 // duplicates); any other content or scope gets a different ID, so stored snapshots are never replaced.
 export async function snapshotId(secret,scope,pdfSha256){
- const mac=new Uint8Array(await crypto.subtle.sign('HMAC',await idKey(secret),enc.encode(JSON.stringify([scope.kind,scope.school,scope.teacher,scope.grade,scope.section,scope.subject,scope.from,scope.to,scope.generatedAt,scope.includeArchived,pdfSha256]))));
+ const mac=new Uint8Array(await crypto.subtle.sign('HMAC',await idKey(secret),enc.encode(JSON.stringify([scope.kind,scope.school,scope.teacher,scope.grade,scope.section,scope.subject,scope.from,scope.to,scope.generatedAt,scope.includeArchived,...(scope.variant==='shareable'?['shareable']:[]),pdfSha256]))));
  mac[6]=(mac[6]&0x0f)|0x40;mac[8]=(mac[8]&0x3f)|0x80;const h=hex(mac.slice(0,16));
  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
 }
@@ -67,9 +70,13 @@ export async function openSnapshot(secret,id,envelope){
  return {meta,pdf};
 }
 
+// Server-side guard for the shareable copy: it must not carry link annotations (attachment links).
+export function assertShareablePdf(bytes){
+ if(dec.decode(bytes).includes('/URI'))throw Error('The shareable copy must not contain attachment links. Export it again.');
+}
 export function snapshotFilename(meta){
  const part=(s,f)=>String(s||'').normalize('NFKD').replace(/[^A-Za-z0-9._-]+/g,'_').replace(/^_+|_+$/g,'').slice(0,50)||f;
- return ['Lesson_Documentation',part(meta.teacher,'Teacher'),part(meta.grade,'Class'),meta.section&&meta.section!=='Not Applicable'?part(meta.section,''):'',part(meta.subject,'Subject'),meta.from,meta.to].filter(Boolean).join('_')+'.pdf';
+ return ['Lesson_Documentation',part(meta.teacher,'Teacher'),part(meta.grade,'Class'),meta.section&&meta.section!=='Not Applicable'?part(meta.section,''):'',part(meta.subject,'Subject'),meta.from,meta.to,meta.variant==='shareable'?'Shareable':''].filter(Boolean).join('_')+'.pdf';
 }
 export function contentDisposition(meta,download=false){
  const name=snapshotFilename(meta);

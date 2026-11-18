@@ -21,6 +21,9 @@ async function handlePOST(req){
   if(!r2UploadsConfigured(config))throw Error('503:Report storage is not configured');
   const {meta}=await loadSnapshotObject({config,secret,id:input.snapshotId});
   assertSchool(a,meta.school);
+  // Only the redacted shareable copy can be opened without sign-in; full evidence (and every snapshot
+  // stored before this option existed) stays behind school sign-in.
+  if(meta.variant!=='shareable')throw Error('403:Only the shareable copy can be shared without sign-in. The full evidence version requires school sign-in.');
   const {id,shareSecret}=await createShareObject({config,secret,snapshotId:input.snapshotId,school:meta.school,createdBy:a.email});
   return Response.json({id,secret:shareSecret,path:sharePagePath(id)},{headers:noStore});
  }catch(e){return fail(e);}
