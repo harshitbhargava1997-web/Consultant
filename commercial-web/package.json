@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/r2-report-access-selfcheck.cjs --write-synthetic; echo \"DIAGNOSTIC BUILD: intentionally failing so this deployment can never be served\"; exit 1",
     "start": "next start"
   },
   "dependencies": {
