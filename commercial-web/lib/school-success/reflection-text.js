@@ -5,8 +5,8 @@
 // teacher_records.lesson_evidence_history. Writing the reflection as a server-built
 // document in the same `.../implementation_<period>/closure/` path gives it the same
 // lesson identity, update date, idempotency (update ID) and access rules as the
-// reflection PDFs it replaces, without changing the schema. The server builds and
-// validates the content; browsers can never upload `.json` evidence themselves.
+// reflection PDFs it replaces. The server builds the canonical document. A teacher can transfer
+// only those signed bytes, and cannot submit a JSON attachment of their own.
 import {z} from 'zod';
 import {closurePrompts} from '../closure-reflection.js';
 
@@ -99,20 +99,6 @@ export async function planReflectionDocuments({submission,reflections,updateId,c
  const planned=evidencePlan(next);
  for(const d of docs)d.key=planned.find(f=>f.id===d.id).key;
  return {submission:next,docs,uploads:planned.filter(f=>!docs.some(d=>d.id===f.id))};
-}
-
-// Writes reflection documents without ever replacing accepted content. Keys are content-addressed, so an
-// existing object at the key already holds these exact bytes. `If-None-Match: *` makes concurrent first
-// writes atomic where storage supports it; otherwise both writers store identical bytes.
-export async function storeReflectionDocuments(docs,{put,head}){
- for(const doc of docs){
-  const existing=await head(doc.key);
-  if(existing.ok&&Number(existing.headers.get('content-length'))===doc.size)continue;
-  const response=await put(doc.key,doc.text,{'Content-Type':'application/json; charset=utf-8','If-None-Match':'*'});
-  if(response.ok)continue;
-  if(response.status===412){const check=await head(doc.key);if(check.ok&&Number(check.headers.get('content-length'))===doc.size)continue;}
-  throw Error('Written reflection could not be saved. Retry this submission.');
- }
 }
 
 // Read-only fetcher for reflection documents under the configured media base (never arbitrary URLs).

@@ -8,35 +8,35 @@ const S='Alpha School',T='Asha',EMAIL='asha-link@school.invalid',SUB='11111111-1
 const PERIOD=i=>`${String(i).padStart(8,'a')}-aaaa-4aaa-8aaa-${String(i).padStart(12,'a')}`;
 const CONFIG={SUPABASE_GATEWAY_TOKEN:SECRET,R2_ACCESS_KEY_ID:'k',R2_SECRET_ACCESS_KEY:'s',R2_ENDPOINT_URL:'https://acc.r2.cloudflarestorage.com',R2_BUCKET_NAME:'onelern-media',R2_PUBLIC_BASE_URL:BASE};
 
-function harness({periods=1,plan='Why — learning objective\nRead CVC words',actor={role:'school-teacher',email:EMAIL,school:S,name:T}}={}){
+function harness({periods=1,plan='Why — learning objective\nRead CVC words',school=S,teacher=T,submissionId=SUB,storageConfig=CONFIG,storageRequest,actor={role:'school-teacher',email:EMAIL,school,name:teacher}}={}){
  const r2=new Map(),writes=[],faults={put:0,rpc:0},state={actor};
- const rows=Array.from({length:periods},(_,i)=>({id:900+i,Center:S,Institution:S,FullName:T,Uploaded_By:EMAIL,Grade:'Grade 2',Section:'A',Subject:'English',Book:'Topic '+(i+1),submission_id:SUB,lesson_period_id:PERIOD(i+1),planned_lesson_on:'2026-10-21',preparation_saved_at:'2026-10-20T05:00:00',lesson_stage:'preparation_saved',lesson_version:0,last_evidence_update_id:null,lesson_reflection:plan,materials_notes:'',lesson_evidence_history:[],Voice_Note_Link:'',Lesson_Plan_Picture:'',Video_Evidence_1:'',Video_Evidence_2:'',Video_Evidence_3:'',Writing_Sample_Link:'',Phonics_Evidence_Link:'',Portfolio_Evidence_Link:'',Event_Pictures_Link:''}));
+ const rows=Array.from({length:periods},(_,i)=>({id:900+i,Center:school,Institution:school,FullName:teacher,Uploaded_By:EMAIL,Grade:'Grade 2',Section:'A',Subject:'English',Book:'Topic '+(i+1),submission_id:submissionId,lesson_period_id:PERIOD(i+1),planned_lesson_on:'2026-10-21',preparation_saved_at:'2026-10-20T05:00:00',lesson_stage:'preparation_saved',lesson_version:0,last_evidence_update_id:null,lesson_reflection:plan,materials_notes:'',lesson_evidence_history:[],Voice_Note_Link:'',Lesson_Plan_Picture:'',Video_Evidence_1:'',Video_Evidence_2:'',Video_Evidence_3:'',Writing_Sample_Link:'',Phonics_Evidence_Link:'',Portfolio_Evidence_Link:'',Event_Pictures_Link:''}));
  const reviews=[];
  const tick=()=>new Promise(r=>setTimeout(r,0));
  const merge=(a,b)=>[...new Set([...String(a||'').split(','),...String(b||'').split(',')].filter(Boolean))].join(',');
  const fileCols=['Video_Evidence_1','Video_Evidence_2','Video_Evidence_3','Writing_Sample_Link','Phonics_Evidence_Link','Portfolio_Evidence_Link','Event_Pictures_Link','Lesson_Plan_Picture'];
  async function gateway(b){
   await tick();
-  if(b.action==='readLesson')return {rows:structuredClone(rows)};
+  if(b.action==='readLesson'||b.action==='findLessons')return {rows:structuredClone(rows)};
   if(b.action==='evidenceStatus')return {saved:state.prepSaved===b.id,submissionId:b.id,periods:0,resumable:true};
   if(b.action==='savePreparation'){state.prepSaved=b.rows[0].submission_id;state.prepRows=b.rows;return {saved:true,submissionId:b.rows[0].submission_id,periods:b.rows.length,version:0};}
   if(b.action==='readLessonReviews')return {rows:reviews.filter(r=>b.ids.includes(String(r.record_id)))};
   if(b.action==='appendLessonEvidence'){
    if(faults.rpc>0){faults.rpc--;throw Error('503:Database temporarily unavailable');}
    // Emulates the RPC as one serialized transaction.
-   if(!rows.some(r=>r.last_evidence_update_id!==b.updateId))return {saved:true,alreadySaved:true,submissionId:SUB,periods:rows.length,version:rows[0].lesson_version};
+   if(!rows.some(r=>r.last_evidence_update_id!==b.updateId))return {saved:true,alreadySaved:true,submissionId,periods:rows.length,version:rows[0].lesson_version};
    if(rows.some(r=>r.lesson_version!==b.version))throw Error('409:Lesson changed. Reopen the return link before adding evidence.');
    for(const inc of b.rows){const row=rows.find(r=>r.lesson_period_id===inc.lesson_period_id);if(inc.Voice_Note_Link)throw Error('Preparation audio cannot be replaced');
     const has=fileCols.some(c=>inc[c]);for(const c of fileCols)row[c]=merge(row[c],inc[c]);
     if(has){row.lesson_evidence_history=[...row.lesson_evidence_history,{id:b.updateId,at:'2026-10-22T06:00:00',conductedOn:b.conductedOn,files:Object.fromEntries(fileCols.map(c=>[c,inc[c]||'']))}];row.lesson_stage='evidence_submitted';row.evidence_submitted_at='2026-10-22T06:00:00';row.conducted_on=b.conductedOn;}
     row.lesson_version++;row.last_evidence_update_id=b.updateId;}
-   return {saved:true,alreadySaved:false,submissionId:SUB,periods:rows.length,version:rows[0].lesson_version,stage:'evidence_submitted'};
+   return {saved:true,alreadySaved:false,submissionId,periods:rows.length,version:rows[0].lesson_version,stage:'evidence_submitted'};
   }
   throw Error('Unexpected gateway action '+b.action);
  }
  async function r2Request(config,key,method,body,headers={}){
   await tick();
-  const status=(code,len,text='')=>({ok:code<300,status:code,headers:new Headers(len==null?{}:{'content-length':String(len)}),text:async()=>text});
+  const status=(code,len,body=null)=>new Response(body,{status:code,headers:len==null?{}:{'content-length':String(len)}});
   if(method==='HEAD'){const v=r2.get(key);return v?status(200,Buffer.byteLength(v)):status(404);}
   if(method==='GET'){const v=r2.get(key);return v?status(200,Buffer.byteLength(v),v):status(404);}
   if(method==='PUT'){
@@ -50,22 +50,22 @@ function harness({periods=1,plan='Why — learning objective\nRead CVC words',ac
  const mocks={
   '@/lib/school-success/server':{withRequest:(req,fn)=>fn(),actor:async()=>state.actor,database:()=>({}),checkOrigin(){},failure:e=>{const message=String(e.message||e),status=Number(message.match(/^(401|403|409|413|503):/)?.[1]||400);return Response.json({error:message.replace(/^\d+:/,'')},{status});}}, // same as server.js failure()
   '@/lib/school-success/environment':{env:{}},
-  '@/lib/school-success/live':{gateway,publicBase:()=>BASE},
-  '@/lib/school-success/r2-evidence':{...real,r2Request,loadR2Config:async()=>CONFIG}
+  '@/lib/school-success/live':{gateway,publicBase:()=>storageConfig.R2_PUBLIC_BASE_URL},
+  '@/lib/school-success/r2-evidence':{...real,r2Request:storageRequest||r2Request,loadR2Config:async()=>storageConfig}
  };
  const filename=path.join(root,'app/api/school-success/evidence/route.js'),out=transformSync(fs.readFileSync(filename,'utf8'),{filename,jsc:{parser:{syntax:'ecmascript'}},module:{type:'commonjs'}}),m=new Module(filename,module);
  m.paths=Module._nodeModulePaths(path.dirname(filename));const normal=m.require.bind(m);
  m.require=name=>mocks[name]||normal(name.startsWith('@/')?path.join(root,name.slice(2)):name);
  m._compile(out.code,filename);
  const call=async body=>{const res=await m.exports.POST(new Request('http://app.test/api/school-success/evidence',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}));return {status:res.status,body:await res.json()};};
- const resume=()=>real.seal({kind:'lesson-resume',id:SUB,school:S,teacher:T,email:EMAIL,exp:Date.now()+86400000},SECRET);
+ const resume=()=>real.seal({kind:'lesson-resume',id:submissionId,school,teacher,email:EMAIL,exp:Date.now()+86400000},SECRET);
  return {r2,writes,faults,rows,reviews,state,call,resume,real};
 }
-async function prepared(h,{updateId,version=0,answers,periodCount=1,files=[]}){
+async function prepared(h,{updateId,version=0,answers,periodCount=1,files=[],uploadWrittenReflections=false}){
  const token=await h.resume(),lesson=(await h.call({action:'resume',resume:token})).body;
  const submission={...lesson.submission,files};
  const reflections=answers?Array.from({length:periodCount},(_,i)=>({periodId:lesson.submission.periods[i].id,answers:typeof answers==='function'?answers(i):answers})):[];
- const prep=await h.call({action:'prepare',mode:'evidence',resume:token,submission,version,updateId,conductedOn:'2026-10-22',reflections});
+ const prep=await h.call({action:'prepare',mode:'evidence',resume:token,submission,version,updateId,conductedOn:'2026-10-22',reflections,uploadWrittenReflections});
  return {prep,commit:extra=>h.call({action:'commit',token:prep.body.token,submission,reflections,...extra}),submission,reflections,token};
 }
 const U1='c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1',U2='c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2';
@@ -117,8 +117,8 @@ test('a stale plan is rejected and leaves saved history unchanged',async()=>{
 
 test('partial failures can be retried: storage failure, then database failure after storage',async()=>{
  const h=harness(),a=await prepared(h,{updateId:U1,answers:{achievement:'Retry me',nextStep:'Next steps'}});
- h.faults.put=1;
- const failed=await a.commit();assert.equal(failed.status,400);assert.match(failed.body.error,/could not be saved/);assert.equal(referenced(h).length,0);
+ h.faults.put=3;
+ const failed=await a.commit();assert.equal(failed.status,503);assert.match(failed.body.error,/R2 PUT 500/);assert.match(failed.body.error,/could not be saved/);assert.equal(referenced(h).length,0);
  h.faults.rpc=1;
  const dbFail=await a.commit();assert.equal(dbFail.status,503);assert.equal(referenced(h).length,0);assert.equal(h.writes.length,1);
  const ok=await a.commit();assert.equal(ok.status,200);assert.equal(ok.body.alreadySaved,false);
@@ -133,7 +133,7 @@ test('a commit whose resent submission or answers differ from the prepared plan 
  assert.equal(h.writes.length,0);assert.equal(referenced(h).length,0);
 });
 
-test('browsers cannot upload JSON evidence and reflections must belong to the lesson',async()=>{
+test('file selection rejects arbitrary JSON evidence and reflections must belong to the lesson',async()=>{
  const h=harness(),token=await h.resume(),lesson=(await h.call({action:'resume',resume:token})).body;
  const json=await h.call({action:'prepare',mode:'evidence',resume:token,version:0,updateId:U1,conductedOn:'2026-10-22',submission:{...lesson.submission,files:[{id:'dddddddd-dddd-4ddd-8ddd-dddddddddddd',periodId:lesson.submission.periods[0].id,category:'closure',name:'x.json',size:10}]}});
  assert.equal(json.status,400);assert.match(json.body.error,/PDF, photo, video or audio/);
@@ -193,4 +193,85 @@ test('lesson-plan preparation with ten maximum-length Hindi periods saves throug
  const done=await h.call({action:'commit',token:prep.body.token,submission});
  assert.equal(done.status,200,JSON.stringify(done.body).slice(0,200));assert.equal(h.state.prepRows.length,10);assert.equal(h.state.prepRows[0].lesson_reflection,'क्ष'.repeat(1666));
  assert.ok(done.body.resumeToken,'return link still issued');
+});
+
+test('photos, student work and written answers reach one lesson even if the server reflection PUT is unavailable',async()=>{
+ const h=harness(),files=['activity','writing'].map((category,i)=>({id:crypto.randomUUID(),periodId:PERIOD(1),category,name:category+'.jpg',size:3}));
+ const a=await prepared(h,{updateId:U1,files,uploadWrittenReflections:true,answers:{achievement:'बच्चे पढ़ सके।',nextStep:'Review pairs.'}});
+ assert.equal(a.prep.status,200);assert.equal(a.prep.body.reflectionUploads.length,1);
+ for(const f of a.prep.body.files){const file=await h.real.unseal(f.token,SECRET);h.r2.set(file.key,'img');}
+ const ticket=a.prep.body.reflectionUploads[0],key=decodeURIComponent(new URL(ticket.url).pathname.slice('/onelern-media/'.length));
+ h.r2.set(key,ticket.text);h.faults.put=10;
+ const result=await a.commit();assert.equal(result.status,200,JSON.stringify(result.body));
+ assert.equal(h.faults.put,10);assert.equal(h.rows[0].lesson_evidence_history.length,1);
+ const row=h.rows[0].lesson_evidence_history[0];
+ assert.ok(row.files.Video_Evidence_1.includes('/activity/'));assert.ok(row.files.Writing_Sample_Link.includes('/writing/'));
+ const reopened=await h.call({action:'resume',resume:a.token});
+ assert.ok(reopened.body.files.some(f=>f.reflection?.answers?.achievement==='बच्चे पढ़ सके।'));
+ assert.equal((await a.commit()).body.alreadySaved,true);assert.equal(h.rows[0].lesson_evidence_history.length,1);
+});
+test('incomplete media identifies only the file that must be resent; an incorrect reflection cannot commit',async()=>{
+ const h=harness(),file={id:crypto.randomUUID(),periodId:PERIOD(1),category:'writing',name:'work.jpg',size:3};
+ const a=await prepared(h,{updateId:U1,files:[file],uploadWrittenReflections:true,answers:{achievement:'Original'}});
+ const ticket=a.prep.body.reflectionUploads[0],key=decodeURIComponent(new URL(ticket.url).pathname.slice('/onelern-media/'.length));
+ h.r2.set(key,ticket.text.replace('Original','Modified'));
+ assert.equal((await a.commit()).status,409);assert.equal(h.rows[0].lesson_evidence_history.length,0);
+ h.r2.set(key,ticket.text);
+ const incomplete=await a.commit();assert.equal(incomplete.status,409);assert.equal(incomplete.body.fileId,file.id);
+ assert.equal(h.rows[0].lesson_evidence_history.length,0);
+});
+
+// Only this opt-in check uses real storage. The lesson, actor and database stay in memory.
+test('real R2 saves classroom evidence, student work and multilingual reflection through the lesson route',
+ {skip:process.env.SCHOOL_SUCCESS_TEST_R2!=='1' && 'requires a configured test storage connection'}, async t=>{
+ const {env}=await import('../lib/school-success/environment.js');
+ const r2=await import('../lib/school-success/r2-evidence.js');
+ const {presignUpload}=await import('../lib/school-success/r2-upload.js');
+ const {transferWrittenReflections}=await import('../lib/school-success/storage-upload.js');
+ let config=env;
+ if(!r2.r2UploadsConfigured(config)){
+  assert.ok(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SCHOOL_SUCCESS_TRANSFER_KEY,'the requested storage test must have a connection');
+  const {localDatabase}=await import('../lib/school-success/database.js');
+  config=await r2.loadR2Config(env,localDatabase());
+ }
+ const school='ZZ Synthetic Evidence Save',teacher='Synthetic Teacher',submissionId=crypto.randomUUID();
+ const keys=new Set(),prefix='schools/'+encodeURIComponent(school)+'/teachers/'+encodeURIComponent(teacher)+'/2026-10-21/submission_'+submissionId+'/';
+ const remember=key=>{assert.ok(key.startsWith(prefix),'only the isolated synthetic lesson can be written or cleaned up');keys.add(key);};
+ t.after(async()=>{
+  const responses=await Promise.all([...keys].map(key=>r2.r2Request(config,key,'DELETE')));
+  assert.ok(responses.every(r=>r.ok),'synthetic lesson files removed');
+ });
+ const h=harness({school,teacher,submissionId,storageConfig:{...config,SUPABASE_GATEWAY_TOKEN:SECRET},storageRequest:r2.r2Request});
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64');
+ const {jsPDF}=require('jspdf'),pdf=new jsPDF();pdf.text('Synthetic student work',20,20);
+ const worksheet=Buffer.from(pdf.output('arraybuffer'));
+ const file=(category,name,size)=>({id:crypto.randomUUID(),periodId:PERIOD(1),category,name,size});
+ const files=[file('activity','classroom.png',png.length),file('writing','work.pdf',worksheet.length)];
+ const answers={achievement:'लेखन अभ्यास पूरा हुआ।',nextStep:'Read again in pairs.'};
+ const a=await prepared(h,{updateId:crypto.randomUUID(),files,answers,uploadWrittenReflections:true});
+ assert.equal(a.prep.status,200);
+ for(const entry of a.prep.body.files){
+  const f=await r2.unseal(entry.token,SECRET);remember(f.key);
+  const url=await presignUpload(config,f.key,f.type),bytes=f.category==='activity'?png:worksheet;
+  const uploaded=await fetch(url,{method:'PUT',headers:{'Content-Type':f.type},body:new Blob([bytes],{type:f.type})});
+  assert.ok(uploaded.ok,'synthetic attachment upload HTTP '+uploaded.status);
+ }
+ const ticket=a.prep.body.reflectionUploads[0];
+ const keyFor=ticket=>decodeURIComponent(new URL(ticket.url).pathname.slice(('/'+config.R2_BUCKET_NAME+'/').length));
+ remember(keyFor(ticket));
+ const responses=[];
+ const transfer=()=>transferWrittenReflections([ticket],async(url,init)=>{const res=await fetch(url,init);responses.push(res.status);return res;});
+ await transfer();await transfer();
+ assert.deepEqual(responses,[200,412],'the direct reflection is stored and a duplicate cannot replace it');
+ const saved=await a.commit();assert.equal(saved.status,200);
+ assert.equal((await a.commit()).body.alreadySaved,true);
+ const reopened=await h.call({action:'resume',resume:a.token});
+ assert.ok(reopened.body.files.some(f=>f.reflection?.answers?.achievement===answers.achievement));
+ assert.ok(reopened.body.files.some(f=>f.url.includes('/activity/')));assert.ok(reopened.body.files.some(f=>f.url.includes('/writing/')));
+ const b=await prepared(h,{updateId:crypto.randomUUID(),version:saved.body.version,answers:{nextStep:'Server fallback'},uploadWrittenReflections:true});
+ assert.equal(b.prep.status,200);remember(keyFor(b.prep.body.reflectionUploads[0]));
+ // Withhold this direct transfer to exercise a server write, as with an already-open teacher form.
+ assert.equal((await b.commit()).status,200);assert.equal(h.rows[0].lesson_evidence_history.length,2);
+ const afterFallback=await h.call({action:'resume',resume:b.token});
+ assert.ok(afterFallback.body.files.some(f=>f.reflection?.answers?.nextStep==='Server fallback'));
 });

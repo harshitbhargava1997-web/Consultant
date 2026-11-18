@@ -44,3 +44,21 @@ export async function uploadEvidenceFile({fetchTicket,put=fetch,body,report=()=>
  }
  return Response.json({error:uploadMessage(outcome),upload:outcome},{status:502});
 }
+
+// The server prepared the exact JSON and signed its checksum and no-overwrite condition. If this
+// transfer is interrupted (or an earlier attempt already wrote it), commit verifies or stores it.
+export async function transferWrittenReflections(tickets, put = fetch) {
+ for (const {url, headers, text} of tickets) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+   const response = await put(url, {method: 'PUT', body: new Blob([text], {type: headers['Content-Type']}),
+    headers, signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer'});
+   await response.body?.cancel();
+   if (!response.ok && response.status !== 412) return;
+  } catch {
+   // A blocked storage origin should add at most one timeout for the entire lesson.
+   return;
+  } finally { clearTimeout(timer); }
+ }
+}

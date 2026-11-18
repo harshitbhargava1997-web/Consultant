@@ -5,7 +5,8 @@ import { gateway, publicBase } from '@/lib/school-success/live';
 import { scopedSubmission, evidencePlan, submissionRecords } from '@/lib/school-success/teacher-submissions';
 import { seal, unseal, r2UploadsConfigured, r2Request, loadR2Config } from '@/lib/school-success/r2-evidence';
 import { assertResumeAccess, lessonFromRows, assertEvidenceMatches } from '@/lib/school-success/lesson-workflow';
-import { reflectionInputSchema, planReflectionDocuments, storeReflectionDocuments, attachReflectionText, reflectionFetcher, sha256Hex } from '@/lib/school-success/reflection-text';
+import { reflectionInputSchema, planReflectionDocuments, attachReflectionText, reflectionFetcher, sha256Hex } from '@/lib/school-success/reflection-text';
+import {reflectionUploadTicket, storeReflectionDocuments} from '@/lib/school-success/reflection-storage';
 import { submissionSchema } from '@/lib/school-success/teacher-submissions';
 async function handlerPOST(req) {
     try {
@@ -50,7 +51,7 @@ async function handlerPOST(req) {
             if (!['legacy', 'preparation', 'evidence'].includes(mode))
                 throw Error('Choose preparation or classroom evidence');
             let submission = scopedSubmission(body.submission, a);
-            // JSON evidence is written only by the server (written reflections); browsers cannot upload it.
+            // File selection excludes JSON. Only a validated, server-built reflection gets a checksum-bound ticket.
             if (submission.files.some(f => /\.json$/i.test(f.name)))
                 throw Error('Use PDF, photo, video or audio evidence files');
             const reflectionInput = body.reflections == null ? [] : reflectionInputSchema.parse(body.reflections);
@@ -99,7 +100,9 @@ async function handlerPOST(req) {
             // Bounded plan token: hashes only. The browser resends the submission and reflections at commit.
             const sealedPlan = { kind: 'plan', v: 2, email: a.email, exp, mode, submissionId: submission.id, school: submission.school, teacher: submission.teacher, submissionHash: await sha256Hex(JSON.stringify(submission)),
                 ...(mode === 'evidence' ? { resume: body.resume, version: body.version, updateId: body.updateId, conductedOn: body.conductedOn, reflections: reflectionDocs.map(({ id, periodId, sha256, size }) => ({ id, periodId, sha256, size })) } : {}) };
-            return Response.json({ token: await seal(sealedPlan, signer), files: await Promise.all(files.map(async (file) => ({ id: file.id, token: await seal({ kind: 'file', email: a.email, exp, ...file }, signer) }))) });
+            const reflectionUploads = body.uploadWrittenReflections === true
+                ? await Promise.all(reflectionDocs.map(doc => reflectionUploadTicket(config, doc))) : [];
+            return Response.json({ token: await seal(sealedPlan, signer), reflectionUploads, files: await Promise.all(files.map(async (file) => ({ id: file.id, token: await seal({ kind: 'file', email: a.email, exp, ...file }, signer) }))) }, {headers: {'Cache-Control': 'no-store'}});
         }
         if (body.action === 'commit') {
             const plan = await unseal(body.token, signer);
@@ -139,11 +142,14 @@ async function handlerPOST(req) {
             }
             const files = evidencePlan(submission);
             // Accepted reflection content is immutable: content-addressed keys, no overwrite (see storeReflectionDocuments).
-            await storeReflectionDocuments(reflectionDocs, { put: (key, text, headers) => r2Request(config, key, 'PUT', text, headers), head: key => r2Request(config, key, 'HEAD') });
+            await storeReflectionDocuments(reflectionDocs, { put: (key, text, headers) => r2Request(config, key, 'PUT', text, headers), get: key => r2Request(config, key, 'GET') });
+            const reflectionIds = new Set(reflectionDocs.map(doc => doc.id));
             for (const file of files) {
+                if (reflectionIds.has(file.id)) continue; // verified or written from the canonical document above
                 const r = await r2Request(config, file.key, 'HEAD');
-                if (!r.ok || Number(r.headers.get('content-length')) !== file.size)
-                    throw Error('Evidence upload is incomplete. Retry this submission.');
+                if (r.status === 404 || (r.ok && Number(r.headers.get('content-length')) !== file.size))
+                    return Response.json({error: 'One evidence file needs to be uploaded again.', fileId: file.id}, {status: 409, headers: {'Cache-Control':'no-store'}});
+                if (!r.ok) throw Error('503:The evidence file could not be checked in storage. Retry this submission.');
             }
             const rows = submissionRecords(submission, a.email, publicBase());
             if (plan.mode === 'evidence')
