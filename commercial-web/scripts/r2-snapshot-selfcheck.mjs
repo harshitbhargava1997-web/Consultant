@@ -18,7 +18,8 @@ import {env} from '../lib/school-success/environment.js';
 import {localDatabase} from '../lib/school-success/database.js';
 import {loadR2Config,r2Request,r2Diagnostics,describeR2,r2UploadsConfigured} from '../lib/school-success/r2-evidence.js';
 import {sealSnapshot,openSnapshot,snapshotKey,sha256Hex,assertPdfBytes} from '../lib/school-success/report-snapshots.js';
-import {storeSnapshotObject,loadSnapshotObject,snapshotExists} from '../lib/school-success/snapshot-storage.js';
+import {storeSnapshotObject,loadSnapshotObject,snapshotExists,createShareObject,loadShareObject,shareRevocation,revokeShareObject} from '../lib/school-success/snapshot-storage.js';
+import {shareKey,revokedKey,secretDigest,sameDigest} from '../lib/school-success/report-shares.js';
 
 const args=new Set(process.argv.slice(2));
 const out=(step,data)=>console.log('SELFCHECK '+JSON.stringify({step,...data}));
@@ -103,6 +104,16 @@ async function main(){
  const pubBytes=pub&&pub.ok?new Uint8Array(await pub.arrayBuffer()):new Uint8Array();
  const plain=new TextDecoder('latin1').decode(pubBytes);
  check('public-url-ciphertext-only',!plain.includes('%PDF')&&!plain.includes('Synthetic R2 self-check')&&!plain.includes(scope.teacher),{publicStatus:pub?pub.status:'unreachable',bytes:pubBytes.length});
+ if(!args.has('--share'))return;
+ // 8. Sharing link: create → read back → not revoked → revoke (once) → revoked; records are ciphertext.
+ const created=await createShareObject({config,secret,snapshotId:stored.id,school:scope.school,createdBy:'r2-selfcheck@synthetic.invalid'});
+ const record=await loadShareObject({config,secret,id:created.id});
+ check('share-created-and-read',record.snapshotId===stored.id&&sameDigest(await secretDigest(created.shareSecret),record.secretSha256),{shareId:created.id});
+ check('share-not-revoked',(await shareRevocation({config,secret,id:created.id}))===null);
+ const r1=await revokeShareObject({config,secret,id:created.id,revokedBy:'r2-selfcheck@synthetic.invalid'}),r2b=await revokeShareObject({config,secret,id:created.id,revokedBy:'r2-selfcheck@synthetic.invalid'});
+ check('share-revoked-once',r1.alreadyRevoked===false&&r2b.alreadyRevoked===true&&Boolean(await shareRevocation({config,secret,id:created.id})));
+ const leaks=[];for(const key of [shareKey(created.id),revokedKey(created.id)]){const r=await fetch(config.R2_PUBLIC_BASE_URL.replace(/\/$/,'')+'/'+key,{signal:AbortSignal.timeout(15000)}).catch(()=>null);const t=r&&r.ok?new TextDecoder('latin1').decode(new Uint8Array(await r.arrayBuffer())):'';if(t.includes(created.shareSecret)||t.includes(stored.id)||t.includes(scope.school))leaks.push(key.endsWith('.bin')?'record':'marker');}
+ check('share-public-urls-ciphertext-only',leaks.length===0,{leaks});
 }
 
 async function run(){

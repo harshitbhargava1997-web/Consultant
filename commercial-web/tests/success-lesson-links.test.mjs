@@ -69,3 +69,14 @@ test('combined and per-school PDFs give every teacher only their own documentati
  // Callers that do not pass options (older exports) still render without a documentation section.
  assert.doesNotMatch(pdfText(createReportPdf(profiles.slice(0,1),from,to,settings)),/Open lesson\s+documentation/);
 });
+
+test('shareable exports say that anyone with a link can open it and carry the sharing link; private exports keep the sign-in wording',async()=>{
+ const entries=await entriesP,settings=structuredClone(defaultReportSettings),profiles=buildProfiles(entries,raw().roster,from,to,settings).filter(p=>p.school==='Alpha School'&&p.name==='Asha');
+ const share='https://vision.example.test/school-success/shared/0b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f60#'+'A'.repeat(43);
+ const base=docsOption(entries),shared={lessonDocs:p=>base.lessonDocs(p).map(g=>({...g,url:share})),lessonDocsAccess:'shared'};
+ const doc=createReportPdf(profiles,from,to,settings,undefined,shared),text=pdfText(doc).replace(/\s+/g,' ');
+ assert.match(text,/Anyone with a link can open that PDF without signing in\. The school can revoke a link; copies already downloaded cannot be recalled\./);
+ assert.doesNotMatch(text,/Sign-in is required/);
+ assert.ok(uris(doc).includes(share),'the sharing link (with its #secret) is the link target');
+ assert.match(pdfText(createReportPdf(profiles,from,to,settings,undefined,base)).replace(/\s+/g,' '),/Sign-in is required\./);
+});

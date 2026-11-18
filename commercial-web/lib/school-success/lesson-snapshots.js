@@ -61,3 +61,12 @@ export async function storeSnapshot(fetcher,bytes,scope){
  if(!response.ok){const error=Error(body.error||'storage failed');error.permanent=response.status>=400&&response.status<500&&![408,429].includes(response.status);throw error;}
  return body;
 }
+
+// Creates a sharing link (no sign-in for holders of the link) for a stored snapshot. Same retry
+// semantics as storeSnapshot: 4xx other than 408/429 are permanent.
+export async function createShareLink(fetcher,snapshotId){
+ const response=await fetcher('/api/school-success/report-shares',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snapshotId})});
+ let body={};try{body=await response.json();}catch{}
+ if(!response.ok){const error=Error(body.error||'sharing link could not be created');error.permanent=response.status>=400&&response.status<500&&![408,429].includes(response.status);throw error;}
+ return body;
+}
