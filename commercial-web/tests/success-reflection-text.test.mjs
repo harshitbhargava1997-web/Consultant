@@ -1,3 +1,4 @@
+import {storeReflectionDocuments,reflectionUploadTicket} from '../lib/school-success/reflection-storage.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
@@ -5,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {formatClosure} from '../lib/closure-reflection.js';
-import {parseClosureText,reflectionFileId,planReflectionDocuments,attachReflectionText,reflectionDocument,isReflectionTextUrl,storeReflectionDocuments,REFLECTION_DOCUMENT_TYPE} from '../lib/school-success/reflection-text.js';
+import {parseClosureText,reflectionFileId,planReflectionDocuments,attachReflectionText,reflectionDocument,isReflectionTextUrl,REFLECTION_DOCUMENT_TYPE} from '../lib/school-success/reflection-text.js';
 import {submissionSchema,evidencePlan,submissionRecords} from '../lib/school-success/teacher-submissions.js';
 import {mapLive} from '../lib/school-success/live-mapping.js';
 import {buildLessonRecords,isGeneratedPreparationPdf,visibleLessonSections} from '../lib/school-success/lesson-records.js';
@@ -35,7 +36,7 @@ test('server plans one reflection document per period, keyed in that period’s 
  const parsed=JSON.parse(doc.text);
  assert.equal(parsed.type,REFLECTION_DOCUMENT_TYPE);assert.deepEqual(parsed.answers,{achievement:'बहुत अच्छा',nextStep:'Group practice'});
  assert.equal(parsed.updateId,U1);assert.equal(parsed.periodId,P1);assert.equal(parsed.conductedOn,'2026-10-22');
- assert.deepEqual(planned.uploads.map(f=>f.name),['photo.jpg'],'reflection is written by the server, not uploaded by the browser');
+ assert.deepEqual(planned.uploads.map(f=>f.name),['photo.jpg'],'only the selected photo gets an ordinary attachment ticket');
  const file=planned.submission.files.find(f=>f.id===doc.id);
  assert.deepEqual([file.category,file.size],['closure',new TextEncoder().encode(doc.text).length]);
  // The row columns the RPC appends to history include the reflection with the activity photo.
@@ -53,17 +54,38 @@ test('reflection identity is content-addressed: same answers → same object; an
  assert.match(a.id,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
 
-test('storing never replaces an existing object; concurrent first writes resolve through If-None-Match',async()=>{
- const store=new Map(),calls=[];
- const head=async k=>({ok:store.has(k),status:store.has(k)?200:404,headers:new Headers(store.has(k)?{'content-length':String(Buffer.byteLength(store.get(k)))}:{})});
- const put=async(k,body,headers)=>{calls.push(k);if(headers['If-None-Match']==='*'&&store.has(k))return {ok:false,status:412};store.set(k,body);return {ok:true,status:200};};
- const doc={key:'k1',text:'{"a":1}',size:7};
- await storeReflectionDocuments([doc],{put,head});await storeReflectionDocuments([doc],{put,head});
- assert.deepEqual(calls,['k1'],'second store skips the existing object');
- // Race: HEAD saw nothing, another writer stored first; If-None-Match turns the second PUT into 412 and it is accepted after verifying size.
- const raced=new Map([['k2','{"a":1}']]);let first=true;
- await storeReflectionDocuments([{key:'k2',text:'{"a":1}',size:7}],{put:async(k,b,h)=>h['If-None-Match']==='*'&&raced.has(k)?{ok:false,status:412}:{ok:true,status:200},head:async k=>{if(first){first=false;return {ok:false,status:404,headers:new Headers()};}return {ok:true,status:200,headers:new Headers({'content-length':'7'})};}});
- await assert.rejects(storeReflectionDocuments([{key:'k3',text:'x',size:1}],{put:async()=>({ok:false,status:500}),head:async()=>({ok:false,status:404,headers:new Headers()})}),/could not be saved/);
+test('reflection storage confirms exact bytes and never overwrites a saved answer',async()=>{
+ const store=new Map(),calls=[],wait=async()=>{};
+ const get=async k=>store.has(k)?new Response(store.get(k)):new Response(null,{status:404});
+ const put=async(k,body,headers)=>{
+  calls.push(k);
+  assert.equal(headers['If-None-Match'],'*');assert.equal(headers['Content-Length'],String(Buffer.byteLength(body)));
+  if(store.has(k))return new Response(null,{status:412});
+  store.set(k,body);return new Response(null,{status:200});
+ };
+ const text='{"a":"हिंदी"}',doc={key:'k1',text,size:Buffer.byteLength(text)};
+ await storeReflectionDocuments([doc],{put,get,wait});await storeReflectionDocuments([doc],{put,get,wait});
+ assert.deepEqual(calls,['k1']);
+ store.set('k1',text.replace('द','ब'));
+ await assert.rejects(storeReflectionDocuments([doc],{put,get,wait}),/differs from this update/);
+ assert.deepEqual(calls,['k1']);
+ store.clear();
+ await storeReflectionDocuments([doc],{get,wait,put:async(k,body)=>{store.set(k,body);return new Response(null,{status:412});}});
+ store.clear();
+ await storeReflectionDocuments([doc],{get,wait,put:async(k,body)=>{store.set(k,body);throw Error('response lost');}});
+ assert.equal(store.get('k1'),text);
+});
+
+test('a reflection upload signs its exact checksum, content type and create-only condition',async()=>{
+ const config={R2_ENDPOINT_URL:'https://fixture.r2.cloudflarestorage.com',R2_BUCKET_NAME:'onelern-media',R2_ACCESS_KEY_ID:'fixture',R2_SECRET_ACCESS_KEY:'test',R2_PUBLIC_BASE_URL:'https://media.example.test'};
+ const doc={key:'schools/S/teachers/T/closure/synthetic.json',text:'{"answer":"हिंदी"}'};
+ const {createHash}=await import('node:crypto');
+ const ticket=await reflectionUploadTicket(config,doc),url=new URL(ticket.url);
+ assert.equal(ticket.text,doc.text);assert.equal(ticket.headers['Content-MD5'],createHash('md5').update(doc.text).digest('base64'));
+ assert.equal(ticket.headers['If-None-Match'],'*');
+ const signed=url.searchParams.get('X-Amz-SignedHeaders').split(';');
+ for(const name of ['content-type','content-md5','if-none-match'])assert.ok(signed.includes(name),name);
+ assert.equal(url.pathname,'/onelern-media/'+doc.key);assert.equal(url.searchParams.get('X-Amz-Expires'),'900');
 });
 
 test('reflection input is validated: own periods only, non-empty, bounded length, no extra fields',async()=>{

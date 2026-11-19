@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Module from 'node:module';
 import {createRequire} from 'node:module';
-import {uploadEvidenceFile,storageOutcome,retryable,uploadMessage} from '../lib/school-success/storage-upload.js';
+import {uploadEvidenceFile,storageOutcome,retryable,uploadMessage,transferWrittenReflections} from '../lib/school-success/storage-upload.js';
 
 const SIGNED='https://acc.r2.cloudflarestorage.com/onelern-media/schools/Alpha%2520School/teachers/AKANSHA%2520PAL/x.pdf?X-Amz-Signature=deadbeef&X-Amz-Credential=AKSECRET';
 const xml=(status,code,id)=>new Response(`<?xml version="1.0"?><Error><Code>${code}</Code><Message>m</Message>${id?`<RequestId>${id}</RequestId>`:''}</Error>`,{status});
@@ -60,6 +60,21 @@ test('diagnostic parsing keeps only safe codes and references',async()=>{
  assert.equal(retryable({kind:'storage',status:403,code:'SignatureDoesNotMatch'}),false);
  assert.equal(retryable({kind:'storage',status:429,code:''}),true);
  assert.match(uploadMessage({kind:'storage',status:500,code:'',ref:'',file:'unknown-kind'}),/refused the file \(R2 500\)/);
+});
+
+test('reflection transfers send the prepared UTF-8 bytes and yield to commit after one blocked request',async()=>{
+ const headers={'Content-Type':'application/json','Content-MD5':'synthetic','If-None-Match':'*'};
+ const tickets=['पहला','दूसरा','तीसरा'].map((text,i)=>({text,headers,url:'https://storage.example.test/'+i}));
+ const seen=[];
+ await transferWrittenReflections(tickets,async(url,init)=>{
+  seen.push(await init.body.text());
+  assert.deepEqual(init.headers,headers);assert.equal(init.credentials,'omit');assert.equal(init.referrerPolicy,'no-referrer');
+  return new Response(null,{status:seen.length===1?412:seen.length===2?503:200});
+ });
+ assert.deepEqual(seen,tickets.slice(0,2).map(t=>t.text));
+ let attempts=0;
+ await transferWrittenReflections(tickets,async()=>{attempts++;throw TypeError('interrupted');});
+ assert.equal(attempts,1);
 });
 
 // upload-report route: authenticated, strict schema, logs only safe fields.

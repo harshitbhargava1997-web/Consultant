@@ -28,14 +28,12 @@ The native Vision teacher portal keeps its reflection PDFs. Vision's home page g
 
 The append-only evidence RPC (`school_success_append_lesson_evidence`) records file URLs per dated update in `lesson_evidence_history`. It has no text field, so a database column would need a migration. To avoid one:
 
-- **What is sent:** the browser sends `reflections: [{periodId, answers:{achievement,nextStep}}]` with `prepare` (classroom-evidence mode only). Each answer is limited to 4,000 characters, and the period must belong to the lesson.
-- **What the server builds:** a JSON document `{type:'school-success/after-class-reflection@1', submissionId, periodId, updateId, conductedOn, savedAt, prompts, answers}`.
-  - Its file ID is derived deterministically from (update ID, period ID).
-  - The server seals it into the signed plan token and adds it to the submission as a `closure` file at `…/implementation_<period>/closure/<id>.json`.
-- **What happens at commit:** the server writes the document to R2 (an idempotent PUT to the same key). The existing size check and the RPC then record it in that update's dated history.
-  - Retries with the same update ID return "already saved"; there are no duplicates.
-  - Multiple updates create separate dated reflections.
-- **Upload limits:** browsers cannot upload `.json` evidence; the prepare step rejects it.
+The teacher sends the two answers for each class period with the evidence update. Each answer can contain up to 4,000 characters. The server validates the lesson and builds the reflection document. Its storage key depends on the update, period and exact contents. The signed plan holds the hashes that commit checks.
+
+The current form sends the written reflection after the activity and student-work uploads. It uses a short-lived upload URL bound to the exact document checksum and a create-only write. The file picker accepts classroom media and PDFs. A teacher cannot select their own JSON attachment.
+
+At commit the server verifies the stored reflection bytes or writes the prepared document itself. This also supports a form that was open before the update and a browser that lost its connection to storage. Commit checks the selected files and the existing database operation attaches everything to one dated history entry. A repeated submission receives the same receipt. When storage refuses a write, the response includes the operation, status and an available provider reference. The form retains the answers and skips previously uploaded files on the next submission unless the server identifies a missing file.
+
 - **How text is read back:** `/api/school-success/portal` reads these documents server-side, only for records already returned to that caller and only from the configured media base, then validates them.
   - Limits: 400 per read, 64 KB each, an 8-second timeout, and schema validation.
   - Text is attached to the file entry. A failure leaves a labelled link ("Written reflection (open saved text)"); nothing is hidden.

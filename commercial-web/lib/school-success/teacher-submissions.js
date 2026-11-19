@@ -8,7 +8,7 @@ export const submissionSchema = z.object({ id: z.string().uuid(), school: text, 
     ctx.addIssue({ code: 'custom', message: 'Evidence must belong to a class period' }); if (s.files.reduce((n, f) => n + f.size, 0) > 100 * 1024 * 1024)
     ctx.addIssue({ code: 'custom', message: 'Use at most 100 MB of evidence per submission' }); });
 export function scopedSubmission(raw, actor) { const s = raw; return submissionSchema.parse({ ...s, ...(actor.role === 'admin' ? {} : { school: actor.school, teacher: actor.name }) }); }
-const mediaTypes = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', json: 'application/json' }; // json: server-written reflections only (evidence route rejects browser JSON)
+const mediaTypes = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', json: 'application/json' }; // JSON is reserved for server-built reflections
 export function evidenceType(name) { const ext = name.split('.').pop()?.toLowerCase() || ''; const type = mediaTypes[ext]; if (!type)
     throw Error('Use PDF, photo, video or audio evidence files'); return { ext, type }; }
 export function evidencePlan(s) { return s.files.map(f => { const { ext, type } = evidenceType(f.name); return { ...f, type, key: `schools/${encodeURIComponent(s.school)}/teachers/${encodeURIComponent(s.teacher)}/${s.date}/submission_${s.id}/implementation_${f.periodId}/${f.category}/${f.id}.${ext}` }; }); }

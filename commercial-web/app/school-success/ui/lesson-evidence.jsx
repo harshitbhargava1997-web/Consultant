@@ -5,7 +5,8 @@ import {closurePrompts} from '@/lib/closure-reflection';
 import {parseClosureText,isReflectionTextUrl} from '@/lib/school-success/reflection-text';
 import {isGeneratedPreparationPdf} from '@/lib/school-success/lesson-records';
 import {successFetch} from '@/lib/school-success/client';
-import { useEffect, useState } from 'react';
+import {transferWrittenReflections} from '@/lib/school-success/storage-upload';
+import { useEffect, useRef, useState } from 'react';
 import { Upload, Trash2, FileText } from 'lucide-react';
 import { evidenceCategories, submissionSchema } from '@/lib/school-success/teacher-submissions';
 import { lessonStageLabel } from '@/lib/school-success/lesson-workflow';
@@ -37,8 +38,16 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
     const [token, setToken] = useState(initialToken), [date, setDate] = useState(today()), [matches, setMatches] = useState(null);
     const [lesson, setLesson] = useState(null), [pending, setPending] = useState({}), [category, setCategory] = useState({}), [conductedOn, setConductedOn] = useState(''), [updateId, setUpdateId] = useState(() => crypto.randomUUID()), [busy, setBusy] = useState(''), [error, setError] = useState(''), [receipt, setReceipt] = useState(null);
     const [reflections, setReflections] = useState({});
-    async function request(body) { const r = await successFetch('/api/school-success/evidence', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(body) }); const d = await r.json(); if (!r.ok)
-        throw Error(d.error || 'Could not update this lesson'); return d; }
+    const uploadedFiles = useRef(new Set());
+    async function request(body) {
+        const r = await successFetch('/api/school-success/evidence', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(body) });
+        const result = await r.json();
+        if (!r.ok) {
+            if (result.fileId) uploadedFiles.current.delete(result.fileId);
+            throw Error(result.error || 'Could not update this lesson');
+        }
+        return result;
+    }
     async function find(e) { e.preventDefault(); setError(''); setBusy('Finding saved lessons'); setMatches(null); setLesson(null); setReceipt(null); setToken(''); try {
         const d = await request({ action: 'findLessons', school, teacher, date });
         setMatches(d.lessons);
@@ -55,6 +64,7 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
         const d = await request({ action: 'resume', resume: token });
         setLesson(d);
         setConductedOn(d.conductedOn || (d.submission.date <= today() ? d.submission.date : ''));
+        uploadedFiles.current.clear();
         setPending({}); setReflections({});
         setUpdateId(crypto.randomUUID());
     }
@@ -76,26 +86,36 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
         if (!all.length && !written.length)
             throw Error('Add a classroom evidence file or an after-class reflection before submitting.');
         const submission = submissionSchema.parse({ ...lesson.submission, files: all.map(f => ({ id: f.id, periodId:f.periodId, category: f.category, name: f.file.name, size: f.file.size })) });
-        const prepared = await request({ action: 'prepare', mode: 'evidence', resume: token, submission, version: lesson.version, updateId, conductedOn, reflections: written });
+        const prepared = await request({ action: 'prepare', mode: 'evidence', resume: token, submission, version: lesson.version, updateId, conductedOn, reflections: written, uploadWrittenReflections: true });
         let result = prepared;
         if (!prepared.saved) {
             for (let i = 0; i < prepared.files.length; i++) {
                 const f = prepared.files[i], actual = all.find(x => x.id === f.id);
                 if (!actual)
                     throw Error('A selected file is missing. Choose it again.');
+                if (uploadedFiles.current.has(f.id)) continue;
                 setBusy(`Uploading classroom evidence ${i + 1} of ${prepared.files.length}`);
                 const r = await successFetch('/api/school-success/evidence/upload', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/octet-stream', 'X-Evidence-Token': f.token }, body: actual.file });
                 if (!r.ok) {
                     const d = await r.json();
                     throw Error(`File ${i + 1} of ${prepared.files.length}: ${d.error || 'Upload failed'}`);
                 }
+                uploadedFiles.current.add(f.id);
             }
-            setBusy('Saving classroom update');
+            if (prepared.reflectionUploads?.length) {
+                setBusy('Saving written reflection');
+                await transferWrittenReflections(prepared.reflectionUploads);
+            }
+            setBusy('Attaching evidence to the lesson');
             result = await request({ action: 'commit', token: prepared.token, submission, reflections: written });
         }
         setReceipt(result);
+        // A receipt closes this draft even if refreshing the saved lesson fails. Reopening starts a new update.
+        setLesson(null);
+        setPending({}); setReflections({}); uploadedFiles.current.clear();
         await load(true);
-        await onSaved();
+        try { await onSaved(); }
+        catch { setError('Your evidence was saved. Reopen the lesson to refresh the displayed record.'); }
     }
     catch (e) {
         setError(e.message + ' Your reflection and files are still here; submit again to retry.');
