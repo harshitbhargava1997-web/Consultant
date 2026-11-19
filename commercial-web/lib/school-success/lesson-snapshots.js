@@ -102,5 +102,10 @@ export function reportAccessSession({mode,origin,mediaBase,newId=()=>crypto.rand
    if (!index.has(key)) { index.set(key, evidence.length); evidence.push(key); }
    return evidenceLink(origin, mode, id, index.get(key), secret);
   },
+  // Parent PDFs can link only to a file already registered by the final child render.
+  existingFileLink(url) {
+   const n = index.get(evidenceKeyFromUrl(url, mediaBase));
+   return n === undefined ? null : evidenceLink(origin,mode,id,n,secret);
+  },
   url:()=>reportLink(origin,mode,id,secret)};
 }

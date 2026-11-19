@@ -48,7 +48,6 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
         banner('School overview', school, `${from} to ${to}  |  ${group.length} teachers  |  ${group[0].days} working days`);
         const holidays = [...new Set(group.flatMap(p => p.holidays))].filter(d => d >= from && d <= to);
         paragraph('Excluded holiday dates: ' + (holidays.join(', ') || 'None') + '.');
-        paragraph('Durations are shown in hours and minutes, rounded to the nearest minute.');
         for (const i of [0, 1, 2, 3]) {
             if (!includedMetric(i, settings))
                 continue;
@@ -84,14 +83,13 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                 heading('Lesson preparation - consolidated report');
                 table(['Activity', 'Sessions', 'Preparation time'], [['Lesson preparation', p.metrics[0].logs.length, duration(p.metrics[0].actual)]]);
             }
+            const groups = options.lessonDocs?.(p) || [];
             if (options.lessonDocs) {
-                const groups = options.lessonDocs(p) || [];
                 heading('Lesson documentation');
                 if (!groups.length) paragraph('No lesson plans or classroom evidence were recorded in this review period.');
                 else {
                     const cls = g => [g.grade, g.section && g.section !== 'Not Applicable' ? 'Section\u00a0' + g.section : ''].filter(Boolean).join('\n') || '—', period = from === to ? from : from + ' to ' + to;
-                    const access = options.lessonDocsAccess === 'link' ? 'Anyone with the link can open the report and its evidence without signing in. The school can revoke the link.' : options.lessonDocsAccess === 'signin' ? 'Opening a report or any of its files requires school sign-in.' : 'Sign-in is required.';
-                    paragraph('Lessons are grouped by class, section and subject. Each link opens the complete lesson report for this teacher and period, saved when this report was created: lesson plans, classroom photos, student writing, attachments, recordings, dated reflections and feedback. ' + access);
+                    paragraph('Lessons are grouped by class, section and subject. Each link opens the complete lesson report for this teacher and period, saved when this report was created: lesson plans, classroom photos, student writing, attachments, recordings, dated reflections and feedback.');
                     table(['Class / section', 'Subject', 'Reporting period', 'Lessons documented', 'Lesson documentation'], groups.map(g => [cls(g), g.subject || '—', period, String(g.lessons), 'Open lesson documentation\u00a0↗'].map(String)), groups.map(g => g.url), 4, { 0: { cellWidth: 32 }, 1: { cellWidth: 29 }, 2: { cellWidth: 29 }, 3: { cellWidth: 30, halign: 'center' }, 4: { cellWidth: 58 } });
                 }
             }
@@ -108,16 +106,22 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                     heading('Teacher evidence');
                     table(['Category', 'Files', 'Period target', 'Status'], evidenceKpis.map(i => { const e = p.evidence[i]; return [e.label, e.actual, e.target, e.status]; }));
                 }
-                // With consolidated report links, files open only through those links (and their access rules).
                 const gated = options.lessonDocsAccess === 'link' || options.lessonDocsAccess === 'signin';
-                paragraph(gated ? 'File counts indicate submission coverage only. Files are listed here without links; open them from the lesson documentation links, which apply the access option chosen for this report.' : 'File counts indicate submission coverage only. Open the linked files below to review teaching practice.');
+                const classKey = f => JSON.stringify([f.grade, f.section, f.subject].map(v => String(v || '').trim()));
+                const byClass = new Map(groups.map(group => [classKey(group), group]));
+                function evidenceUrl(file) {
+                    if (!gated) return file.url;
+                    const url = byClass.get(classKey(file))?.fileLink?.(file.url);
+                    if (!url) throw Error('The file for ' + [p.name, file.grade, file.section, file.subject, file.date].filter(Boolean).join(' · ') + ' could not be linked to its lesson. Refresh the selected period and export again.');
+                    return url;
+                }
                 const fileOrder=['Lesson preparation PDFs','Audio recordings','Activity files','Writing samples','Phonics evidence'];
                 const order=label=>{const i=fileOrder.indexOf(label);return i<0?fileOrder.length:i;};
                 for (const e of reportEvidenceGroups(p).sort((a,b)=>order(a.label)-order(b.label)))
                     if (e.files.length && !LESSON_DOCUMENTATION_ONLY.includes(e.label)) {
                         heading(e.label);
-                        if (gated) table(['File', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => ['File ' + (i + 1), f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]));
-                        else table(['Open evidence', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => ['Open file ' + (i + 1), f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]), e.files.map(f => f.url));
+                        const action = gated && e.label === 'Activity files' ? 'Open activity' : gated && e.label === 'Writing samples' ? 'Open writing sample' : 'Open file';
+                        table(['Open evidence', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => [action + ' ' + (i + 1), f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]), e.files.map(evidenceUrl));
                     }
             }
             if (settings.sections.observations) {

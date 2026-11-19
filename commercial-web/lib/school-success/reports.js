@@ -30,14 +30,12 @@ export function buildProfiles(entries, roster, from, to, settings, calendars = {
         const byColumn = new Map(), closureMap = new Map(), remedialMap = new Map();
         for (const r of submissions)
             for (const f of r.files || []) {
-                if(isRemedialFile(f)){remedialMap.set(f.url,{...f,date:r.date,grade:r.grade,subject:r.subject,topic:r.topic});continue;}
-                if(isClosureFile(f)){closureMap.set(f.url,{...f,date:r.date,grade:r.grade,subject:r.subject,topic:r.topic});continue;}
+                const evidenceFile = { ...f, date:r.date, grade:r.grade, section:r.section || '', subject:r.subject, topic:r.topic };
+                if(isRemedialFile(f)){remedialMap.set(f.url,evidenceFile);continue;}
+                if(isClosureFile(f)){closureMap.set(f.url,evidenceFile);continue;}
                 const column = f.column || String(f.key).split(':')[0];
-                if (!byColumn.has(column))
-                    byColumn.set(column, new Map());
-                const url = f.url || '';
-                if (url)
-                    byColumn.get(column).set(url, { ...f, date: r.date, grade: r.grade, subject: r.subject, topic: r.topic, column });
+                if (!byColumn.has(column)) byColumn.set(column, new Map());
+                if (f.url) byColumn.get(column).set(f.url, { ...evidenceFile, column });
             }
         const unique = (cols) => [...new Map(cols.flatMap(c => [...(byColumn.get(c) || new Map()).entries()])).values()];
         const groups = [unique(['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']), unique(['Writing_Sample_Link']), [...unique(['Lesson_Plan_Picture']), ...unique(['Voice_Note_Link'])], unique(['Phonics_Evidence_Link']), unique(['Portfolio_Evidence_Link'])];

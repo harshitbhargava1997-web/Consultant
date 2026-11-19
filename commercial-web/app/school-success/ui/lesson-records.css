@@ -81,3 +81,11 @@
 .lesson-records .lr-reflection>b{display:block;font-size:12px;color:#127369;margin-bottom:6px}
 .lesson-records .lr-reflection span{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-top:8px}
 .lesson-records .lr-reflection p{white-space:pre-wrap;margin:4px 0 0;color:#2b3d45;font-size:13px;overflow-wrap:anywhere}
+
+.success-app .lesson-review-dialog { border: 1px solid var(--line); color: var(--ink); width: min(680px, 94vw); max-height: 90dvh; }
+.success-app .lesson-review-dialog::backdrop { background: #1c302c80; }
+.success-app .lesson-review-dialog section { margin: 1rem 0; }
+.success-app .review-note, .success-app .review-plan-field p, .success-app .lr-review p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.success-app .review-criterion { margin: 1rem 0; padding: 1rem; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.success-app .review-criterion legend { padding: 0 .4rem; font-weight: 700; }
+.success-app .review-list-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .75rem; align-items: center; }

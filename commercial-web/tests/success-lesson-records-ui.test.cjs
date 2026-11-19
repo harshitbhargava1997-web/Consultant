@@ -54,6 +54,10 @@ test('a lesson with items outside the period says so and offers the complete his
  const html=renderToStaticMarkup(React.createElement(ui.LessonCard,{lesson,number:1,showTeacher:false,busy:false,onDownload(){},onDownloadHistory(){},defaultOpen:true}));
  assert.match(html,/Outside this reporting period: 2 files for this lesson are not shown here/);
  assert.match(html,/More outside period/);assert.match(html,/Lesson PDF · this period/);assert.match(html,/Complete history PDF/);
+ const mixed=renderToStaticMarkup(React.createElement(ui.LessonCard,{lesson:{...lesson,reviewOutsidePeriod:true,feedback:{text:'Planning feedback for this period.'}},number:1,defaultOpen:true,onReview(){}}));
+ assert.match(mixed,/2 files and additional review feedback/);
+ assert.match(mixed,/Planning feedback for this period/);
+ assert.match(mixed,/Review lesson/);
 });
 
 // Destination of usage-PDF links, rendered with the real LessonRecords component.

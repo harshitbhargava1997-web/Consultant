@@ -6,6 +6,7 @@
 // consultant observations (which carry no lesson identity) to lessons.
 import {fileCategory,lessonIdentity} from './school-portfolio.js';
 import {teacherKey} from './reports.js';
+import {feedbackText} from './lesson-reviews.js';
 import {chronologicalRows} from '../report-sequence.js';
 import {isReflectionTextUrl} from './reflection-text.js';
 
@@ -87,7 +88,7 @@ const additionalLabels={remedial:'Remedial plan / support',phonics:'Phonics / li
 //  'period' (default) — evidence files and the Academic Review appear only when they were
 //     submitted/recorded within the selected dates, matching the period-scoped School 360° and
 //     Teacher 360° counts. The lesson plan text is the lesson itself and is always shown.
-//  'all' — complete lesson history: every stored file and the current review, whatever the date.
+//  'all' — complete lesson history: every stored file and all feedback, whatever the date.
 // Labels are numbered on the complete history so "Classroom activity 3" is the same file in both.
 export const REPORT_SCOPES=['period','all'];
 export const istDay=iso=>{const t=new Date(iso).getTime();return Number.isFinite(t)?new Date(t+330*60000).toISOString().slice(0,10):'';};
@@ -123,8 +124,9 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
  // Period view: the taught date comes only from in-period activity, so later uploads do not leak in.
  const conducted=rows.filter(r=>scope==='all'||inRange(r.date)).map(r=>clean(r.conductedOn)).filter(Boolean).sort().at(-1)||'';
  const prepared=utcStamp(rows.map(r=>r.preparationSavedAt).find(Boolean)),submitted=utcStamp(rows.map(r=>r.lessonSubmittedAt).find(Boolean));
- const review=rows.map(r=>clean(r.review)).find(Boolean)||'',reviewedAt=utcStamp(clean(rows.map(r=>r.reviewedAt||r.version).find(Boolean)));
- const reviewInScope=Boolean(review)&&(scope==='all'||inRange(istDay(reviewedAt)));
+ const legacy=rows.find(r=>clean(r.review));
+ const history=first.reviewHistory || (legacy?[{text:clean(legacy.review),date:legacy.reviewedAt||legacy.version||''}]:[]);
+ const visibleReviews=history.filter(r=>scope==='all'||inRange(istDay(utcStamp(r.date))));
 
  const firstDate=rows.map(r=>r.date).filter(Boolean).sort()[0]||'';
  return {
@@ -136,8 +138,8 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
   scope,period:{from,to},plan,
   ...Object.fromEntries(Object.entries(sections).map(([key,list])=>[key,scoped(list)])),
   outsidePeriodFiles:scope==='all'?0:all.filter(f=>!keep(f)).length,
-  reviewOutsidePeriod:Boolean(review)&&!reviewInScope,
-  feedback:reviewInScope?{label:'Academic Review',text:review,date:reviewedAt}:null
+  reviewOutsidePeriod:visibleReviews.length<history.length,
+  feedback:visibleReviews.length?{label:'Academic Review',text:feedbackText(visibleReviews),date:utcStamp(visibleReviews.at(-1).date)}:null
  };
 }
 
