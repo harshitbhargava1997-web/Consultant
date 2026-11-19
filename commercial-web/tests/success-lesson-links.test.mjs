@@ -6,9 +6,12 @@ import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {lessonDocumentationUrl,parseLessonDocumentationLink,safeReturnPath} from '../lib/school-success/lesson-links.js';
 import {mapLive} from '../lib/school-success/live-mapping.js';
-import {buildLessonRecords,lessonDocumentationGroups,filterLessons} from '../lib/school-success/lesson-records.js';
+import {buildLessonRecords,lessonDocumentationGroups,filterLessons,lessonEvidenceFiles} from '../lib/school-success/lesson-records.js';
 import {buildProfiles,defaultReportSettings} from '../lib/school-success/reports.js';
 import {createReportPdf} from '../lib/school-success/report-pdf.js';
+import {groupLessons,reportAccessSession} from '../lib/school-success/lesson-snapshots.js';
+import {createLessonDocumentationPdf} from '../lib/school-success/lesson-report-pdf.js';
+import {reportEvidenceGroups} from '../lib/report-sequence.js';
 import {raw,base,from,to} from './fixtures/lesson-records.mjs';
 
 const origin='https://vision.example.test';
@@ -70,25 +73,48 @@ test('combined and per-school PDFs give every teacher only their own documentati
  assert.doesNotMatch(pdfText(createReportPdf(profiles.slice(0,1),from,to,settings)),/Open lesson\s+documentation/);
 });
 
-const ACCESS={link:i=>`https://vision.example.test/school-success/shared/0b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f6${i}#${'A'.repeat(43)}`,signin:i=>`https://vision.example.test/school-success/secure/0b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f6${i}`};
-const accessOption=(base,mode)=>({lessonDocs:p=>base.lessonDocs(p).map((g,i)=>({...g,url:ACCESS[mode](i)})),lessonDocsAccess:mode});
+function accessOption(entries,mode,renderChild=false){
+ const lessons=buildLessonRecords(entries,from,to),groups=lessonDocumentationGroups(lessons);
+ const docs=groups.map(group=>{
+  const session=reportAccessSession({mode,origin,mediaBase:base,newSecret:()=>'A'.repeat(43)});
+  const subset=groupLessons(lessons,group);let child=[];
+  if(renderChild)child=uris(createLessonDocumentationPdf({kind:'teacher',lessons:subset,from,to,linkFor:session.linkFor}));
+  else for(const file of subset.flatMap(lessonEvidenceFiles))session.linkFor(file.url);
+  return {...group,url:session.url(),fileLink:session.existingFileLink,child};
+ });
+ return {lessonDocs:p=>docs.filter(g=>g.teacherKey===p.key),lessonDocsAccess:mode};
+}
 
-test('parent usage report: one "Open lesson documentation" link per group in the chosen access mode, and no direct file links',async()=>{
- const entries=await entriesP,settings=structuredClone(defaultReportSettings);settings.sections.evidence=true;
- const profiles=buildProfiles(entries,raw().roster,from,to,settings).filter(p=>p.school==='Alpha School'&&p.name==='Asha');
- const base=docsOption(entries),groups=base.lessonDocs(profiles[0]).length;
+test('the parent links to the same activity and writing files as each child, in both access modes',async()=>{
+ const entries=await entriesP,settings=structuredClone(defaultReportSettings);
+ // Same teacher, grade and subject in another section. Reused photo URL must use the section actually printed.
+ const example=entries.find(r=>r.kind==='submission'&&r.recordId==='101'&&r.files.some(f=>f.url.includes('/writing/')));
+ const other={...example,id:'801',recordId:'801',periodId:'',section:'B',topic:'Another section',date:to};
+ const all=[...entries,other],profiles=buildProfiles(all,raw().roster,from,to,settings);
  for(const mode of ['link','signin']){
-  const doc=createReportPdf(profiles,from,to,settings,undefined,accessOption(base,mode)),text=pdfText(doc).replace(/\s+/g,' '),links=uris(doc);
-  assert.deepEqual(links.sort(),[...Array(groups).keys()].map(ACCESS[mode]).sort(),mode+': exactly one access link per group, nothing else');
-  assert.match(text,/Each link opens the complete lesson report for this teacher and period, saved when this report was created: lesson plans, classroom photos, student writing, attachments, recordings, dated reflections and feedback\./);
-  assert.match(text,mode==='link'?/Anyone with the link can open the report and its evidence without signing in\. The school can revoke the link\./:/Opening a report or any of its files requires school sign-in\./);
-  assert.match(text,/Open lesson\s+documentation/);assert.doesNotMatch(text,/Shareable copy|Full evidence/);
-  assert.match(text,/Files are listed here without links; open them from the lesson documentation links/);
+  const options=accessOption(all,mode,true);
+  for(const list of [[profiles[0]],profiles,...['Alpha School','Beta School'].map(school=>profiles.filter(p=>p.school===school))]){
+   const doc=createReportPdf(list,from,to,settings,undefined,options),links=uris(doc),text=pdfText(doc).replace(/\s+/g,' ');
+   const expected=[];
+   for(const profile of list){
+    const groups=options.lessonDocs(profile);expected.push(...groups.map(g=>g.url));
+    for(const group of reportEvidenceGroups(profile).filter(g=>!['Lesson preparation PDFs','Audio recordings','After-class reflections'].includes(g.label))){
+     for(const file of group.files){
+      const child=groups.find(g=>g.grade===file.grade&&g.section===file.section&&g.subject===file.subject);
+      const target=child.fileLink(file.url);
+      assert.ok(child.child.includes(target),'the published child links to this very file');
+      assert.match(target,mode==='link'?/\/shared\/.+\/file\/\d+#[A-Za-z0-9_-]+$/:/\/secure\/.+\/file\/\d+$/);expected.push(target);
+     }
+    }
+   }
+   assert.deepEqual(links.sort(),expected.sort());
+   assert.doesNotMatch(text,/Durations are shown in hours and minutes|Anyone with the link can open the report|The school can revoke the link|File counts indicate submission coverage only|Files are listed here without links/);
+   assert.doesNotMatch(links.join(' '),/media\.example|X-Amz-/);
+   if(list===profiles){assert.match(text,/Open activity 1/);assert.match(text,/Open writing sample 1/);}
+  }
  }
- // Without consolidated report links (e.g. the KPI flow's internal use), evidence links are unchanged.
- assert.ok(uris(createReportPdf(profiles,from,to,settings,undefined,base)).some(u=>u.startsWith(mediaBase)));
+ assert.throws(()=>createReportPdf(profiles,from,to,settings,undefined,{lessonDocs:()=>[],lessonDocsAccess:'link'}),/could not be linked/);
 });
-const mediaBase=base.replace(/\/$/,'');
 
 test('individual, combined and per-school parents include the selected observations in both access modes', async () => {
  const settings = structuredClone(defaultReportSettings);
@@ -104,7 +130,7 @@ test('individual, combined and per-school parents include the selected observati
   ...['Alpha School','Beta School'].map(school => profiles.filter(p => p.school === school))];
  for (const list of reports) {
   for (const mode of ['link', 'signin']) {
-   const options = accessOption(docsOption(entries), mode);
+   const options = accessOption(entries, mode);
    const text = pdfText(createReportPdf(list, from, to, settings, undefined, options)).replace(/\s+/g, ' ');
    for (const phrase of [alpha.improvements, alpha.actions, alpha.rubrics.Questioning.comment]) assert.ok(text.includes(phrase), mode + ': ' + phrase);
    for (const observation of [alpha, beta]) {
@@ -116,7 +142,7 @@ test('individual, combined and per-school parents include the selected observati
  }
  settings.sections.observations = false;
  for (const mode of ['link', 'signin']) {
-  const text = pdfText(createReportPdf(profiles, from, to, settings, undefined, accessOption(docsOption(entries), mode)));
+  const text = pdfText(createReportPdf(profiles, from, to, settings, undefined, accessOption(entries, mode)));
   assert.doesNotMatch(text, /Invite a second answer|Beta observation only|Modelled six words/);
  }
 });

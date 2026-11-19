@@ -1,4 +1,7 @@
 import { actor, assertSchool } from './server';
+import {hasLessonRecord} from './live-mapping.js';
+import {readRubricRows,appendRubric} from './lesson-review-store.js';
+import {lessonRecordId} from './lesson-reviews.js';
 import { service, checked } from './database';
 import { prepareUsageImport } from './usage-import.js';
 import {readScope,recordQuery,readAllPages} from './read-query.js';
@@ -12,6 +15,19 @@ async function request(path, method = 'GET', body, extra = {}, metadata=false) {
     const total=r.headers.get('content-range')?.match(/\/(\d+)$/)?.[1];return metadata?{rows:data,count:total===undefined?null:Number(total)}:data; }
 async function all(table,order,scope={}){return readAllPages(async(offset,metadata)=>{const result=await request('/rest/v1/'+table+'?'+new URLSearchParams({select:'*',order,...scope,limit:'1000',offset:String(offset)}),'GET',undefined,{},metadata);return metadata?result:{rows:result,count:null};});}
 
+// Resolve the stored lesson and its school before a reviewer can open it or write feedback.
+export async function reviewerLesson(id,a) {
+    if (a.role !== 'admin') throw Error('403:School Success staff access required');
+    const recordId = lessonRecordId.parse(id);
+    const query = new URLSearchParams({...readScope(a,true),id:'eq.'+recordId,select:'*'});
+    const [row] = await request('/rest/v1/teacher_records?'+query);
+    if (!row || !hasLessonRecord(row)) throw Error('403:Lesson unavailable for this account');
+    assertSchool(a,row.Center || row.Institution);
+    return row;
+}
+export async function saveLessonRubric(row,a,input) {
+    return appendRubric({recordId:String(row.id),school:row.Center || row.Institution,reviewer:a.email,requestId:input.requestId,review:input.review},request);
+}
 // Re-read just the selected lessons when issuing file access. Older clients omit the row IDs.
 export async function reportLessonRows({school, from, to}, recordIds) {
     const query = recordQuery(from, to, {role: 'admin', allowedSchools: [school]});
@@ -50,7 +66,8 @@ async function rawGateway(req) {
              teacher?{contacts:{}}:storage('school_crm_data.json'),teacher?[]:storage('school_call_logs_store.json'),
              teacher?[]:all('portal_school_plans','school',scope),teacher?[]:all('portal_tickets','created_at.desc',scope)
             ]);
-            return json({ records, roster, contacts, calls, visits, reviews, legacyContacts, legacyCalls, calendars, tickets });
+            const rubricRows=teacher?[]:await readRubricRows(records.filter(hasLessonRecord).map(r=>r.id),scope,all);
+            return json({ records, roster, contacts, calls, visits, reviews:reviews.concat(rubricRows), legacyContacts, legacyCalls, calendars, tickets });
         }
         if (b.action === 'evidenceStatus') {
             if (!/^[a-f0-9-]{36}$/i.test(b.id) || !b.actor || !b.school || !b.teacher)
@@ -80,7 +97,14 @@ async function rawGateway(req) {
         if (b.action === 'readLessonReviews') {
             if (!Array.isArray(b.ids) || !b.ids.length || b.ids.length > 10 || b.ids.some(id => !/^\d+$/.test(String(id))))
                 throw Error('Invalid lesson review lookup');
-            return json({ rows: await request('/rest/v1/portal_evidence_reviews?record_id=in.(' + b.ids.join(',') + ')&select=record_id,feedback,updated_at') });
+            const a=await actor();
+            if (a.role!=='admin') throw Error('School Success staff access required');
+            const scope=readScope(a);
+            const [legacy,rubrics]=await Promise.all([
+                request('/rest/v1/portal_evidence_reviews?'+new URLSearchParams({...scope,record_id:'in.('+b.ids.join(',')+')',select:'record_id,school,feedback,updated_at'})),
+                readRubricRows(b.ids,scope,all)
+            ]);
+            return json({rows:[...legacy,...rubrics]});
         }
         if (b.action === 'savePreparation') {
             if (!Array.isArray(b.rows) || !b.rows.length || b.rows.length > 10 || !b.actor)

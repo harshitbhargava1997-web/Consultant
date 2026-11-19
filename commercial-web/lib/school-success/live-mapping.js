@@ -1,4 +1,5 @@
 import { normalizeUsage, usageIdentity, canonical } from './domain.js';
+import {feedbackText} from './lesson-reviews.js';
 const string = (x) => x == null ? '' : String(x).trim();
 export function evidenceUrl(value, base) { const s = string(value); if (!s || ['nan', 'none', 'null'].includes(s.toLowerCase()))
     return ''; if (/^https?:\/\//i.test(s)) {
@@ -11,6 +12,8 @@ export function evidenceUrl(value, base) { const s = string(value); if (!s || ['
 } if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith('//'))
     return ''; return base.replace(/\/$/, '') + '/' + s.replace(/^\//, '').split('/').map(encodeURIComponent).join('/'); }
 async function hash(s) { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map(x => x.toString(16).padStart(2, '0')).join(''); }
+const evidenceFields = ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Student_Assessment_Link', 'Event_Pictures_Link'];
+export const hasLessonRecord = r => r.Type === 'Classroom Reflection' || evidenceFields.some(k=>string(r[k]) && !['none','nan','null'].includes(string(r[k]).toLowerCase()));
 export async function mapLive(raw, publicBase) {
     const entries = [], usage = new Map(), contacts = new Map(), calls = new Map();
     let duplicates = 0, otherActivities = 0;
@@ -19,7 +22,13 @@ export async function mapLive(raw, publicBase) {
     for (const r of roster)
         if (r.school)
             schools.add(r.school);
-    const evidenceFields = ['Voice_Note_Link', 'Lesson_Plan_Picture', 'Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3', 'Writing_Sample_Link', 'Phonics_Evidence_Link', 'Portfolio_Evidence_Link', 'Student_Assessment_Link', 'Event_Pictures_Link'];
+
+    const reviewsByRecord = new Map();
+    for (const review of raw.reviews || []) {
+        const id = String(review.record_id);
+        if (!reviewsByRecord.has(id)) reviewsByRecord.set(id, []);
+        reviewsByRecord.get(id).push(review);
+    }
     for (const r of raw.records || []) {
         const school = string(r.Center) || string(r.Institution), teacher = string(r.FullName) || [r.FirstName, r.LastName].filter(Boolean).join(' ').trim();
         if (school)
@@ -42,8 +51,12 @@ export async function mapLive(raw, publicBase) {
         }
         const files = evidenceFields.flatMap(k => string(r[k]).split(',').flatMap((value, i) => { const url = evidenceUrl(value, publicBase); return url ? [{ key: k + ':' + r.id + ':' + i, column: k, url, name: k.replaceAll('_', ' '), category: k.replaceAll('_', ' ') }] : []; }));
         if (files.length || r.Type === 'Classroom Reflection') {
-            const review = (raw.reviews || []).find((v) => String(v.record_id) === String(r.id));
-            const item = { id: String(r.id), recordId: String(r.id), kind: 'submission', school, teacher, date, grade: string(r.Grade), section: string(r.Section), subject: string(r.Subject), topic: string(r.Book) || 'Classroom practice', stage: r.lesson_stage || '', plannedDate: r.planned_lesson_on || '', conductedOn: r.conducted_on || '', evidenceAt: r.evidence_submitted_at || '', reflection: string(r.lesson_reflection), materials: string(r.materials_notes), files, review: review?.feedback || '', version: review?.updated_at || null, uploadedBy: r.Uploaded_By, submissionId: r.submission_id, periodId: string(r.lesson_period_id), preparationSavedAt: string(r.preparation_saved_at), lessonSubmittedAt: string(r.submitted_at || r.created_at), reviewedAt: review?.updated_at || '' };
+            const reviews = (reviewsByRecord.get(String(r.id)) || []).filter(v => !v.school || v.school === school);
+            const reviewHistory = reviews.filter(v=>string(v.feedback)).map(v=>({text:v.feedback,date:v.updated_at || '',id:v.review_id || 'legacy'}))
+                .sort((a,b)=>(Date.parse(a.date)||0)-(Date.parse(b.date)||0)||a.id.localeCompare(b.id));
+            const reviewedAt = reviewHistory.at(-1)?.date || '';
+            const review = reviews.find(v=>!v.review_id);
+            const item = { id: String(r.id), recordId: String(r.id), kind: 'submission', school, teacher, date, grade: string(r.Grade), section: string(r.Section), subject: string(r.Subject), topic: string(r.Book) || 'Classroom practice', stage: r.lesson_stage || '', plannedDate: r.planned_lesson_on || '', conductedOn: r.conducted_on || '', evidenceAt: r.evidence_submitted_at || '', reflection: string(r.lesson_reflection), materials: string(r.materials_notes), files, review: feedbackText(reviewHistory), reviewHistory, version: review?.updated_at || null, uploadedBy: r.Uploaded_By, submissionId: r.submission_id, periodId: string(r.lesson_period_id), preparationSavedAt: string(r.preparation_saved_at), lessonSubmittedAt: string(r.submitted_at || r.created_at), reviewedAt };
             if (r.lesson_stage && r.planned_lesson_on) {
                 const events = Array.isArray(r.lesson_evidence_history) ? r.lesson_evidence_history : [];
                 const eventUrls = new Set(events.flatMap((e) => Object.values(e.files || {}).flatMap(v => string(v).split(','))));

@@ -233,7 +233,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   items.forEach(([label],i)=>{const x=xs[i];drawLine(label.toUpperCase(),x,state.y+3,6.8,{bold:true,color:palette.muted,spacing:0.3});lines[i].forEach((line,k)=>drawLine(line,x,state.y+3+lineHeight(6.8)+0.6+k*lineHeight(8.8),8.8,{bold:true,color:palette.navy}));if(i&&!state.dry){doc.setDrawColor(palette.hair);doc.setLineWidth(0.2);doc.line(x-3,state.y+3,x-3,state.y+h-3);}});
   state.y+=h+3;
   if(scope==='period'&&(lesson.outsidePeriodFiles||lesson.reviewOutsidePeriod)){
-   const parts=[lesson.outsidePeriodFiles?plural(lesson.outsidePeriodFiles,'file'):'',lesson.reviewOutsidePeriod?'the Academic Review':''].filter(Boolean).join(' and ');
+   const parts=[lesson.outsidePeriodFiles?plural(lesson.outsidePeriodFiles,'file'):'',lesson.reviewOutsidePeriod?(lesson.feedback?'additional review feedback':'the Academic Review'):''].filter(Boolean).join(' and ');
    paragraph(`Outside this reporting period: ${parts} for this lesson ${lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'was':'were'} recorded outside ${periodText(from,to)} and ${lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'is':'are'} not shown. The complete lesson history PDF includes ${lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'it':'them'}.`,{size:8.2,color:palette.amber,after:2});
   }
  }

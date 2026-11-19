@@ -22,7 +22,7 @@ test('usage PDF keeps activity lists chronological; preparation PDFs and audio m
  const base={kind:'submission',school:'School',teacher:'Teacher One',grade:'LKG',subject:'English',topic:'Blending'};
  const text=render(structuredClone(defaultReportSettings),false,[{...base,date:'2026-10-13',files:[{column:'Voice_Note_Link',url:'https://example.com/later.wav'},{column:'Video_Evidence_1',url:'https://example.com/later.png'}]},{...base,date:'2026-10-12',files:[{column:'Lesson_Plan_Picture',url:'https://example.com/preparation.pdf'},{column:'Voice_Note_Link',url:'https://example.com/earlier.wav'},{column:'Video_Evidence_1',url:'https://example.com/earlier.png'}]}]);
  assert.doesNotMatch(text,/Lesson preparation PDFs|Audio recordings|After-class reflections/);assert.doesNotMatch(text,/Grade:|Subject:|Preparation date|Lesson preparation sessions/);
- const activity=text.slice(text.indexOf('Activity files',text.indexOf('File counts indicate')));assert(activity.indexOf('2026-10-12')<activity.indexOf('2026-10-13'));assert.match(text,/Activity\s+Sessions\s+Preparation time/);
+ assert.match(text,/Open file 1\s+2026-10-12[\s\S]*?Open file 2\s+2026-10-13/);assert.match(text,/Activity\s+Sessions\s+Preparation time/);
 });
 
 test('individual teacher PDF shows preparation and library data before activities, writing and phonics',()=>{
