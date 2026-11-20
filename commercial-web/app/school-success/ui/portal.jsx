@@ -1,4 +1,5 @@
 'use client';
+import {requestJson} from '@/lib/school-success/request-json';
 import {successFetch} from '@/lib/school-success/client';
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -32,11 +33,14 @@ export default function Portal() {
     const [crmRecord, setCrmRecord] = useState(null), [docLink, setDocLink] = useState(null), [signInHref, setSignInHref] = useState('/');
     const [school360View,setSchool360View]=useState({level:'portfolio',school:'',teacherKey:'',includeArchived:false,status:'all',sort:'name',tab:'teachers',evidenceTeacher:'',category:'all',review:'all',order:'oldest',evidencePage:1});
     const [data, setData] = useState(null), [page, setPage] = useState('Overview'), [school, setSchool] = useState(''), [query, setQuery] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [modal, setModal] = useState(''), [form, setForm] = useState({}), [mobile, setMobile] = useState(false), [from, setFrom] = useState(today().slice(0, 8) + '01'), [to, setTo] = useState(today()), [statusFilter, setStatusFilter] = useState('Active'), [entity, setEntity] = useState('Principal'), [draft, setDraft] = useState(''), [importType, setImportType] = useState('usage'), [importRows, setImportRows] = useState(null), [importName, setImportName] = useState(''), [files, setFiles] = useState([]), [category, setCategory] = useState('Activity'), [teacherFilter, setTeacherFilter] = useState(''), [targets, setTargets] = useState([10, 30, 10, 10]), [holidays, setHolidays] = useState(''), [schoolLinks, setSchoolLinks] = useState({});
-    async function refresh(period) { const r = await successFetch('/api/school-success/portal?' + new URLSearchParams({ ...period || { from, to }, ...Object.fromEntries([...new URLSearchParams(location.search)].filter(([key]) => ['access', 'teacher'].includes(key))) })); const d = await r.json(); if (!r.ok)
-        throw Error(d.error); setData(d); if (d.actor.role !== 'admin' || new URLSearchParams(location.search).get('view') === 'teacher') {
-        setPage('Teacher portal');
-        setSchool(d.actor.school);
-    } }
+    async function refresh(period) {
+        const params = new URLSearchParams(location.search);
+        const query = new URLSearchParams({...period || {from, to}, ...Object.fromEntries([...params].filter(([key]) => ['access', 'teacher'].includes(key)))});
+        if (params.has('access')) query.set('view', 'teacher');
+        const d = await requestJson(() => successFetch('/api/school-success/portal?' + query));
+        setData(d);
+        if (d.actor.role !== 'admin' || params.get('view') === 'teacher') {setPage('Teacher portal');setSchool(d.actor.school);}
+    }
     useEffect(() => {
         // A Teacher 360° "Open lesson documentation" link: load exactly its period through the authorised read.
         const params = new URLSearchParams(location.search), docView = params.get('view') === LESSON_DOCS_VIEW, link = docView ? parseLessonDocumentationLink(location.search) : null;

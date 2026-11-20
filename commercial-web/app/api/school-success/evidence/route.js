@@ -8,6 +8,8 @@ import { assertResumeAccess, lessonFromRows, assertEvidenceMatches } from '@/lib
 import { reflectionInputSchema, planReflectionDocuments, attachReflectionText, reflectionFetcher, sha256Hex } from '@/lib/school-success/reflection-text';
 import {reflectionUploadTicket, storeReflectionDocuments} from '@/lib/school-success/reflection-storage';
 import { submissionSchema } from '@/lib/school-success/teacher-submissions';
+import {presignUpload} from '@/lib/school-success/r2-upload';
+import {mapLimited} from '@/lib/school-success/parallel';
 async function handlerPOST(req) {
     try {
         checkOrigin(req);
@@ -102,7 +104,14 @@ async function handlerPOST(req) {
                 ...(mode === 'evidence' ? { resume: body.resume, version: body.version, updateId: body.updateId, conductedOn: body.conductedOn, reflections: reflectionDocs.map(({ id, periodId, sha256, size }) => ({ id, periodId, sha256, size })) } : {}) };
             const reflectionUploads = body.uploadWrittenReflections === true
                 ? await Promise.all(reflectionDocs.map(doc => reflectionUploadTicket(config, doc))) : [];
-            return Response.json({ token: await seal(sealedPlan, signer), reflectionUploads, files: await Promise.all(files.map(async (file) => ({ id: file.id, token: await seal({ kind: 'file', email: a.email, exp, ...file }, signer) }))) }, {headers: {'Cache-Control': 'no-store'}});
+            const uploadFiles = await Promise.all(files.map(async file => ({
+                id: file.id, token: await seal({kind: 'file', email: a.email, exp, ...file}, signer),
+                ...(body.directUploads === true ? {upload: {
+                    url: await presignUpload(config, file.key, file.type), contentType: file.type,
+                    file: file.category === 'lesson_plan' && file.id === file.periodId ? 'generated-preparation-pdf' : file.category
+                }} : {})
+            })));
+            return Response.json({ token: await seal(sealedPlan, signer), reflectionUploads, files: uploadFiles }, {headers: {'Cache-Control': 'no-store'}});
         }
         if (body.action === 'commit') {
             const plan = await unseal(body.token, signer);
@@ -142,15 +151,18 @@ async function handlerPOST(req) {
             }
             const files = evidencePlan(submission);
             // Accepted reflection content is immutable: content-addressed keys, no overwrite (see storeReflectionDocuments).
-            await storeReflectionDocuments(reflectionDocs, { put: (key, text, headers) => r2Request(config, key, 'PUT', text, headers), get: key => r2Request(config, key, 'GET') });
             const reflectionIds = new Set(reflectionDocs.map(doc => doc.id));
-            for (const file of files) {
-                if (reflectionIds.has(file.id)) continue; // verified or written from the canonical document above
-                const r = await r2Request(config, file.key, 'HEAD');
-                if (r.status === 404 || (r.ok && Number(r.headers.get('content-length')) !== file.size))
-                    return Response.json({error: 'One evidence file needs to be uploaded again.', fileId: file.id}, {status: 409, headers: {'Cache-Control':'no-store'}});
-                if (!r.ok) throw Error('503:The evidence file could not be checked in storage. Retry this submission.');
-            }
+            const checks = await mapLimited([
+                () => storeReflectionDocuments(reflectionDocs, { put: (key, text, headers) => r2Request(config, key, 'PUT', text, headers), get: key => r2Request(config, key, 'GET') }),
+                ...files.filter(file => !reflectionIds.has(file.id)).map(file => async () => {
+                    const r = await r2Request(config, file.key, 'HEAD');
+                    if (r.status === 404 || (r.ok && Number(r.headers.get('content-length')) !== file.size))
+                        return file.id;
+                    if (!r.ok) throw Error('503:The evidence file could not be checked in storage. Retry this submission.');
+                })
+            ], check => check(), 4);
+            const missing = checks.find(Boolean);
+            if (missing) return Response.json({error: 'One evidence file needs to be uploaded again.', fileId: missing}, {status: 409, headers: {'Cache-Control':'no-store'}});
             const rows = submissionRecords(submission, a.email, publicBase());
             if (plan.mode === 'evidence')
                 return Response.json({ ...await gateway({ action: 'appendLessonEvidence', id: submission.id, actor: a.email, rows, version: plan.version, updateId: plan.updateId, conductedOn: plan.conductedOn }), resumeToken: plan.resume });

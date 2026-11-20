@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {presignUpload} from './r2-upload.js';
 import {r2Diagnostics, describeR2, logR2Failure} from './r2-evidence.js';
 import {retryable} from './storage-upload.js';
+import {mapLimited} from './parallel.js';
 
 const type = 'application/json';
 export async function reflectionUploadTicket(config, doc) {
@@ -74,7 +75,7 @@ async function storeDocument(doc, get, put, wait) {
 
 export async function storeReflectionDocuments(docs, {get, put, wait = ms => new Promise(resolve => setTimeout(resolve, ms))}) {
  try {
-  for (const doc of docs) await storeDocument(doc, get, put, wait);
+  await mapLimited(docs, doc => storeDocument(doc, get, put, wait), 3);
  } catch (error) {
   if (error.detail) logR2Failure('written-reflection', error.detail);
   throw error;

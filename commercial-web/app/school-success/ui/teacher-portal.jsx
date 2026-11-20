@@ -1,4 +1,6 @@
 'use client';
+import {mapLimited} from '@/lib/school-success/parallel';
+import {requestJson} from '@/lib/school-success/request-json';
 import {successFetch} from '@/lib/school-success/client';
 import { useEffect, useRef, useState } from 'react';
 import { Plus, Trash2, CheckCircle, BookOpen, FileText, ClipboardList, Camera } from 'lucide-react';
@@ -40,8 +42,9 @@ export default function TeacherPortal({ data, school, refresh }) {
     function historyReplace(url) { window.history.replaceState(null, '', url.href); }
     function update(id, key, value) { setPeriods(rows => rows.map(p => p.id === id ? { ...p, [key]: value } : p)); }
     function addRecording(id,file) { setPeriods(rows=>rows.map(p=>p.id===id?{...p,files:recordingAttachment(p.files,file,crypto.randomUUID())}:p)); }
-    async function request(body) { const r = await successFetch('/api/school-success/evidence', { method: 'POST', headers: { 'Content-Type': 'application/json', ...contextHeaders() }, body: JSON.stringify(body) }); const result = await r.json(); if (!r.ok)
-        throw Error(result.error || 'Could not save the submission'); return result; }
+    async function request(body) {
+        return requestJson(() => successFetch('/api/school-success/evidence', {method: 'POST', headers: {'Content-Type': 'application/json', ...contextHeaders()}, body: JSON.stringify(body)}));
+    }
     async function submit(e) { e.preventDefault(); if (busy || recordingIds.length)
         return; setError(''); setReceipt(null); setBusy('Checking your submission'); sessionStorage.setItem('school-success:teacher-pending-submission', submissionId); try {
         let submission = submissionSchema.parse({ id: submissionId, school: selectedSchool, teacher: teacherValue, date, periods: periods.map(({ category, files, ...p }) => p), files: periods.flatMap(p => p.files.map(f => ({ id: f.id, periodId: p.id, category: f.category, name: f.file.name, size: f.file.size }))) });
@@ -54,21 +57,18 @@ export default function TeacherPortal({ data, school, refresh }) {
             generated.push({ id: p.id, category: 'lesson_plan', file: new File([bytes], 'Lesson-preparation-' + (index + 1) + '.pdf', { type: 'application/pdf' }) });
         }
         submission = submissionSchema.parse({ ...submission, files: [...submission.files, ...generated.map((f, i) => ({ id: f.id, periodId: periods[i].id, category: f.category, name: f.file.name, size: f.file.size }))] });
-        const plan = await request({ action: 'prepare', mode: 'preparation', submission });
+        const plan = await request({ action: 'prepare', mode: 'preparation', submission, directUploads: true });
         let result = plan;
         if (!plan.saved) {
             const allFiles = [...periods.flatMap(p => p.files), ...generated];
-            for (let i = 0; i < plan.files.length; i++) {
-                const file = plan.files[i], actual = allFiles.find(f => f.id === file.id);
-                if (!actual)
-                    throw Error('A selected file is missing. Choose it again.');
-                setBusy(`Uploading evidence ${i + 1} of ${plan.files.length}`);
-                const response = await successFetch('/api/school-success/evidence/upload', { method: 'POST', headers: { 'X-Evidence-Token': file.token, 'Content-Type': 'application/octet-stream', ...contextHeaders() }, body: actual.file });
-                if (!response.ok) {
-                    const value = await response.json();
-                    throw Error(`File ${i + 1} of ${plan.files.length}: ${value.error || 'Evidence upload failed'}`);
-                }
-            }
+            let completed = 0;
+            await mapLimited(plan.files, async file => {
+                const actual = allFiles.find(f => f.id === file.id);
+                if (!actual) throw Error('A selected file is missing. Choose it again.');
+                const response = await successFetch('/api/school-success/evidence/upload', {method: 'POST', headers: {'X-Evidence-Token': file.token, ...contextHeaders()}, body: actual.file, uploadTicket: file.upload});
+                if (!response.ok) throw Error((await response.json()).error || 'Evidence upload failed');
+                setBusy('Uploaded ' + (++completed) + ' of ' + plan.files.length + ' files');
+            });
             setBusy('Saving your class periods');
             result = await request({ action: 'commit', token: plan.token, submission });
         }
@@ -87,12 +87,7 @@ export default function TeacherPortal({ data, school, refresh }) {
         setPeriods([newPeriod()]);
         setId(crypto.randomUUID());
         sessionStorage.removeItem('school-success:teacher-pending-submission');
-        try {
-            await refresh();
-        }
-        catch {
-            setError('Your submission is saved. Refresh the page to update the history.');
-        }
+        if (admin) void refresh().catch(() => setError('Your submission is saved. Refresh the workspace to update the report.'));
     }
     catch (e) {
         setError(e instanceof Error ? e.message : 'Could not save. Retry using this receipt ID: ' + submissionId);
@@ -111,7 +106,7 @@ export default function TeacherPortal({ data, school, refresh }) {
         else {
             setTeacher(e.target.value);
             setResumeToken('');
-        } }}><option value="">Select teacher</option>{teachers.map(t => <option key={t}>{t}</option>)}</select></label> : <div className="field"><span>Teacher</span><b>{teacherValue}</b></div>}</div></section><LessonEvidence key={selectedSchool + '|' + teacherValue + '|' + resumeToken} token={resumeToken} headers={contextHeaders} uploadsEnabled={data.uploadsEnabled} school={selectedSchool} teacher={teacherValue} onSaved={refresh}/></> : <form className="card" id="teacher-submission-form" onSubmit={submit}><div className="card-head"><div><h2>Submit lesson plan</h2><p>Save up to 10 class periods, then choose Submit Evidence after teaching.</p></div></div><fieldset disabled={!!busy} className="teacher-fields"><div className="form-grid">{admin ? <><label className="field"><span>School</span><select required disabled={recordingIds.length > 0} value={selectedSchool} onChange={e => { setSchool(e.target.value); setTeacher(''); setPeriods([newPeriod()]); setId(crypto.randomUUID()); }}><option value="">Select school</option>{schools.map(s => <option key={s}>{s}</option>)}</select></label><label className="field"><span>Teacher</span>{teachers.length ? <select required disabled={recordingIds.length > 0} value={teacherValue} onChange={e => {setTeacher(e.target.value);setPeriods([newPeriod()]);setId(crypto.randomUUID());}}><option value="">Select teacher</option>{teachers.map(t => <option key={t}>{t}</option>)}</select> : <input required value={teacher} onChange={e => {setTeacher(e.target.value);setPeriods([newPeriod()]);setId(crypto.randomUUID());}}/>}</label></> : schoolLink ? <><div className="field"><span>School</span><b>{selectedSchool}</b></div><label className="field"><span>Teacher</span><select required disabled={recordingIds.length > 0} value={teacherValue} onChange={e => void selectTeacher(e.target.value)}><option value="">Select teacher</option>{teachers.map(t => <option key={t}>{t}</option>)}</select></label></> : <div className="field"><span>School / teacher</span><b>{selectedSchool} · {teacherValue}</b></div>}<label className="field"><span>Planned lesson date</span><input type="date" required value={date} onChange={e => setDate(e.target.value)}/></label></div>
+        } }}><option value="">Select teacher</option>{teachers.map(t => <option key={t}>{t}</option>)}</select></label> : <div className="field"><span>Teacher</span><b>{teacherValue}</b></div>}</div></section><LessonEvidence key={selectedSchool + '|' + teacherValue + '|' + resumeToken} token={resumeToken} headers={contextHeaders} uploadsEnabled={data.uploadsEnabled} school={selectedSchool} teacher={teacherValue} onSaved={async () => { if (admin) await refresh(); }}/></> : <form className="card" id="teacher-submission-form" onSubmit={submit}><div className="card-head"><div><h2>Submit lesson plan</h2><p>Save up to 10 class periods, then choose Submit Evidence after teaching.</p></div></div><fieldset disabled={!!busy} className="teacher-fields"><div className="form-grid">{admin ? <><label className="field"><span>School</span><select required disabled={recordingIds.length > 0} value={selectedSchool} onChange={e => { setSchool(e.target.value); setTeacher(''); setPeriods([newPeriod()]); setId(crypto.randomUUID()); }}><option value="">Select school</option>{schools.map(s => <option key={s}>{s}</option>)}</select></label><label className="field"><span>Teacher</span>{teachers.length ? <select required disabled={recordingIds.length > 0} value={teacherValue} onChange={e => {setTeacher(e.target.value);setPeriods([newPeriod()]);setId(crypto.randomUUID());}}><option value="">Select teacher</option>{teachers.map(t => <option key={t}>{t}</option>)}</select> : <input required value={teacher} onChange={e => {setTeacher(e.target.value);setPeriods([newPeriod()]);setId(crypto.randomUUID());}}/>}</label></> : schoolLink ? <><div className="field"><span>School</span><b>{selectedSchool}</b></div><label className="field"><span>Teacher</span><select required disabled={recordingIds.length > 0} value={teacherValue} onChange={e => void selectTeacher(e.target.value)}><option value="">Select teacher</option>{teachers.map(t => <option key={t}>{t}</option>)}</select></label></> : <div className="field"><span>School / teacher</span><b>{selectedSchool} · {teacherValue}</b></div>}<label className="field"><span>Planned lesson date</span><input type="date" required value={date} onChange={e => setDate(e.target.value)}/></label></div>
  {periods.map((p, index) => <section className="teacher-period" key={p.id}><div className="card-head"><h3>Period {index + 1}</h3>{periods.length > 1 && <button className="text-button" type="button" disabled={recordingIds.length > 0} onClick={() => setPeriods(rows => rows.filter(r => r.id !== p.id))}><Trash2 size={15}/>Remove period</button>}</div><div className="form-grid"><label className="field"><span>Class</span><select required value={p.grade} onChange={e => update(p.id, 'grade', e.target.value)}><option value="">Select class</option>{teacherGrades.map(g => <option key={g}>{g}</option>)}</select></label><label className="field"><span>Section</span><select value={p.section} onChange={e => update(p.id, 'section', e.target.value)}>{teacherSections.map(s => <option key={s}>{s}</option>)}</select></label><label className="field"><span>Subject</span><select required value={p.subject} onChange={e => update(p.id, 'subject', e.target.value)}><option value="">Select subject</option>{teacherSubjects.map(s => <option key={s}>{s}</option>)}</select></label></div><label className="field"><span>Lesson plan number & topic / chapter</span><input required maxLength={1000} value={p.topic} onChange={e => update(p.id, 'topic', e.target.value)} placeholder="Example: LP 12 — Plants around us"/></label><p className="hint">Type the topic, or tap the microphone on your device’s keyboard to speak.</p><LessonVoiceControls combinedFile={p.files.find(f=>f.slot===RECORDING_SLOT)?.file} uploadsEnabled={data.uploadsEnabled} disabled={!!busy||recordingIds.length>0} onRecording={active=>setRecordingIds(ids=>active?[...new Set([...ids,p.id])]:ids.filter(id=>id!==p.id))} onFile={file=>addRecording(p.id,file)} onChange={(reflection,materials)=>setPeriods(rows=>rows.map(row=>row.id===p.id?{...row,reflection,materials}:row))}/><div className="teacher-evidence">{p.files.filter(f => f.category === 'voice').map(f => <div className="teacher-file" key={f.id}><FileText size={16}/><div><b>{f.file.name}</b><small>Voice reflection · {(f.file.size / 1024 / 1024).toFixed(1)} MB</small></div><button type="button" className="icon" aria-label={'Remove ' + f.file.name} onClick={() => update(p.id, 'files', p.files.filter(x => x.id !== f.id))}><Trash2 size={15}/></button></div>)}</div>
             </section>)}
  <div className="actions"><button className="button" type="button" disabled={periods.length >= 10} onClick={() => setPeriods(rows => [...rows, newPeriod()])}><Plus size={17}/>Add class period</button><button className="button primary" type="submit" disabled={!selectedSchool || !teacherValue || recordingIds.length > 0}>{recordingIds.length ? 'Stop voice recording before saving' : busy || 'Save lesson preparation'}</button></div></fieldset>{busy && <p role="status">{busy}…</p>}{error && <p className="negative" role="alert">{error}</p>}</form>}
