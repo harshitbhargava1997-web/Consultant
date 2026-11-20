@@ -52,9 +52,13 @@ test('permission and missing-file responses return without retry, while transien
 test('bundled permissions avoid a ticket request; failed ticket requests also recover', async () => {
  let tickets=0, puts=0;
  const initialTicket={url:'https://storage.example.test/object',contentType:'image/jpeg',file:'activity'};
- const ok=await uploadEvidenceFile({initialTicket,body:new Blob(['abc']),fetchTicket:async()=>{tickets++;throw Error('unneeded');},
-  put:async()=>{puts++;return new Response(null,{status:200});}});
- assert.equal(ok.status,200);assert.equal(tickets,0);assert.equal(puts,1);
+ const timeout=AbortSignal.timeout;
+ try {
+  AbortSignal.timeout=undefined; // Older clients still support AbortController.
+  const ok=await uploadEvidenceFile({initialTicket,body:new Blob(['abc']),fetchTicket:async()=>{tickets++;throw Error('unneeded');},
+   put:async(_url,init)=>{assert.ok(init.signal instanceof AbortSignal);puts++;return new Response(null,{status:200});}});
+  assert.equal(ok.status,200);assert.equal(tickets,0);assert.equal(puts,1);
+ } finally {AbortSignal.timeout=timeout;}
  const retry=await uploadEvidenceFile({body:new Blob(['abc']),wait:async()=>{},
   fetchTicket:async()=>{tickets++;if(tickets===1)throw TypeError('Load failed');return Response.json(initialTicket);},
   put:async()=>new Response(null,{status:200})});

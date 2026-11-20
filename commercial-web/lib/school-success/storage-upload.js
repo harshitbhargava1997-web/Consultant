@@ -29,7 +29,7 @@ export function uploadMessage(o){
 export async function uploadEvidenceFile({fetchTicket,initialTicket,put=fetch,body,report=()=>{},wait=ms=>new Promise(r=>setTimeout(r,ms)),attempts=UPLOAD_ATTEMPTS}){
  let outcome;
  for(let attempt=1;attempt<=attempts;attempt++){
-  let file=initialTicket?.file||'file';
+  let file=initialTicket?.file||'file',timer;
   try{
    let value=attempt===1?initialTicket:null;
    if(!value){
@@ -42,10 +42,13 @@ export async function uploadEvidenceFile({fetchTicket,initialTicket,put=fetch,bo
     value=await ticket.json();
    }
    file=value.file||file;
-   const res=await put(value.url,{method:'PUT',headers:{'Content-Type':value.contentType},body,signal:AbortSignal.timeout(180000)});
+   const controller=new AbortController();
+   timer=setTimeout(()=>controller.abort(),180000);
+   const res=await put(value.url,{method:'PUT',headers:{'Content-Type':value.contentType},body,signal:controller.signal});
    if(res.ok){try{res.body?.cancel();}catch{}return Response.json({ok:true,attempts:attempt});}
    outcome={...await storageOutcome(res),file,attempt};
   }catch{outcome={kind:'network',status:0,code:'',ref:'',file,attempt};}
+  finally{clearTimeout(timer);}
   const last=attempt===attempts||!retryable(outcome);
   try{report({...outcome,final:last});}catch{}
   if(last)break;
