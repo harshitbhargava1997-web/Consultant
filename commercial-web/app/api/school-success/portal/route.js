@@ -16,6 +16,15 @@ async function handlerGET(req) {
     try {
         const started=performance.now(),a=await actor(req),authDone=performance.now(),db=database(),url=new URL(req.url),today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
         const from=url.searchParams.get('from')||today.slice(0,8)+'01',to=url.searchParams.get('to')||today,admin=a.role==='admin';
+        // Teacher links use lesson lookup for their saved work. The landing page needs only identity and upload settings.
+        if (a.role === 'school-teacher' && url.searchParams.get('view') === 'teacher') {
+            const config = await loadR2Config(env, db);
+            return streamJson({actor: {...a, allowedSchools: undefined, userId: undefined}, entries: [], members: [],
+                roster: a.teachers.map(name => ({name, school: a.school})), period: {from, to},
+                source: 'Vision · School Success', uploadsEnabled: r2UploadsConfigured(config), mediaPublicBase: publicBase(),
+                teacherSubmissionsEnabled: true, importsEnabled: false
+            }, {headers: {'Server-Timing': `auth;dur=${(authDone-started).toFixed(1)}, total;dur=${(performance.now()-started).toFixed(1)}`}});
+        }
         const rawTask=gateway({action:'read',from,to}),mappedTask=rawTask.then(raw=>mapLive(raw,publicBase()));
         const [mapped,localRows,saved,allMemberRows,archiveRows,config,crmArchive]=await Promise.all([
          mappedTask,admin?db.prepare("SELECT * FROM portal_entries WHERE kind='school'").all():{results:[]},

@@ -107,8 +107,16 @@ export function reflectionFetcher({base,get,timeoutMs=8000}){
  return async url=>{
   if(!url.startsWith(prefix))throw Error('Unexpected media location');
   const key=url.slice(prefix.length).split('/').map(decodeURIComponent).join('/');
-  const response=await Promise.race([get(key,url),new Promise((_,reject)=>setTimeout(()=>reject(Error('Timed out')),timeoutMs))]);
-  if(!response.ok||Number(response.headers.get('content-length')||0)>MAX_REFLECTION_BYTES)throw Error('Unavailable');
-  return response.text();
+  let timer;
+  try {
+   return await Promise.race([
+    (async () => {
+     const response=await get(key,url);
+     if(!response.ok||Number(response.headers.get('content-length')||0)>MAX_REFLECTION_BYTES)throw Error('Unavailable');
+     return response.text();
+    })(),
+    new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Timed out')),timeoutMs);})
+   ]);
+  } finally { clearTimeout(timer); }
  };
 }

@@ -5,6 +5,8 @@ import {closurePrompts} from '@/lib/closure-reflection';
 import {parseClosureText,isReflectionTextUrl} from '@/lib/school-success/reflection-text';
 import {isGeneratedPreparationPdf} from '@/lib/school-success/lesson-records';
 import {successFetch} from '@/lib/school-success/client';
+import {mapLimited} from '@/lib/school-success/parallel';
+import {requestJson} from '@/lib/school-success/request-json';
 import {transferWrittenReflections} from '@/lib/school-success/storage-upload';
 import { useEffect, useRef, useState } from 'react';
 import { Upload, Trash2, FileText } from 'lucide-react';
@@ -40,14 +42,14 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
     const [reflections, setReflections] = useState({});
     const uploadedFiles = useRef(new Set());
     async function request(body) {
-        const r = await successFetch('/api/school-success/evidence', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(body) });
-        const result = await r.json();
-        if (!r.ok) {
-            if (result.fileId) uploadedFiles.current.delete(result.fileId);
-            throw Error(result.error || 'Could not update this lesson');
+        try {
+            return await requestJson(() => successFetch('/api/school-success/evidence', {method: 'POST', headers: {'Content-Type': 'application/json', ...headers()}, body: JSON.stringify(body)}));
+        } catch (error) {
+            if (error.fileId) uploadedFiles.current.delete(error.fileId);
+            throw error;
         }
-        return result;
     }
+
     async function find(e) { e.preventDefault(); setError(''); setBusy('Finding saved lessons'); setMatches(null); setLesson(null); setReceipt(null); setToken(''); try {
         const d = await request({ action: 'findLessons', school, teacher, date });
         setMatches(d.lessons);
@@ -86,26 +88,23 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
         if (!all.length && !written.length)
             throw Error('Add a classroom evidence file or an after-class reflection before submitting.');
         const submission = submissionSchema.parse({ ...lesson.submission, files: all.map(f => ({ id: f.id, periodId:f.periodId, category: f.category, name: f.file.name, size: f.file.size })) });
-        const prepared = await request({ action: 'prepare', mode: 'evidence', resume: token, submission, version: lesson.version, updateId, conductedOn, reflections: written, uploadWrittenReflections: true });
+        const prepared = await request({ action: 'prepare', mode: 'evidence', resume: token, submission, version: lesson.version, updateId, conductedOn, reflections: written, uploadWrittenReflections: true, directUploads: true });
         let result = prepared;
         if (!prepared.saved) {
-            for (let i = 0; i < prepared.files.length; i++) {
-                const f = prepared.files[i], actual = all.find(x => x.id === f.id);
-                if (!actual)
-                    throw Error('A selected file is missing. Choose it again.');
-                if (uploadedFiles.current.has(f.id)) continue;
-                setBusy(`Uploading classroom evidence ${i + 1} of ${prepared.files.length}`);
-                const r = await successFetch('/api/school-success/evidence/upload', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/octet-stream', 'X-Evidence-Token': f.token }, body: actual.file });
-                if (!r.ok) {
-                    const d = await r.json();
-                    throw Error(`File ${i + 1} of ${prepared.files.length}: ${d.error || 'Upload failed'}`);
-                }
+            let completed = prepared.files.filter(f => uploadedFiles.current.has(f.id)).length;
+            const transfers = prepared.files.filter(f => !uploadedFiles.current.has(f.id)).map(f => async () => {
+                const actual = all.find(x => x.id === f.id);
+                if (!actual) throw Error('A selected file is missing. Choose it again.');
+                const response = await successFetch('/api/school-success/evidence/upload', {
+                    method: 'POST', headers: {...headers(), 'X-Evidence-Token': f.token}, body: actual.file, uploadTicket: f.upload
+                });
+                if (!response.ok) throw Error((await response.json()).error || 'Upload failed');
                 uploadedFiles.current.add(f.id);
-            }
-            if (prepared.reflectionUploads?.length) {
-                setBusy('Saving written reflection');
-                await transferWrittenReflections(prepared.reflectionUploads);
-            }
+                setBusy('Uploaded ' + (++completed) + ' of ' + prepared.files.length + ' files');
+            });
+            if (prepared.reflectionUploads?.length) transfers.unshift(() => transferWrittenReflections(prepared.reflectionUploads));
+            setBusy('Uploading classroom evidence');
+            await mapLimited(transfers, transfer => transfer());
             setBusy('Attaching evidence to the lesson');
             result = await request({ action: 'commit', token: prepared.token, submission, reflections: written });
         }
@@ -113,9 +112,9 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
         // A receipt closes this draft even if refreshing the saved lesson fails. Reopening starts a new update.
         setLesson(null);
         setPending({}); setReflections({}); uploadedFiles.current.clear();
-        await load(true);
-        try { await onSaved(); }
-        catch { setError('Your evidence was saved. Reopen the lesson to refresh the displayed record.'); }
+        setUpdateId(crypto.randomUUID());
+        setBusy('');
+        void Promise.resolve().then(onSaved).catch(() => setError('Your evidence was saved. Refresh the workspace to see the updated report.'));
     }
     catch (e) {
         setError(e.message + ' Your reflection and files are still here; submit again to retry.');

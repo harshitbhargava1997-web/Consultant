@@ -10,7 +10,7 @@ export async function successFetch(input,init={}){
  if(url.pathname==='/api/school-success/evidence/upload'){
   // Presigned PUT straight to R2, with bounded retries for transient failures and safe diagnostics.
   const report=outcome=>{const h=new Headers(headers);h.delete('X-Evidence-Token');h.set('Content-Type','application/json');fetch('/api/school-success/evidence/upload-report',{method:'POST',headers:h,body:JSON.stringify(outcome),keepalive:true,cache:'no-store'}).catch(()=>{});};
-  return uploadEvidenceFile({fetchTicket:()=>fetch(url,{method:'POST',headers,cache:'no-store'}),body:init.body,report});
+  return uploadEvidenceFile({fetchTicket:()=>fetch(url,{method:'POST',headers,cache:'no-store'}),initialTicket:init.uploadTicket,body:init.body,report});
  }
  return fetch(url,{...init,headers,cache:'no-store'});
 }

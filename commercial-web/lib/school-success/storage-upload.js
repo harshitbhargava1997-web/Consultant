@@ -26,17 +26,29 @@ export function uploadMessage(o){
 
 // fetchTicket(): Promise<Response> for POST /api/school-success/evidence/upload (already authenticated).
 // put(url, init) is the browser fetch; report(outcome) is fire-and-forget.
-export async function uploadEvidenceFile({fetchTicket,put=fetch,body,report=()=>{},wait=ms=>new Promise(r=>setTimeout(r,ms)),attempts=UPLOAD_ATTEMPTS}){
+export async function uploadEvidenceFile({fetchTicket,initialTicket,put=fetch,body,report=()=>{},wait=ms=>new Promise(r=>setTimeout(r,ms)),attempts=UPLOAD_ATTEMPTS}){
  let outcome;
  for(let attempt=1;attempt<=attempts;attempt++){
-  const ticket=await fetchTicket();
-  if(!ticket.ok)return ticket; // permission/validation errors from our own API keep their message
-  const value=await ticket.json(),file=value.file||'file';
+  let file=initialTicket?.file||'file',timer;
   try{
-   const res=await put(value.url,{method:'PUT',headers:{'Content-Type':value.contentType},body});
+   let value=attempt===1?initialTicket:null;
+   if(!value){
+    const ticket=await fetchTicket();
+    if(!ticket.ok){
+     if(ticket.status<500 && ![408,429].includes(ticket.status))return ticket;
+     await ticket.body?.cancel();
+     throw TypeError('Upload permission request interrupted');
+    }
+    value=await ticket.json();
+   }
+   file=value.file||file;
+   const controller=new AbortController();
+   timer=setTimeout(()=>controller.abort(),180000);
+   const res=await put(value.url,{method:'PUT',headers:{'Content-Type':value.contentType},body,signal:controller.signal});
    if(res.ok){try{res.body?.cancel();}catch{}return Response.json({ok:true,attempts:attempt});}
    outcome={...await storageOutcome(res),file,attempt};
   }catch{outcome={kind:'network',status:0,code:'',ref:'',file,attempt};}
+  finally{clearTimeout(timer);}
   const last=attempt===attempts||!retryable(outcome);
   try{report({...outcome,final:last});}catch{}
   if(last)break;

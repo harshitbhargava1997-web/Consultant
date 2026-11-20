@@ -61,11 +61,11 @@ function harness({periods=1,plan='Why — learning objective\nRead CVC words',sc
  const resume=()=>real.seal({kind:'lesson-resume',id:submissionId,school,teacher,email:EMAIL,exp:Date.now()+86400000},SECRET);
  return {r2,writes,faults,rows,reviews,state,call,resume,real};
 }
-async function prepared(h,{updateId,version=0,answers,periodCount=1,files=[],uploadWrittenReflections=false}){
+async function prepared(h,{updateId,version=0,answers,periodCount=1,files=[],uploadWrittenReflections=false,directUploads=false}){
  const token=await h.resume(),lesson=(await h.call({action:'resume',resume:token})).body;
  const submission={...lesson.submission,files};
  const reflections=answers?Array.from({length:periodCount},(_,i)=>({periodId:lesson.submission.periods[i].id,answers:typeof answers==='function'?answers(i):answers})):[];
- const prep=await h.call({action:'prepare',mode:'evidence',resume:token,submission,version,updateId,conductedOn:'2026-10-22',reflections,uploadWrittenReflections});
+ const prep=await h.call({action:'prepare',mode:'evidence',resume:token,submission,version,updateId,conductedOn:'2026-10-22',reflections,uploadWrittenReflections,directUploads});
  return {prep,commit:extra=>h.call({action:'commit',token:prep.body.token,submission,reflections,...extra}),submission,reflections,token};
 }
 const U1='c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1',U2='c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2';
@@ -274,4 +274,29 @@ test('real R2 saves classroom evidence, student work and multilingual reflection
  assert.equal((await b.commit()).status,200);assert.equal(h.rows[0].lesson_evidence_history.length,2);
  const afterFallback=await h.call({action:'resume',resume:b.token});
  assert.ok(afterFallback.body.files.some(f=>f.reflection?.answers?.nextStep==='Server fallback'));
+});
+
+
+test('batched upload permissions match the sealed files and a lost commit response preserves one update',async()=>{
+ const h=harness(),files=Array.from({length:6},(_,i)=>({id:crypto.randomUUID(),periodId:PERIOD(1),category:i%2?'writing':'activity',name:'file-'+i+'.jpg',size:3}));
+ const a=await prepared(h,{updateId:U1,files,directUploads:true,uploadWrittenReflections:true,answers:{achievement:'All six groups practised.'}});
+ assert.equal(a.prep.status,200);assert.equal(a.prep.body.files.length,6);
+ for(const [index,file] of a.prep.body.files.entries()){
+  const signed=await h.real.unseal(file.token,SECRET),url=new URL(file.upload.url);
+  assert.equal(file.id,files[index].id);assert.equal(file.upload.file,files[index].category);
+  assert.equal(decodeURIComponent(url.pathname.slice('/onelern-media/'.length)),signed.key);
+  assert.equal(file.upload.contentType,signed.type);assert.ok(url.searchParams.has('X-Amz-Signature'));
+  if(index!==2)h.r2.set(signed.key,'abc');
+ }
+ const missing=await a.commit();assert.equal(missing.status,409);assert.equal(missing.body.fileId,files[2].id);
+ assert.equal(h.rows[0].lesson_evidence_history.length,0);
+ const signed=await h.real.unseal(a.prep.body.files[2].token,SECRET);h.r2.set(signed.key,'abc');
+ const {requestJson}=await import('../lib/school-success/request-json.js');let calls=0;
+ const receipt=await requestJson(async()=>{
+  const result=await a.commit();calls++;
+  if(calls===1)throw TypeError('Load failed');
+  return Response.json(result.body,{status:result.status});
+ },{wait:async()=>{}});
+ assert.equal(receipt.saved,true);assert.equal(receipt.alreadySaved,true);
+ assert.equal(h.rows[0].lesson_evidence_history.length,1);assert.equal(referenced(h).length,1);
 });
