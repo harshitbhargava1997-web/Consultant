@@ -22,13 +22,10 @@ const AfterClassReflection=load(path.join(root,'app/AfterClassReflection.jsx')).
 const entries=[{kind:'submission',school:'Alpha School',teacher:'Asha',id:'1:preparation',date:'2026-10-20',grade:'Grade 2',subject:'English',topic:'Old feed lesson',files:[{url:'https://m.test/x.pdf',column:'Lesson_Plan_Picture'}],review:'Old feed feedback'}];
 const render=actor=>renderToStaticMarkup(React.createElement(TeacherPortal,{data:{actor,roster:[{school:'Alpha School',name:'Asha'}],entries,period:{from:'2026-10-01',to:'2026-10-31'},uploadsEnabled:true},school:'Alpha School',refresh:async()=>{}}));
 
-test('teacher landing offers two primary actions and no download controls or history feed',()=>{
- for(const actor of [{role:'school-teacher',school:'Alpha School',name:'Asha',email:'x@school.invalid'},{role:'admin',school:'',name:'Admin',email:'a@x.test'}]){
-  const html=render(actor);
-  assert.match(html,/Submit Lesson Plan/);assert.match(html,/Submit Evidence/);assert.match(html,/aria-pressed="true"/);
-  for(const gone of ['Download reflection draft','Download submitted reflection','Download reflection &amp; evidence links','Download lesson &amp; evidence links','My Evidence','Teacher evidence','Loaded period','feed entry','Old feed lesson','Old feed feedback'])assert.ok(!html.includes(gone),actor.role+': '+gone);
-  assert.match(html,/Save lesson preparation/);assert.match(html,/Audio reflection on your lesson plan/,'optional preparation recording kept');
- }
+test('teacher landing starts with two language choices and no recording or submission form',()=>{
+ const html=render({role:'school-teacher',school:'Alpha School',name:'Asha',email:'x@school.invalid'});
+ assert.match(html,/Choose your preferred language/);assert.match(html,/English/);assert.match(html,/हिन्दी/);
+ assert.ok(!html.includes('Record audio reflection'));assert.ok(!html.includes('teacher-submission-form'));
 });
 
 test('Add Evidence reflection has no audio controls; native Vision keeps its optional recording',()=>{
