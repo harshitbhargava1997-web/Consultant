@@ -254,6 +254,9 @@ async function rawGateway(req) {
 }
 export async function gateway(body) {
     const a = await actor();
+    // School leaders read their school's records and lesson reviews; every other data action is consultant-only.
+    if (a.leader && !['read', 'readLessonReviews'].includes(body.action))
+        throw Error('403:This part of School Success is available to consultants only.');
     if (body.action !== 'read') {
         const school = body.school || body.data?.school || body.rows?.[0]?.Center;
         if (school)
@@ -293,6 +296,12 @@ export async function gateway(body) {
         value.records = (value.records || []).filter(r => visible(r.Center || r.Institution) && (a.role === 'admin' || (r.Center === a.school && r.FullName === a.name && r.Uploaded_By === a.email)));
         value.legacyContacts = { contacts: Object.fromEntries(Object.entries(value.legacyContacts?.contacts || {}).filter(([s]) => visible(s))) };
         value.legacyCalls = (value.legacyCalls || []).filter(r => visible(r.School));
+        if (a.leader) {
+            // The CRM (contacts, connect calls, tickets and their legacy copies) is the consultants' own record.
+            for (const f of ['contacts', 'calls', 'tickets', 'legacyCalls'])
+                value[f] = [];
+            value.legacyContacts = { contacts: {} };
+        }
         if (a.role !== 'admin') {
             value.roster = value.roster.filter(r => r.school === a.school);
             for (const f of ['contacts', 'calls', 'visits', 'reviews', 'calendars', 'tickets', 'legacyCalls'])

@@ -1,6 +1,6 @@
 import {withRequest} from '@/lib/school-success/server';
 import { env } from '@/lib/school-success/environment';
-import { actor, database, checkOrigin, failure } from '@/lib/school-success/server';
+import { actor, database, checkOrigin, failure, assertConsultant } from '@/lib/school-success/server';
 import { gateway, publicBase } from '@/lib/school-success/live';
 import { currentMediaUrl } from '@/lib/school-success/live-mapping';
 import { scopedSubmission, evidencePlan, submissionRecords } from '@/lib/school-success/teacher-submissions';
@@ -14,7 +14,10 @@ import {mapLimited} from '@/lib/school-success/parallel';
 async function handlerPOST(req) {
     try {
         checkOrigin(req);
-        const a = await actor(req), config = await loadR2Config(env, database()), body = await req.json();
+        const a = await actor(req);
+        // Lesson plans and evidence are submitted by teachers (or consultants on their behalf), not by school leaders.
+        assertConsultant(a);
+        const config = await loadR2Config(env, database()), body = await req.json();
         const signer = config.SUPABASE_GATEWAY_TOKEN;
         async function resumeGrant(token) { const grant = await unseal(token, signer); assertResumeAccess(grant, a); return grant; }
         async function resumeReceipt(submission, result) { return { ...result, resumeToken: await seal({ kind: 'lesson-resume', id: submission.id, school: submission.school, teacher: submission.teacher, email: a.email, exp: Date.now() + 365 * 86400000 }, signer) }; }

@@ -69,8 +69,11 @@ async function identify(req){
  const saved=isSuperAdmin?null:await checked(db.from('success_config').select('value').eq('key','moduleAccess:'+user.id).maybeSingle());
  const grant=readModuleGrant(saved?.value,user.id);
  if(!isSuperAdmin&&!grant)throw Error('403:Ask Super Admin to assign your School Success module access');
- return {email:user.email||user.phone,name:user.user_metadata?.full_name||user.email||user.phone||'Administrator',role:'admin',visionRole:isSuperAdmin?'super_admin':'consultant',isSuperAdmin,userId:user.id,school:'',allowedSchools:isSuperAdmin?null:grant.schools};
+ return {email:user.email||user.phone,name:user.user_metadata?.full_name||user.email||user.phone||'Administrator',role:'admin',leader:!isSuperAdmin&&grant?.role==='leader',staffRole:isSuperAdmin?'super_admin':grant.role,visionRole:isSuperAdmin?'super_admin':grant.role==='leader'?'school_leader':'consultant',isSuperAdmin,userId:user.id,school:'',allowedSchools:isSuperAdmin?null:grant.schools};
 }
+// School leaders (principals, coordinators) are staff for their own school's reports, lesson reviews, classroom
+// visits and teacher PINs. Everything else that staff can do is consultant-only and fails closed for leaders.
+export function assertConsultant(a){if(a?.leader)throw Error('403:This part of School Success is available to consultants only.');}
 export function assertSchool(a,school){if(!school||a.allowedSchools&&!a.allowedSchools.includes(school))throw Error('403:School is outside your assignment');}
 export function checkOrigin(req){const o=req.headers.get('Origin');if(o&&o!==new URL(req.url).origin)throw Error('403:Cross-origin request rejected');}
 export function streamJson(data,init={}){const bytes=new TextEncoder().encode(JSON.stringify(data));let offset=0;return new Response(new ReadableStream({pull(controller){if(offset>=bytes.length){controller.close();return;}controller.enqueue(bytes.subarray(offset,offset+32768));offset+=32768;}}),{...init,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...init.headers}});}
