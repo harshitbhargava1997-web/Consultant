@@ -48,7 +48,7 @@ function harness({periods=1,plan='Why — learning objective\nRead CVC words',sc
  }
  const real=require(path.join(root,'lib/school-success/r2-evidence.js'));
  const mocks={
-  '@/lib/school-success/server':{withRequest:(req,fn)=>fn(),actor:async()=>state.actor,database:()=>({}),checkOrigin(){},failure:e=>{const message=String(e.message||e),status=Number(message.match(/^(401|403|409|413|503):/)?.[1]||400);return Response.json({error:message.replace(/^\d+:/,'')},{status});}}, // same as server.js failure()
+  '@/lib/school-success/server':{withRequest:(req,fn)=>fn(),actor:async()=>state.actor,assertConsultant:a=>{if(a?.leader)throw Error('403:This part of School Success is available to consultants only.');},database:()=>({}),checkOrigin(){},failure:e=>{const message=String(e.message||e),status=Number(message.match(/^(401|403|409|413|503):/)?.[1]||400);return Response.json({error:message.replace(/^\d+:/,'')},{status});}}, // same as server.js failure()
   '@/lib/school-success/environment':{env:{}},
   '@/lib/school-success/live':{gateway,publicBase:()=>storageConfig.R2_PUBLIC_BASE_URL},
   '@/lib/school-success/r2-evidence':{...real,r2Request:storageRequest||r2Request,loadR2Config:async()=>storageConfig}

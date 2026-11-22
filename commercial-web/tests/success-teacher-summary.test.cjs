@@ -50,7 +50,7 @@ function harness(t,{actor={role:'teacher',school:S,name:T,email:EMAIL}}={}){
   }else throw Error('Unexpected fixture call '+u.pathname);
   return Response.json(result,{headers:{'content-range':'0-'+result.length+'/'+result.length}});
  };
- const server={actor:async()=>state.actor,assertSchool:(a,s)=>{if(!s||a.allowedSchools&&!a.allowedSchools.includes(s))throw Error('403:Unassigned school');},
+ const server={actor:async()=>state.actor,assertConsultant:a=>{if(a?.leader)throw Error('403:This part of School Success is available to consultants only.');},assertSchool:(a,s)=>{if(!s||a.allowedSchools&&!a.allowedSchools.includes(s))throw Error('403:Unassigned school');},
   withRequest:(req,fn)=>fn(),checkOrigin(){},database:()=>({}),failure:e=>{const m=String(e.message||e),status=Number(m.match(/^(401|403|409|503):/)?.[1]||400);return Response.json({error:m.replace(/^\d+:/,'')},{status});}};
  const live=load('lib/school-success/live.js',{'./server':server,'./database':{}});
  const r2=require(path.join(root,'lib/school-success/r2-evidence.js'));

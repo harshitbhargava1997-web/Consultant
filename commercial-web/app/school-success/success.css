@@ -226,3 +226,5 @@
 .success-app .pin-default{display:flex;align-items:flex-end;gap:12px;border-top:1px solid var(--line);padding-top:14px}
 .success-app .pin-default .field{max-width:320px;flex:1;margin:0}
 @media(max-width:600px){.success-app .tl-card{padding:20px 16px;border-radius:16px}.success-app .tl-change-grid{grid-template-columns:1fr}.success-app .tp-top{flex-direction:column}.success-app .tp-tools{justify-content:flex-start}.success-app .pin-list li{flex-wrap:wrap}.success-app .pin-default{flex-direction:column;align-items:stretch}}
+
+.success-app .leaders-admin h2{display:flex;align-items:center;gap:8px}.success-app .leaders-form{border-top:1px solid var(--line);margin-top:16px;padding-top:16px}.success-app .leaders-form h3{display:flex;align-items:center;gap:8px;margin-bottom:12px}

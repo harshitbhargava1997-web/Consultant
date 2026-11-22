@@ -1,10 +1,11 @@
 import {withRequest} from '@/lib/school-success/server';
-import { actor, database, checkOrigin, failure } from '@/lib/school-success/server';
+import { actor, database, checkOrigin, failure, assertConsultant } from '@/lib/school-success/server';
 import { defaultTemplates, templateSchema } from '@/lib/school-success/crm-templates';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'no-store' };
 async function handlerGET(req) { try {
     const a = await actor(req);
+    assertConsultant(a);
     if (a.role !== 'admin')
         throw Error('403:Admin required');
     const rows = await database().prepare("SELECT value FROM portal_config WHERE key LIKE 'crmTemplate:%'").all();
@@ -22,6 +23,7 @@ async function handlerPOST(req) {
     try {
         checkOrigin(req);
         const a = await actor(req);
+    assertConsultant(a);
         if (a.role !== 'admin')
             throw Error('403:Admin required');
         const raw = await req.text();

@@ -7,7 +7,7 @@ import { ticketSchema } from '@/lib/school-success/crm';
 import { reportSettingsSchema, defaultReportSettings } from '@/lib/school-success/reports';
 import { gateway, publicBase } from '@/lib/school-success/live';
 import { mapLive } from '@/lib/school-success/live-mapping';
-import { actor, database, checkOrigin, failure, assertSchool, schoolTeachers, streamJson } from '@/lib/school-success/server';
+import { actor, database, checkOrigin, failure, assertSchool, assertConsultant, schoolTeachers, streamJson } from '@/lib/school-success/server';
 import { schemas } from '@/lib/school-success/domain';
 import { attachReflectionText, reflectionFetcher } from '@/lib/school-success/reflection-text';
 import { r2Request } from '@/lib/school-success/r2-evidence';
@@ -30,7 +30,7 @@ async function handlerGET(req) {
          mappedTask,admin?db.prepare("SELECT * FROM portal_entries WHERE kind='school'").all():{results:[]},
          admin?db.prepare("SELECT value FROM portal_config WHERE key='reportSettings'").first():null,
          admin?db.prepare('SELECT * FROM portal_members ORDER BY school,name').all():{results:[]},
-         loadArchives(db),loadR2Config(env,db),admin?ensureCrmArchive(db,async()=>(await mappedTask).entries):{ids:[]}
+         loadArchives(db),loadR2Config(env,db),admin&&!a.leader?ensureCrmArchive(db,async()=>(await mappedTask).entries):{ids:[]}
         ]);
         const raw=await rawTask,dataDone=performance.now();
         const local=localRows.results.map(r=>({...JSON.parse(r.payload),id:r.id,kind:r.kind,version:r.version}));
@@ -48,7 +48,7 @@ async function handlerGET(req) {
         // Written after-class reflections are small server-built documents in the lesson's evidence folder;
         // attach their text for the records this caller is already allowed to read.
         await attachReflectionText([...visibleEntries, ...(archivedEntries || [])], reflectionFetcher({ base: publicBase(), get: (key, url) => r2UploadsConfigured(config) ? r2Request(config, key, 'GET') : fetch(url, { signal: AbortSignal.timeout(8000) }) }));
-        return streamJson({ actor: {...a,allowedSchools:undefined,userId:undefined}, entries: visibleEntries, members, directory, crmArchive: a.role === 'admin' ? { createdAt: crmArchive.createdAt, count: crmArchive.ids.length } : undefined, archivedEntries, archivedRoster: a.role === 'admin' ? roster.filter(r => isArchived(archives, r.school, r.name)) : undefined, roster: a.role === 'admin' ? activeRoster : a.role === 'school-teacher' ? a.teachers.map((name) => ({ name, school: a.school })) : [], source: 'Vision · School Success', period: { from, to }, counts: a.role === 'admin' ? mapped.counts : undefined, reportSettings: a.role === 'admin' ? reportSettings : undefined, calendars: a.role === 'admin' ? calendars : undefined, uploadsEnabled: r2UploadsConfigured(config), mediaPublicBase: publicBase(), teacherSubmissionsEnabled: true, importsEnabled: a.role === 'admin' }, { headers: { 'Cache-Control': 'no-store','Server-Timing':`auth;dur=${(authDone-started).toFixed(1)}, data;dur=${(dataDone-authDone).toFixed(1)}, total;dur=${(performance.now()-started).toFixed(1)}` } });
+        return streamJson({ actor: {...a,allowedSchools:undefined,userId:undefined}, entries: visibleEntries, members, directory, crmArchive: a.role === 'admin' && !a.leader ? { createdAt: crmArchive.createdAt, count: crmArchive.ids.length } : undefined, archivedEntries, archivedRoster: a.role === 'admin' ? roster.filter(r => isArchived(archives, r.school, r.name)) : undefined, roster: a.role === 'admin' ? activeRoster : a.role === 'school-teacher' ? a.teachers.map((name) => ({ name, school: a.school })) : [], source: 'Vision · School Success', period: { from, to }, counts: a.role === 'admin' ? mapped.counts : undefined, reportSettings: a.role === 'admin' ? reportSettings : undefined, calendars: a.role === 'admin' ? calendars : undefined, uploadsEnabled: r2UploadsConfigured(config), mediaPublicBase: publicBase(), teacherSubmissionsEnabled: true, importsEnabled: a.role === 'admin' }, { headers: { 'Cache-Control': 'no-store','Server-Timing':`auth;dur=${(authDone-started).toFixed(1)}, data;dur=${(dataDone-authDone).toFixed(1)}, total;dur=${(performance.now()-started).toFixed(1)}` } });
     }
     catch (e) {
         return failure(e);
@@ -58,6 +58,8 @@ async function handlerPOST(req) {
     try {
         checkOrigin(req);
         const a = await actor(req), db = database();
+        // School leaders do not change schools, people, access, school links, the CRM or shared report defaults.
+        assertConsultant(a);
         const b = await req.json();
         const now = new Date().toISOString();
         if(a.allowedSchools&&b.kind==='school')throw Error('403:Only Super Admin may add schools');
