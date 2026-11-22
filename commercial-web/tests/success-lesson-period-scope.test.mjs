@@ -83,8 +83,8 @@ test('period counts agree with the existing School 360° and Teacher 360° calcu
  assert.equal(lessonSummary(alphaLessons).plansSubmitted,alpha.preparations,'lesson plans match School 360° prepared lessons');
  const profile=buildProfiles(entries,input().roster,from,to,defaultReportSettings).find(p=>p.school===A&&p.name===T);
  const mine=filterLessons(lessons,{teacher:chitra}),summary=lessonSummary(mine);
- assert.equal(summary.activities,profile.evidence[0].actual,'activity files match Teacher 360°');
- assert.equal(summary.writing,profile.evidence[1].actual,'writing samples match Teacher 360°');
+ assert.equal(summary.activities,profile.evidence[1].actual,'classroom activities match Teacher 360°');
+ assert.equal(summary.writing,profile.evidence[2].actual,'student written work matches Teacher 360°');
 });
 
 test('consolidated PDFs state the period rule and exclude out-of-period files; complete history is per lesson only',async()=>{

@@ -57,10 +57,10 @@ test('usage PDF keeps activity and writing links but drops preparation PDF, audi
  const before=JSON.stringify(profiles.map(p=>[p.metrics.map(m=>[m.actual,m.target,m.status]),p.evidence.map(e=>[e.actual,e.target,e.status])]));
  const doc=createReportPdf(profiles,from,to,settings,undefined,docsOption(entries)),text=pdfText(doc),links=uris(doc);
  assert.equal(JSON.stringify(profiles.map(p=>[p.metrics.map(m=>[m.actual,m.target,m.status]),p.evidence.map(e=>[e.actual,e.target,e.status])])),before);
- assert.doesNotMatch(text,/Lesson preparation PDFs|Audio recordings|After-class reflections/);
+ assert.doesNotMatch(text,/Lesson preparation PDFs|Audio recordings/);
  assert.ok(links.some(u=>u.endsWith('a1.jpg'))&&links.some(u=>u.endsWith('w1.jpg')),'activity and writing links remain');
  assert.ok(!links.some(u=>/\.wav$|plan\.pdf$|reflection\.pdf$/.test(u)),'no audio, preparation or reflection file links');
- assert.match(text,/Teacher evidence/);assert.match(text,/LP \/ Audio notes/,'quantitative evidence table still counts preparation/audio files');
+ assert.match(text,/Teacher evidence/);assert.match(text,/Lesson plans submitted/,'the evidence table counts lesson plans and reflections');assert.match(text,/After-class reflections/);
 });
 
 test('combined and per-school PDFs give every teacher only their own documentation links',async()=>{
@@ -98,7 +98,7 @@ test('the parent links to the same activity and writing files as each child, in 
    const expected=[];
    for(const profile of list){
     const groups=options.lessonDocs(profile);expected.push(...groups.map(g=>g.url));
-    for(const group of reportEvidenceGroups(profile).filter(g=>!['Lesson preparation PDFs','Audio recordings','After-class reflections'].includes(g.label))){
+    for(const group of reportEvidenceGroups(profile).filter(g=>!['Lesson plans submitted','After-class reflections','Audio recordings (previous portal)'].includes(g.label))){
      for(const file of group.files){
       const child=groups.find(g=>g.grade===file.grade&&g.section===file.section&&g.subject===file.subject);
       const target=child.fileLink(file.url);

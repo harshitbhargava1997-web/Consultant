@@ -41,7 +41,9 @@ test('Teacher 360 usage PDFs leave reflections to lesson documentation; School 3
  const dir=mkdtempSync(join(tmpdir(),'closure-'));
  const extract=pdf=>{const path=join(dir,'report.pdf');writeFileSync(path,Buffer.from(pdf.output('arraybuffer')));return execFileSync('pdftotext',[path,'-'],{encoding:'utf8'});};
  try{
- // Usage PDFs no longer list after-class reflection files, whatever the saved closure setting.
+ // Usage PDFs no longer list after-class reflection files, whatever the saved closure setting. (With evidence
+ // targets on, reflections appear only as a count in the evidence table.)
+ settings.qualitative=false;
  assert.doesNotMatch(extract(createReportPdf(profiles,'2026-11-01','2026-11-01',settings)),/After-class reflections/);
  settings.sections.closure=false;
  assert.doesNotMatch(extract(createReportPdf(profiles,'2026-11-01','2026-11-01',settings)),/After-class reflections/);

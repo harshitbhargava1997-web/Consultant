@@ -7,7 +7,7 @@ import {reportEvidenceGroups} from '../report-sequence.js';
 import {formatReportDuration as duration} from './report-units.js';
 // Files that belong in lesson documentation rather than the usage report: generated preparation PDFs,
 // audio recordings and after-class reflections. They are not deleted; they stay in lesson records.
-export const LESSON_DOCUMENTATION_ONLY = ['Lesson preparation PDFs', 'Audio recordings', 'After-class reflections'];
+export const LESSON_DOCUMENTATION_ONLY = ['Lesson plans submitted', 'After-class reflections', 'Audio recordings (previous portal)'];
 // options.lessonDocs(profile) -> [{grade, section, subject, lessons, url}] adds the lesson-documentation summary.
 export function createReportPdf(profiles, from, to, settings, comparison, options = {}) {
     if (!profiles.length)
@@ -38,7 +38,7 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
             doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url }); } }); y = doc.lastAutoTable.finalY + 9; };
     const banner = (kicker, title, subtitle) => { doc.setFillColor(navy); doc.rect(0, 0, 210, 8, 'F'); text('ONELERN  /  SCHOOL SUCCESS', 16, 19, 9, teal, true); text(kicker.toUpperCase(), 16, 32, 9, '#647780', true); doc.setFont('Report', 'bold'); doc.setFontSize(23); const lines = doc.splitTextToSize(title, 178); text(lines, 16, 43, 23, navy, true); y = 45 + lines.length * 8; paragraph(subtitle); doc.setDrawColor('#c6ded9'); doc.line(16, y, 194, y); y += 10; };
     const usageKpis = [0, 1, 2, 3].filter(i => settings.quantitative && settings.daily[i] > 0 && includedMetric(i, settings));
-    const evidenceKpis = [0, 1, 2, 3, 4].filter(i => settings.qualitative && settings.sections.evidence && settings.evidence[i] > 0);
+    const evidenceKpis = [0, 1, 2, 3, 4, 5].filter(i => settings.qualitative && settings.sections.evidence && settings.evidence[i] > 0);
     const schools = [...new Set(profiles.map(p => p.school))];
     for (const school of schools) {
         if (school !== schools[0])
@@ -84,7 +84,7 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                 table(['Activity', 'Sessions', 'Preparation time'], [['Lesson preparation', p.metrics[0].logs.length, duration(p.metrics[0].actual)]]);
             }
             const groups = options.lessonDocs?.(p) || [];
-            if (options.lessonDocs) {
+            if (options.lessonDocs && settings.sections.documentation !== false) {
                 heading('Lesson documentation');
                 if (!groups.length) paragraph('No lesson plans or classroom evidence were recorded in this review period.');
                 else {
@@ -93,8 +93,10 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                     table(['Class / section', 'Subject', 'Reporting period', 'Lessons documented', 'Lesson documentation'], groups.map(g => [cls(g), g.subject || '—', period, String(g.lessons), 'Open lesson documentation\u00a0↗'].map(String)), groups.map(g => g.url), 4, { 0: { cellWidth: 32 }, 1: { cellWidth: 29 }, 2: { cellWidth: 29 }, 3: { cellWidth: 30, halign: 'center' }, 4: { cellWidth: 58 } });
                 }
             }
-            heading('Book / chapter breakdown');
-            table(['Book / chapter', 'Grade', 'Subject', 'Sessions', 'Time'], p.books.map(b => [b.title, b.grade || '—', b.subject || '—', b.sessions, duration(b.minutes)]));
+            if (settings.sections.book !== false) {
+                heading('Book / chapter breakdown');
+                table(['Book / chapter', 'Grade', 'Subject', 'Sessions', 'Time'], p.books.map(b => [b.title, b.grade || '—', b.subject || '—', b.sessions, duration(b.minutes)]));
+            }
             for (const i of [2, 3]) {
                 if (!includedMetric(i, settings) || (i === 2 && !settings.sections.additionalDetails))
                     continue;
@@ -115,13 +117,15 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                     if (!url) throw Error('The file for ' + [p.name, file.grade, file.section, file.subject, file.date].filter(Boolean).join(' · ') + ' could not be linked to its lesson. Refresh the selected period and export again.');
                     return url;
                 }
-                const fileOrder=['Lesson preparation PDFs','Audio recordings','Activity files','Writing samples','Phonics evidence'];
+                const fileOrder=['Classroom activities','Student written work','Remedial support','Student portfolio / assessment','Phonics evidence (previous portal)','Event pictures (previous portal)'];
                 const order=label=>{const i=fileOrder.indexOf(label);return i<0?fileOrder.length:i;};
                 for (const e of reportEvidenceGroups(p).sort((a,b)=>order(a.label)-order(b.label)))
                     if (e.files.length && !LESSON_DOCUMENTATION_ONLY.includes(e.label)) {
                         heading(e.label);
-                        const action = gated && e.label === 'Activity files' ? 'Open activity' : gated && e.label === 'Writing samples' ? 'Open writing sample' : 'Open file';
-                        table(['Open evidence', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => [action + ' ' + (i + 1), f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]), e.files.map(evidenceUrl));
+                        const action = gated && e.label === 'Classroom activities' ? 'Open activity' : gated && e.label === 'Student written work' ? 'Open writing sample' : 'Open file';
+                        // Without lesson documentation no file is linked, so no report exposes direct storage links.
+                        const linked = settings.sections.documentation !== false;
+                        table([linked ? 'Open evidence' : 'Evidence', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => [(linked ? action : e.label) + ' ' + (i + 1), f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]), linked ? e.files.map(evidenceUrl) : undefined);
                     }
             }
             if (settings.sections.observations) {
