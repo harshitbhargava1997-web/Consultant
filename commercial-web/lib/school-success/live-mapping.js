@@ -1,10 +1,19 @@
 import { normalizeUsage, usageIdentity, canonical } from './domain.js';
 import {feedbackText} from './lesson-reviews.js';
 const string = (x) => x == null ? '' : String(x).trim();
+// Media addresses used before the school's own media domain. Files stored under them are the same objects in the
+// same bucket, so they are presented under the current media address (nothing stored is rewritten).
+export const LEGACY_MEDIA_BASES = ['https://pub-584a50ce1c7944dea02be2edbc4188aa.r2.dev'];
+export function currentMediaUrl(url, base) {
+    const current = String(base || '').replace(/\/$/, '');
+    if (!current || typeof url !== 'string') return url;
+    for (const legacy of LEGACY_MEDIA_BASES) { const old = legacy.replace(/\/$/, ''); if (old !== current && url.startsWith(old + '/')) return current + url.slice(old.length); }
+    return url;
+}
 export function evidenceUrl(value, base) { const s = string(value); if (!s || ['nan', 'none', 'null'].includes(s.toLowerCase()))
     return ''; if (/^https?:\/\//i.test(s)) {
     try {
-        return new URL(s).href;
+        return currentMediaUrl(new URL(s).href, base);
     }
     catch {
         return '';
@@ -59,7 +68,7 @@ export async function mapLive(raw, publicBase) {
             const item = { id: String(r.id), recordId: String(r.id), kind: 'submission', school, teacher, date, grade: string(r.Grade), section: string(r.Section), subject: string(r.Subject), topic: string(r.Book) || 'Classroom practice', stage: r.lesson_stage || '', plannedDate: r.planned_lesson_on || '', conductedOn: r.conducted_on || '', evidenceAt: r.evidence_submitted_at || '', reflection: string(r.lesson_reflection), materials: string(r.materials_notes), files, review: feedbackText(reviewHistory), reviewHistory, version: review?.updated_at || null, uploadedBy: r.Uploaded_By, submissionId: r.submission_id, periodId: string(r.lesson_period_id), preparationSavedAt: string(r.preparation_saved_at), lessonSubmittedAt: string(r.submitted_at || r.created_at), reviewedAt };
             if (r.lesson_stage && r.planned_lesson_on) {
                 const events = Array.isArray(r.lesson_evidence_history) ? r.lesson_evidence_history : [];
-                const eventUrls = new Set(events.flatMap((e) => Object.values(e.files || {}).flatMap(v => string(v).split(','))));
+                const eventUrls = new Set(events.flatMap((e) => Object.values(e.files || {}).flatMap(v => string(v).split(',').map(x => evidenceUrl(x, publicBase)).filter(Boolean))));
                 const preparationFiles = files.filter(f => ['Voice_Note_Link', 'Lesson_Plan_Picture'].includes(f.column) && !eventUrls.has(f.url));
                 const localDay = (v) => v ? new Date(/Z$|[+-]\d\d:\d\d$/.test(v) ? v : v + 'Z').toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : '';
                 entries.push({ ...item, id: item.id + ':preparation', date: localDay(r.preparation_saved_at) || r.planned_lesson_on, feedStage: 'Lesson preparation', stage: 'preparation_saved', files: preparationFiles });
