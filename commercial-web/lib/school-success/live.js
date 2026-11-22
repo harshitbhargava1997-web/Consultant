@@ -1,5 +1,5 @@
 import { actor, assertSchool } from './server';
-import {hasLessonRecord} from './live-mapping.js';
+import {hasLessonRecord,LEGACY_MEDIA_BASES} from './live-mapping.js';
 import {readRubricRows,appendRubric} from './lesson-review-store.js';
 import {lessonRecordId} from './lesson-reviews.js';
 import { service, checked } from './database';
@@ -302,5 +302,5 @@ export async function gateway(body) {
     }
     return value;
 }
-export function publicBase() { return process.env.SUCCESS_R2_PUBLIC_BASE_URL || 'https://pub-584a50ce1c7944dea02be2edbc4188aa.r2.dev'; }
+export function publicBase() { return process.env.SUCCESS_R2_PUBLIC_BASE_URL || LEGACY_MEDIA_BASES[0]; }
 

@@ -2,6 +2,7 @@ import {withRequest} from '@/lib/school-success/server';
 import { env } from '@/lib/school-success/environment';
 import { actor, database, checkOrigin, failure } from '@/lib/school-success/server';
 import { gateway, publicBase } from '@/lib/school-success/live';
+import { currentMediaUrl } from '@/lib/school-success/live-mapping';
 import { scopedSubmission, evidencePlan, submissionRecords } from '@/lib/school-success/teacher-submissions';
 import { seal, unseal, r2UploadsConfigured, r2Request, loadR2Config } from '@/lib/school-success/r2-evidence';
 import { assertResumeAccess, lessonFromRows, assertEvidenceMatches } from '@/lib/school-success/lesson-workflow';
@@ -67,6 +68,7 @@ async function handlerPOST(req) {
             const grant = await resumeGrant(body.resume);
             const data = await gateway({ action: 'readLesson', id: grant.id, school: grant.school, teacher: grant.teacher, actor: a.email });
             const lesson = lessonFromRows(data.rows);
+            lesson.files = lesson.files.map(f => ({ ...f, url: currentMediaUrl(f.url, publicBase()) }));
             // Show saved written reflections as text in the selected lesson (never raw JSON).
             await attachReflectionText([{ kind: 'submission', files: lesson.files }], reflectionFetcher({ base: publicBase(), get: (key, url) => r2UploadsConfigured(config) ? r2Request(config, key, 'GET') : fetch(url, { signal: AbortSignal.timeout(8000) }) }));
             // Recorded feedback stays visible to School Success administrators, as in the earlier feed.
