@@ -3,7 +3,7 @@ import {withRequest,actor,database,checkOrigin,failure} from '@/lib/school-succe
 import {service,checked} from '@/lib/school-success/database';
 import {moduleGrantSchema} from '@/lib/school-success/module-access';
 import {moduleSchools} from '@/lib/school-success/module-schools';
-import {normalizePhone} from '@/lib/auth';
+import {normalizePhone,mobileLoginEmail} from '@/lib/auth';
 export const runtime='nodejs';
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
 // School leaders (principals and coordinators) managed by Super Admin from School Success → Schools & teachers.
@@ -34,9 +34,18 @@ async function userByPhone(phone){
  for(let page=1;;page++){
   const {data,error}=await service().auth.admin.listUsers({page,perPage:1000});
   if(error)throw Error('503:Could not check existing accounts');
-  const hit=data.users.find(u=>u.phone&&digits(u.phone)===want);
+  const alias=mobileLoginEmail(phone),hit=data.users.find(u=>u.phone&&digits(u.phone)===want||u.email===alias);
   if(hit||data.users.length<1000)return hit||null;
  }
+}
+// Mobile sign-in without SMS: the account also carries an internal sign-in address made from its mobile number.
+// Added to accounts that have none, so older leader accounts sign in too. Accounts with a real email keep it.
+async function ensureMobileLogin(auth,u){
+ if(!u?.phone||u.email)return u;
+ const email=mobileLoginEmail(u.phone);if(!email)return u;
+ const {data,error}=await auth.updateUserById(u.id,{email,email_confirm:true});
+ if(error)throw Error('409:Could not enable mobile sign-in for this account.');
+ return data?.user||{...u,email};
 }
 const statusOf=u=>u?.app_metadata?.must_change_password?'Waiting for first sign-in':'Active';
 async function handlePOST(req){
@@ -51,8 +60,9 @@ async function handlePOST(req){
    const leaders=[];
    for(const g of all.values()){
     if(!g.enabled||g.role!=='leader'||!g.schools.includes(input.school))continue;
-    const {data}=await auth.getUserById(g.userId);const u=data?.user;
-    leaders.push({userId:g.userId,name:u?.user_metadata?.full_name||'',mobile:u?.phone?'+'+digits(u.phone):'',email:u?.email||'',title:g.title||'',status:u?statusOf(u):'Account missing',managed:Boolean(u?.app_metadata?.school_success_leader)});
+    const {data}=await auth.getUserById(g.userId);let u=data?.user;
+    if(u?.app_metadata?.school_success_leader)u=await ensureMobileLogin(auth,u);
+    leaders.push({userId:g.userId,name:u?.user_metadata?.full_name||'',mobile:u?.phone?'+'+digits(u.phone):'',email:u?.email&&!u.email.endsWith('@mobile.schoolsuccess.in')?u.email:'',title:g.title||'',status:u?statusOf(u):'Account missing',managed:Boolean(u?.app_metadata?.school_success_leader)});
    }
    leaders.sort((x,y)=>(x.title+x.name).localeCompare(y.title+y.name));
    return Response.json({school:input.school,leaders},{headers});
@@ -66,8 +76,9 @@ async function handlePOST(req){
     const g=all.get(user.id);
     if(admin)throw Error('409:This mobile number belongs to a Super Admin account.');
     if(g?.enabled&&g.role!=='leader')throw Error('409:This mobile number already has consultant access to School Success.');
+    user=await ensureMobileLogin(auth,user);
    }else{
-    const made=await auth.createUser({phone,phone_confirm:true,password:input.password,user_metadata:{full_name:input.name},app_metadata:{must_change_password:true,school_success_leader:true}});
+    const made=await auth.createUser({phone,phone_confirm:true,email:mobileLoginEmail(phone),email_confirm:true,password:input.password,user_metadata:{full_name:input.name},app_metadata:{must_change_password:true,school_success_leader:true}});
     if(made.error)throw Error(/password/i.test(made.error.message||'')?'The sign-in service rejected this starting password. Try a longer one.':'409:Could not create the sign-in for this mobile number.');
     user=made.data.user;created=true;
    }
@@ -81,6 +92,7 @@ async function handlePOST(req){
   if(input.action==='reset'){
    const {data}=await auth.getUserById(input.userId);const u=data?.user;
    if(!u?.app_metadata?.school_success_leader)throw Error('403:This sign-in was not created here. Reset its password where it was created.');
+   await ensureMobileLogin(auth,u);
    const {error}=await auth.updateUserById(u.id,{password:input.password,app_metadata:{...u.app_metadata,must_change_password:true}});
    if(error)throw Error(/password/i.test(error.message||'')?'The sign-in service rejected this starting password. Try a longer one.':'503:Password could not be reset');
    await saveGrant(g,a,'reset-school-leader-password');

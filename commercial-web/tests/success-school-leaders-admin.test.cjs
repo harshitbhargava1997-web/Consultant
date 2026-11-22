@@ -15,8 +15,8 @@ function harness(){
  const auth={admin:{
   listUsers:async()=>({data:{users:[...users.values()]},error:null}),
   getUserById:async id=>({data:{user:users.get(id)||null},error:null}),
-  createUser:async u=>{if(u.password.length<6)return {data:null,error:{message:'Password should be at least 6 characters'}};const user={id:uid(),phone:u.phone.replace('+',''),phone_confirmed_at:'x',user_metadata:u.user_metadata,app_metadata:u.app_metadata};users.set(user.id,user);return {data:{user},error:null};},
-  updateUserById:async(id,patch)=>{const u=users.get(id);Object.assign(u,{app_metadata:patch.app_metadata||u.app_metadata,password:patch.password});return {data:{user:u},error:null};},
+  createUser:async u=>{if(u.password.length<6)return {data:null,error:{message:'Password should be at least 6 characters'}};const user={id:uid(),phone:u.phone.replace('+',''),email:u.email,phone_confirmed_at:'x',user_metadata:u.user_metadata,app_metadata:u.app_metadata};users.set(user.id,user);return {data:{user},error:null};},
+  updateUserById:async(id,patch)=>{const u=users.get(id);Object.assign(u,{app_metadata:patch.app_metadata||u.app_metadata,...(patch.password?{password:patch.password}:{}),...(patch.email?{email:patch.email}:{})});return {data:{user:u},error:null};},
   deleteUser:async id=>{users.delete(id);return {error:null};}}};
  const from=table=>{const f=[];const q={select(){return q;},eq(k,v){f.push([k,v]);return q;},like(){return q;},
   async maybeSingle(){if(table==='literacy_platform_admins')return {data:admins.has(f[0][1])?{user_id:f[0][1]}:null,error:null};return {data:null,error:null};},
@@ -83,4 +83,21 @@ test('School management is a third school leader role with the same access',asyn
  const u=[...h.users.values()].find(x=>x.user_metadata.full_name==='Rakesh Jain');
  assert.deepEqual([h.grant(u.id).role,h.grant(u.id).title],['leader','School management']);
  assert.equal((await add(h,{title:'Owner',mobile:'9811122244'})).status,400,'only the three titles');
+});
+
+test('mobile sign-in works without SMS: leader accounts carry an internal sign-in address; older leader accounts are repaired',async()=>{
+ const {mobileLoginEmail,loginLabel}=await import('../lib/auth.js');
+ assert.equal(mobileLoginEmail('98765 43210'),'919876543210@mobile.schoolsuccess.in');
+ assert.equal(mobileLoginEmail('+91 98765-43210'),'919876543210@mobile.schoolsuccess.in');
+ assert.equal(mobileLoginEmail('12345'),'');
+ assert.equal(loginLabel({email:'919876543210@mobile.schoolsuccess.in',phone:'919876543210'}),'+919876543210','people see their mobile number, not the internal address');
+ const h=harness();await add(h);const [u]=[...h.users.values()];
+ assert.equal(u.email,'919876543210@mobile.schoolsuccess.in');
+ // An account created before this change (phone only) is repaired when the leaders list is opened.
+ delete u.email;
+ const list=await h.call({action:'list',school:S});
+ assert.equal(u.email,'919876543210@mobile.schoolsuccess.in');
+ assert.equal(list.body.leaders[0].email,'','the internal address is not shown as an email');
+ // A linked account that already has a real email keeps it.
+ u.email='meera@example.test';await add(h,{school:'Green Valley School'});assert.equal(u.email,'meera@example.test');
 });

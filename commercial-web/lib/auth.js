@@ -20,5 +20,15 @@ export function isConfirmedUser(user) {
 }
 
 export function loginLabel(user) {
+  if(user?.email&&user.email.endsWith("@"+MOBILE_LOGIN_DOMAIN)&&user.phone)return "+"+String(user.phone).replace(/^\+/,"");
   return user?.email||user?.phone||"User";
+}
+
+// Mobile-number sign-in without SMS: accounts created for a mobile number also carry this internal sign-in address
+// (never emailed; schoolsuccess.in has no mail service on this subdomain). The sign-in page uses it when a mobile
+// number is entered, then falls back to the phone sign-in for older phone-only accounts.
+export const MOBILE_LOGIN_DOMAIN="mobile.schoolsuccess.in";
+export function mobileLoginEmail(phone){
+  const digits=String(normalizePhone(phone)||"").replace(/\D/g,"");
+  return digits?digits+"@"+MOBILE_LOGIN_DOMAIN:"";
 }
