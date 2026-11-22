@@ -3,7 +3,10 @@ import {mapLimited} from '@/lib/school-success/parallel';
 import {requestJson} from '@/lib/school-success/request-json';
 import {successFetch} from '@/lib/school-success/client';
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle, ClipboardList, Camera, ArrowLeft, Languages, BookOpenCheck } from 'lucide-react';
+import { CheckCircle, ClipboardList, Camera, ArrowLeft, Languages, BookOpenCheck, KeyRound, LogOut } from 'lucide-react';
+import TeacherLogin, {ChangePin} from './teacher-login';
+import TeacherPinAdmin from './teacher-pin-admin';
+import {clearTeacherSession} from '@/lib/school-success/teacher-session';
 import LessonPlanForm, {newBlock, dayLabel, hindiOptions} from './lesson-plan-form';
 import {SummaryStrip, PendingEvidence, FeedbackCard} from './teacher-summary';
 import SchoolSharingLinks from './school-sharing-links';
@@ -28,7 +31,7 @@ export default function TeacherPortal({ data, school, refresh }) {
     const [selectedSchool, setSchool] = useState(admin ? school || schools[0] || '' : data.actor.school), [teacher, setTeacher] = useState(admin ? '' : data.actor.name);
     const [plan, setPlan] = useState(() => emptyPlan('daily')), [busy, setBusy] = useState(''), [error, setError] = useState(''), [receipt, setReceipt] = useState(null), [mode, setMode] = useState(''), [resumeToken, setResumeToken] = useState(''), [savedLinks, setSavedLinks] = useState([]);
     const [summary, setSummary] = useState(null), [summaryError, setSummaryError] = useState(''), [summaryLoading, setSummaryLoading] = useState(false);
-    const top = useRef(null);
+    const top = useRef(null), [pinPanel, setPinPanel] = useState(false), [pinNotice, setPinNotice] = useState('');
     useEffect(() => { if (admin && school) setSchool(school); }, [admin, school]);
     useEffect(() => { const token = new URLSearchParams(location.search).get('resume'); if (token) { setResumeToken(token); setMode('evidence'); } try {
         const stored = JSON.parse(localStorage.getItem('school-success:teacher-lesson-links-v1') || '[]');
@@ -62,9 +65,7 @@ export default function TeacherPortal({ data, school, refresh }) {
         finally { setSummaryLoading(false); }
     }
     useEffect(() => { setSummary(null); if (language) void loadSummary(); }, [selectedSchool, teacherValue, language]);
-    async function selectTeacher(name, nextMode = mode) { const previousUrl=location.href; const url = new URL(location.href); url.searchParams.set('teacher', name); url.searchParams.delete('resume'); historyReplace(url); setMode(nextMode); setResumeToken(''); setReceipt(null); setBusy(t('Opening teacher workspace','शिक्षक का कार्यक्षेत्र खुल रहा है')); try {
-        await refresh();
-    } catch (e) { historyReplace(new URL(previousUrl));setError(e.message); } finally {setBusy('');} }
+    async function signOut() { clearTeacherSession(); setMode(''); setResumeToken(''); setReceipt(null); setPinPanel(false); const url = new URL(location.href); url.searchParams.delete('teacher'); url.searchParams.delete('resume'); historyReplace(url); try { await refresh(); } catch (e) { setError(e.message); } }
     function historyReplace(url) { window.history.replaceState(null, '', url.href); }
     function go(next) { const url = new URL(location.href); url.searchParams.delete('resume'); historyReplace(url); if (next !== 'evidence') setResumeToken(''); setMode(next); setError(''); requestAnimationFrame(() => top.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }
     function openLesson(token) { setResumeToken(token); setMode('evidence'); setReceipt(null); requestAnimationFrame(() => document.getElementById('lesson-evidence')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }
@@ -122,15 +123,20 @@ export default function TeacherPortal({ data, school, refresh }) {
     const option = v => language === 'hi' ? (hindiOptions[v] || v.replace('Grade ', 'कक्षा ')) : v;
 
     if(!language)return <section className="lp-language"><span className="lp-language-icon"><Languages size={28}/></span><h2>Choose your language</h2><p>अपनी भाषा चुनें</p><div className="lp-language-options"><button type="button" onClick={()=>chooseLanguage('en')}><span>Aa</span><b>English</b></button><button type="button" onClick={()=>chooseLanguage('hi')}><span>अ</span><b>हिन्दी</b></button></div></section>;
+    if(schoolLink && !data.actor.name)return <div className="teacher-workspace tp" lang={language}><div className="tp-top"><div><span className="eyebrow">{t('SCHOOL SUCCESS','स्कूल सक्सेस')}</span><h2>{t('Teacher sign-in','शिक्षक साइन इन')}</h2></div><label className="tp-language"><Languages size={16}/><select aria-label={t('Language','भाषा')} value={language} onChange={e=>chooseLanguage(e.target.value)}><option value="en">English</option><option value="hi">हिन्दी</option></select></label></div><TeacherLogin language={language} school={data.actor.school} teachers={roster.map(r => r.name)} onSignedIn={async () => { const url = new URL(location.href); url.searchParams.delete('teacher'); historyReplace(url); await refresh(); }}/></div>;
     const identity = admin ? <div className="lp-shared"><label className="field"><span>{t('School','विद्यालय')}</span><select value={selectedSchool} onChange={e => { setSchool(e.target.value); setTeacher(''); }}><option value="">{t('Select school','विद्यालय चुनें')}</option>{schools.map(s => <option key={s}>{s}</option>)}</select></label><label className="field"><span>{t('Teacher','शिक्षक')}</span>{teachers.length ? <select value={teacherValue} onChange={e => setTeacher(e.target.value)}><option value="">{t('Select teacher','शिक्षक चुनें')}</option>{teachers.map(n => <option key={n}>{n}</option>)}</select> : <input value={teacher} onChange={e => setTeacher(e.target.value)}/>}</label></div>
-        : schoolLink ? <div className="lp-shared"><div className="field"><span>{t('School','विद्यालय')}</span><b>{selectedSchool}</b></div><label className="field"><span>{t('Teacher','शिक्षक')}</span><select value={teacherValue} onChange={e => void selectTeacher(e.target.value)}><option value="">{t('Select teacher','शिक्षक चुनें')}</option>{teachers.map(n => <option key={n}>{n}</option>)}</select></label></div> : null;
+        : null;
     const who = JSON.stringify([data.actor.email || data.actor.role, selectedSchool, teacherValue]);
     return <div className="teacher-workspace tp" lang={language} ref={top}>
      <div className="tp-top">
       <div><span className="eyebrow">{t('REFLECT • SHARE • GROW','सोचें • साझा करें • आगे बढ़ें')}</span><h2>{teacherValue ? t('Welcome, ','नमस्ते, ') + teacherValue : t('Teacher workspace','शिक्षक कार्यक्षेत्र')}</h2><p>{selectedSchool}</p></div>
-      <label className="tp-language"><Languages size={16}/><select aria-label={t('Language','भाषा')} value={language} disabled={!!busy} onChange={e=>chooseLanguage(e.target.value)}><option value="en">English</option><option value="hi">हिन्दी</option></select></label>
+      <div className="tp-tools"><label className="tp-language"><Languages size={16}/><select aria-label={t('Language','भाषा')} value={language} disabled={!!busy} onChange={e=>chooseLanguage(e.target.value)}><option value="en">English</option><option value="hi">हिन्दी</option></select></label>
+       {schoolLink && <><button type="button" className="tp-chip" disabled={!!busy} onClick={() => { setPinPanel(v => !v); setPinNotice(''); }}><KeyRound size={15}/>{t('Change PIN','PIN बदलें')}</button><button type="button" className="tp-chip" disabled={!!busy} onClick={() => void signOut()}><LogOut size={15}/>{t('Log out','लॉग आउट')}</button></>}</div>
      </div>
+     {schoolLink && pinPanel && <ChangePin language={language} teacher={teacherValue} onCancel={() => setPinPanel(false)} onDone={() => { setPinPanel(false); setPinNotice(t('Your new PIN is saved. Other phones were signed out.','आपका नया PIN सहेजा गया। दूसरे फ़ोन से साइन आउट हो गया।')); }}/>}
+     {pinNotice && <div className="alert success" role="status">{pinNotice}</div>}
      {admin && <SchoolSharingLinks schools={[...new Set(roster.map(r => r.school))].filter(Boolean).sort()}/>}
+     {admin && <TeacherPinAdmin schools={[...new Set(roster.map(r => r.school))].filter(Boolean).sort()}/>}
      {!data.uploadsEnabled && <div className="alert" role="status">Lesson details and written reflections are active. Photo, video and voice uploads are awaiting the administrator’s media-storage connection.</div>}
      {teacherValue && mode !== 'preparation' && <SummaryStrip summary={summary} language={language}/>}
      {receipt && <section className="ts-card tp-receipt" role="status"><div className="ts-card-head"><div><h3><CheckCircle size={20}/> {receipt.type === 'weekly' ? t('Weekly plan saved','साप्ताहिक योजना सहेजी गई') : t('Lesson plan saved','पाठ योजना सहेजी गई')}</h3><p>{t('After teaching, your lessons appear under “Lessons needing evidence”.','पढ़ाने के बाद आपके पाठ “प्रमाण बाकी वाले पाठ” में दिखेंगे।')}</p></div></div>
@@ -145,9 +151,9 @@ export default function TeacherPortal({ data, school, refresh }) {
       <PendingEvidence summary={summary} language={language} onOpen={openLesson} limit={3} onShowAll={() => go('evidence')} loading={summaryLoading} error={summaryError} onRetry={loadSummary}/>
       <FeedbackCard summary={summary} language={language} who={who} onOpen={openLesson}/>
      </div>}
-     {mode === '' && !teacherValue && (admin || schoolLink) && <section className="ts-card"><div className="ts-empty"><BookOpenCheck size={28}/><p>{t('Choose a teacher to see their lessons.','पाठ देखने के लिए शिक्षक चुनें।')}</p></div>{identity}</section>}
+     {mode === '' && !teacherValue && admin && <section className="ts-card"><div className="ts-empty"><BookOpenCheck size={28}/><p>{t('Choose a teacher to see their lessons.','पाठ देखने के लिए शिक्षक चुनें।')}</p></div>{identity}</section>}
      {mode === 'evidence' && <>
-      {(admin || schoolLink) && <section className="ts-card">{identity}</section>}
+      {admin && <section className="ts-card">{identity}</section>}
       {!resumeToken && <PendingEvidence summary={summary} language={language} onOpen={openLesson} loading={summaryLoading} error={summaryError} onRetry={loadSummary}/>}
       <div id="lesson-evidence"><LessonEvidence language={language} key={selectedSchool + '|' + teacherValue + '|' + resumeToken} token={resumeToken} headers={contextHeaders} uploadsEnabled={data.uploadsEnabled} school={selectedSchool} teacher={teacherValue} compactSearch onSaved={async () => { void loadSummary(); if (admin) await refresh(); }}/></div>
       {savedLinks.some(l => l.school === selectedSchool && l.teacher === teacherValue) && <section className="ts-card"><details><summary>{t('Saved lessons on this device','इस उपकरण पर सहेजे गए पाठ')}</summary>{savedLinks.filter(l => l.school === selectedSchool && l.teacher === teacherValue).map(l => <p key={l.submissionId}><a href={l.url}>{dayLabel(l.date, language) || l.date} · {l.teacher}</a></p>)}</details></section>}
