@@ -3,5 +3,5 @@ export const classroomEvidenceCategories={
  activity:'Classroom activities',
  writing:'Student work',
  remedial:'Remedial plan / support shared with students',
- portfolio:'Student portfolio'
+ portfolio:'Student portfolio / assessment'
 };

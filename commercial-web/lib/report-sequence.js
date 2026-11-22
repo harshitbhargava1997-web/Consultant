@@ -17,5 +17,5 @@ export function splitStoredFiles(files=[]){return [
  {label:'',files:chronologicalRows(files.filter(f=>!isClosureFile(f)&&!isRemedialFile(f)&&!['lesson_plan','voice'].includes(f.category)&&!['Lesson_Plan_Picture','Voice_Note_Link'].includes(column(f))))}
  ].filter(g=>g.files.length);}
 export function reportEvidenceGroups(profile){
- return [...profile.evidence.flatMap((e,i)=>i===2?splitStoredFiles(e.files).map(g=>({label:g.label||e.label,files:g.files})):[{label:e.label,files:chronologicalRows(e.files)}]),{label:'After-class reflections',files:chronologicalRows(profile.closures||[])},{label:'Remedial plans / support shared with students',files:chronologicalRows(profile.remedials||[])},{label:'Event pictures',files:chronologicalRows(profile.events||[])}];
+ return [...profile.evidence.map(e=>({label:e.label,files:chronologicalRows(e.files)})),...(profile.legacyEvidence||[]).map(g=>({label:g.label,files:chronologicalRows(g.files)})),{label:'Event pictures (previous portal)',files:chronologicalRows(profile.events||[])}];
 }
