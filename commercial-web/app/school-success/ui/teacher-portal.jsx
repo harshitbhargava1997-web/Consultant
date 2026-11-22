@@ -2,33 +2,41 @@
 import {mapLimited} from '@/lib/school-success/parallel';
 import {requestJson} from '@/lib/school-success/request-json';
 import {successFetch} from '@/lib/school-success/client';
-import { useEffect, useState } from 'react';
-import { CheckCircle, BookOpen, ClipboardList, Camera } from 'lucide-react';
-import GuidedPlan from './guided-plan';
-
+import { useEffect, useRef, useState } from 'react';
+import { CheckCircle, ClipboardList, Camera, ArrowLeft, Languages, BookOpenCheck } from 'lucide-react';
+import LessonPlanForm, {newBlock, dayLabel, hindiOptions} from './lesson-plan-form';
+import {SummaryStrip, PendingEvidence, FeedbackCard} from './teacher-summary';
 import SchoolSharingLinks from './school-sharing-links';
 import LessonEvidence from './lesson-evidence';
-import { submissionSchema, submissionRecords } from '@/lib/school-success/teacher-submissions';
+import { submissionSchema } from '@/lib/school-success/teacher-submissions';
+import { planSubmissions, nextSchoolDay, PLAN_TYPES } from '@/lib/school-success/planning-guide';
 const day = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-const newPeriod = () => ({ id: crypto.randomUUID(), grade: '', section: 'A', subject: '', topic: '', reflection: '', materials: '', category: 'activity', files: [] });
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function storedType(){try{const v=localStorage.getItem('school-success:plan-type');return PLAN_TYPES.includes(v)?v:'daily';}catch{return 'daily';}}
+export function emptyPlan(type=storedType(),today=day()){const first=nextSchoolDay(today);return {v:2,type,date:first,shared:{grade:'',section:'A',subject:'',submissionId:crypto.randomUUID()},blocks:[newBlock(type==='weekly'?{date:first}:{})],saved:{}};}
+// Restores a planning draft from this tab, including drafts saved by the earlier one-date form.
+export function restoreDraft(raw){
+ if(!raw||typeof raw!=='object')return null;
+ if(Array.isArray(raw.periods)&&uuid.test(raw.id||''))return {...emptyPlan('daily'),date:raw.date,shared:{grade:'',section:'A',subject:'',submissionId:raw.id},blocks:raw.periods.filter(p=>uuid.test(p?.id||'')).map(p=>({...newBlock(),...p,files:undefined}))};
+ if(raw.v!==2||!PLAN_TYPES.includes(raw.type)||!Array.isArray(raw.blocks)||!raw.blocks.length||!uuid.test(raw.shared?.submissionId||''))return null;
+ if(raw.blocks.some(b=>!uuid.test(b?.id||'')||!uuid.test(b?.submissionId||'')))return null;
+ return {...raw,saved:raw.saved&&typeof raw.saved==='object'?raw.saved:{}};
+}
 export default function TeacherPortal({ data, school, refresh }) {
     const admin = data.actor.role === 'admin', schoolLink = data.actor.role === 'school-teacher', roster = data.roster || [];
     const schools = [...new Set([...roster.map(r => r.school), ...(data.entries || []).map((r) => r.school || r.name)])].filter(Boolean).sort();
-    const [selectedSchool, setSchool] = useState(admin ? school || schools[0] || '' : data.actor.school), [teacher, setTeacher] = useState(admin ? '' : data.actor.name), [date, setDate] = useState(day()), [periods, setPeriods] = useState(() => [newPeriod()]), [submissionId, setId] = useState(() => crypto.randomUUID()), [busy, setBusy] = useState(''), [error, setError] = useState(''), [receipt, setReceipt] = useState(null), [mode, setMode] = useState(''), [resumeToken, setResumeToken] = useState(''), [savedLinks, setSavedLinks] = useState([]);
-    useEffect(() => { if (admin && school)
-        setSchool(school); }, [admin, school]);
-    useEffect(() => { const token = new URLSearchParams(location.search).get('resume'); if (token) {
-        setResumeToken(token);
-        setMode('evidence');
-    } try {
+    const [selectedSchool, setSchool] = useState(admin ? school || schools[0] || '' : data.actor.school), [teacher, setTeacher] = useState(admin ? '' : data.actor.name);
+    const [plan, setPlan] = useState(() => emptyPlan('daily')), [busy, setBusy] = useState(''), [error, setError] = useState(''), [receipt, setReceipt] = useState(null), [mode, setMode] = useState(''), [resumeToken, setResumeToken] = useState(''), [savedLinks, setSavedLinks] = useState([]);
+    const [summary, setSummary] = useState(null), [summaryError, setSummaryError] = useState(''), [summaryLoading, setSummaryLoading] = useState(false);
+    const top = useRef(null);
+    useEffect(() => { if (admin && school) setSchool(school); }, [admin, school]);
+    useEffect(() => { const token = new URLSearchParams(location.search).get('resume'); if (token) { setResumeToken(token); setMode('evidence'); } try {
         const stored = JSON.parse(localStorage.getItem('school-success:teacher-lesson-links-v1') || '[]');
-        if (Array.isArray(stored))
-            setSavedLinks(stored.filter(l => typeof l?.url === 'string' && l.url.startsWith(location.origin + '/school-success?') && typeof l.submissionId === 'string'));
-    }
-    catch { } }, []);
+        if (Array.isArray(stored)) setSavedLinks(stored.filter(l => typeof l?.url === 'string' && l.url.startsWith(location.origin + '/school-success?') && typeof l.submissionId === 'string'));
+    } catch { } }, []);
     useEffect(() => { const open = () => { const url = new URL(location.href); url.searchParams.delete('resume'); window.history.replaceState(null, '', url.href); setMode('preparation'); setResumeToken(''); requestAnimationFrame(() => document.getElementById('teacher-submission-form')?.scrollIntoView({ behavior: 'smooth' })); }; window.addEventListener('teacher-new-preparation', open); return () => window.removeEventListener('teacher-new-preparation', open); }, []);
     const teachers = [...new Set(roster.filter(r => r.school === selectedSchool).map(r => r.name))].sort();
-    const teacherValue = admin ? teacher : schoolLink ? data.actor.name : data.actor.name;
+    const teacherValue = admin ? teacher : data.actor.name;
     const contextHeaders = () => { const access = new URLSearchParams(location.search).get('access'); return access ? { 'X-School-Link': access, 'X-Teacher': encodeURIComponent(teacherValue) } : {}; };
 
     const [language,setLanguage]=useState(''),[draftReady,setDraftReady]=useState(''),[draftStatus,setDraftStatus]=useState('');
@@ -38,83 +46,113 @@ export default function TeacherPortal({ data, school, refresh }) {
     const draftKey='school-success:planning-draft:'+JSON.stringify([data.actor.email||data.actor.role,selectedSchool,teacherValue]);
     useEffect(()=>{
       setDraftReady('');
-      try{const raw=JSON.parse(sessionStorage.getItem(draftKey)||'null');if(raw){submissionSchema.parse({id:raw.id,school:selectedSchool,teacher:teacherValue,date:raw.date,periods:raw.periods.map(p=>({...p,grade:p.grade||'-',subject:p.subject||'-',topic:p.topic||'-'})),files:[]});setPeriods(raw.periods.map(p=>({...p,files:[]})));setId(raw.id);setDate(raw.date);}else{setPeriods([newPeriod()]);setId(crypto.randomUUID());setDate(day());}}
-      catch{setPeriods([newPeriod()]);setId(crypto.randomUUID());setDate(day());}setDraftReady(draftKey);
+      let restored=null;try{restored=restoreDraft(JSON.parse(sessionStorage.getItem(draftKey)||'null'));}catch{}
+      setPlan(restored||emptyPlan());setDraftReady(draftKey);
     },[draftKey]);
-    useEffect(()=>{if(draftReady!==draftKey||!teacherValue)return;try{sessionStorage.setItem(draftKey,JSON.stringify({id:submissionId,date,periods:periods.map(p=>({...p,files:[]}))}));setDraftStatus(t('Draft saved in this browser tab. Submit to save it to your school.','प्रारूप इस ब्राउज़र टैब में सहेजा गया। विद्यालय में सहेजने के लिए जमा करें।'));}catch{setDraftStatus(t('Draft could not be saved on this device. Keep this tab open.','इस उपकरण पर प्रारूप नहीं सहेजा जा सका। टैब खुला रखें।'));}},[draftReady,draftKey,periods,date,submissionId,language]);
-    async function selectTeacher(name, nextMode = 'preparation') { const previousUrl=location.href; const url = new URL(location.href); url.searchParams.set('teacher', name); url.searchParams.delete('resume'); historyReplace(url); setMode(nextMode); setResumeToken(''); setReceipt(null); setBusy(t('Opening teacher workspace','शिक्षक का कार्यक्षेत्र खुल रहा है')); try {
-        await refresh();
-    }
-    catch (e) {
-        historyReplace(new URL(previousUrl));setError(e.message);
-    } finally {setBusy('');} }
-    function historyReplace(url) { window.history.replaceState(null, '', url.href); }
+    useEffect(()=>{if(draftReady!==draftKey||!teacherValue)return;try{sessionStorage.setItem(draftKey,JSON.stringify(plan));setDraftStatus(t('Draft kept in this browser tab','प्रारूप इस टैब में सुरक्षित है'));}catch{setDraftStatus(t('Draft could not be kept on this device. Keep this tab open.','इस उपकरण पर प्रारूप नहीं सहेजा जा सका। टैब खुला रखें।'));}},[draftReady,draftKey,plan,language]);
+
     async function request(body) {
         return requestJson(() => successFetch('/api/school-success/evidence', {method: 'POST', headers: {'Content-Type': 'application/json', ...contextHeaders()}, body: JSON.stringify(body)}));
     }
-    async function submit(e) { e.preventDefault(); if (busy)
-        return; setError(''); setReceipt(null); setBusy('Checking your submission');  try {
-        let submission = submissionSchema.parse({ id: submissionId, school: selectedSchool, teacher: teacherValue, date, periods: periods.map(({ category, files, ...p }) => p), files: periods.flatMap(p => p.files.map(f => ({ id: f.id, periodId: p.id, category: f.category, name: f.file.name, size: f.file.size }))) });
-        setBusy('Creating lesson preparation PDFs');
+    async function loadSummary() {
+        if (!selectedSchool || !teacherValue) { setSummary(null); return; }
+        setSummaryLoading(true); setSummaryError('');
+        try { setSummary(await request({ action: 'myLessons', school: selectedSchool, teacher: teacherValue })); }
+        catch (e) { setSummaryError(t('Your lesson summary could not be loaded. ','आपका सारांश नहीं खुल सका। ') + (e.message || '')); }
+        finally { setSummaryLoading(false); }
+    }
+    useEffect(() => { setSummary(null); if (language) void loadSummary(); }, [selectedSchool, teacherValue, language]);
+    async function selectTeacher(name, nextMode = mode) { const previousUrl=location.href; const url = new URL(location.href); url.searchParams.set('teacher', name); url.searchParams.delete('resume'); historyReplace(url); setMode(nextMode); setResumeToken(''); setReceipt(null); setBusy(t('Opening teacher workspace','शिक्षक का कार्यक्षेत्र खुल रहा है')); try {
+        await refresh();
+    } catch (e) { historyReplace(new URL(previousUrl));setError(e.message); } finally {setBusy('');} }
+    function historyReplace(url) { window.history.replaceState(null, '', url.href); }
+    function go(next) { const url = new URL(location.href); url.searchParams.delete('resume'); historyReplace(url); if (next !== 'evidence') setResumeToken(''); setMode(next); setError(''); requestAnimationFrame(() => top.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }
+    function openLesson(token) { setResumeToken(token); setMode('evidence'); setReceipt(null); requestAnimationFrame(() => document.getElementById('lesson-evidence')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }
+
+    // Saves one submission through the existing preparation workflow (PDF, direct upload, prepare/commit).
+    async function saveOne(sub) {
+        let submission = submissionSchema.parse({ id: sub.id, school: selectedSchool, teacher: teacherValue, date: sub.date, periods: sub.periods.map(p => ({ id: p.id, grade: p.grade, section: p.section, subject: p.subject, topic: p.topic, reflection: p.reflection, materials: p.materials })), files: [] });
         const { preparationPdf } = await import('@/lib/school-success/preparation-pdf');
-        const audioRows = submissionRecords(submission, '', data.mediaPublicBase);
         const generated = [];
-        for (const [index, p] of periods.entries()) {
-            const bytes = await preparationPdf({ school: selectedSchool, teacher: teacherValue, date, ...p, audioUrls: audioRows[index].Voice_Note_Link.split(',').filter(Boolean) });
+        for (const [index, p] of submission.periods.entries()) {
+            const bytes = await preparationPdf({ school: selectedSchool, teacher: teacherValue, date: sub.date, ...p, audioUrls: [] });
             generated.push({ id: p.id, category: 'lesson_plan', file: new File([bytes], 'Lesson-preparation-' + (index + 1) + '.pdf', { type: 'application/pdf' }) });
         }
-        submission = submissionSchema.parse({ ...submission, files: [...submission.files, ...generated.map((f, i) => ({ id: f.id, periodId: periods[i].id, category: f.category, name: f.file.name, size: f.file.size }))] });
-        const plan = await request({ action: 'prepare', mode: 'preparation', submission, directUploads: true });
-        let result = plan;
-        if (!plan.saved) {
-            const allFiles = [...periods.flatMap(p => p.files), ...generated];
-            let completed = 0;
-            await mapLimited(plan.files, async file => {
-                const actual = allFiles.find(f => f.id === file.id);
-                if (!actual) throw Error('A selected file is missing. Choose it again.');
-                const response = await successFetch('/api/school-success/evidence/upload', {method: 'POST', headers: {'X-Evidence-Token': file.token, ...contextHeaders()}, body: actual.file, uploadTicket: file.upload});
-                if (!response.ok) throw Error((await response.json()).error || 'Evidence upload failed');
-                setBusy('Uploaded ' + (++completed) + ' of ' + plan.files.length + ' files');
-            });
-            setBusy('Saving your class periods');
-            result = await request({ action: 'commit', token: plan.token, submission });
-        }
-        const returnUrl = new URL(location.href);
-        returnUrl.searchParams.set('resume', result.resumeToken);
-        returnUrl.searchParams.set('teacher', teacherValue);
-        returnUrl.searchParams.set('view', 'teacher');
-        const saved = { ...result, url: returnUrl.href, school: selectedSchool, teacher: teacherValue, date };
-        setReceipt(saved);
-        const links = [saved, ...savedLinks.filter(l => l.submissionId !== result.submissionId)].slice(0, 30);
-        setSavedLinks(links);
+        submission = submissionSchema.parse({ ...submission, files: generated.map(f => ({ id: f.id, periodId: f.id, category: f.category, name: f.file.name, size: f.file.size })) });
+        const prepared = await request({ action: 'prepare', mode: 'preparation', submission, directUploads: true });
+        if (prepared.saved) return prepared;
+        await mapLimited(prepared.files, async file => {
+            const actual = generated.find(f => f.id === file.id);
+            if (!actual) throw Error('A lesson plan PDF is missing. Submit again.');
+            const response = await successFetch('/api/school-success/evidence/upload', {method: 'POST', headers: {'X-Evidence-Token': file.token, ...contextHeaders()}, body: actual.file, uploadTicket: file.upload});
+            if (!response.ok) throw Error((await response.json()).error || 'Upload failed');
+        });
+        return request({ action: 'commit', token: prepared.token, submission });
+    }
+    async function submit(e) { e.preventDefault(); if (busy) return; setError(''); setReceipt(null);
+        const subs = planSubmissions({ ...plan, school: selectedSchool, teacher: teacherValue });
+        let saved = { ...(plan.saved || {}) };
         try {
-            localStorage.setItem('school-success:teacher-lesson-links-v1', JSON.stringify(links));
-        }
-        catch { }
-        setPeriods([newPeriod()]);
-        setId(crypto.randomUUID());
+            for (const [i, sub] of subs.entries()) {
+                if (saved[sub.id]) continue;
+                setBusy(subs.length > 1 ? t('Saving ' + (i + 1) + ' of ' + subs.length, (i + 1) + ' / ' + subs.length + ' सहेजा जा रहा है') : t('Saving your lesson plan', 'आपकी पाठ योजना सहेजी जा रही है'));
+                const result = await saveOne(sub);
+                const returnUrl = new URL(location.href);
+                returnUrl.searchParams.set('resume', result.resumeToken); returnUrl.searchParams.set('teacher', teacherValue); returnUrl.searchParams.set('view', 'teacher');
+                saved = { ...saved, [sub.id]: { submissionId: result.submissionId || sub.id, alreadySaved: !!result.alreadySaved, url: returnUrl.href, date: sub.date, periods: sub.periods.map(p => ({ grade: p.grade, section: p.section, subject: p.subject, topic: p.topic })) } };
+                // Remember progress so a retry after a failure continues with the next day instead of repeating.
+                setPlan(p => ({ ...p, saved }));
+            }
+            const items = subs.map(s => saved[s.id]);
+            setReceipt({ type: plan.type, items });
+            const links = [...items.map(r => ({ submissionId: r.submissionId, url: r.url, school: selectedSchool, teacher: teacherValue, date: r.date })), ...savedLinks.filter(l => !items.some(r => r.submissionId === l.submissionId))].slice(0, 30);
+            setSavedLinks(links);
+            try { localStorage.setItem('school-success:teacher-lesson-links-v1', JSON.stringify(links)); } catch { }
+            const keep = plan.type === 'weekly' ? { shared: { ...plan.shared, submissionId: crypto.randomUUID() } } : {};
+            setPlan({ ...emptyPlan(plan.type), ...keep });
+            setMode('');
+            requestAnimationFrame(() => top.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+            void loadSummary();
+            if (admin) void refresh().catch(() => setError('Your submission is saved. Refresh the workspace to update the report.'));
+        } catch (e) {
+            const count = Object.keys(saved).length - Object.keys(plan.saved || {}).length;
+            setError((e instanceof Error ? e.message : 'Could not save.') + ' ' + (count > 0 ? t(count + ' of ' + subs.length + ' were saved. Submit again to save the rest.', subs.length + ' में से ' + count + ' सहेजे गए। बाकी सहेजने के लिए फिर जमा करें।') : t('Your plan is still here. Submit again to retry.', 'आपकी योजना यहीं है। फिर से जमा करें।')));
+        } finally { setBusy(''); }
+    }
+    const option = v => language === 'hi' ? (hindiOptions[v] || v.replace('Grade ', 'कक्षा ')) : v;
 
-        if (admin) void refresh().catch(() => setError('Your submission is saved. Refresh the workspace to update the report.'));
-    }
-    catch (e) {
-        setError(e instanceof Error ? e.message : 'Could not save. Retry using this receipt ID: ' + submissionId);
-    }
-    finally {
-        setBusy('');
-    } }
-    if(!language)return <section className="card"><h2>Choose your preferred language / अपनी भाषा चुनें</h2><div className="teacher-actions"><button className="teacher-action" type="button" onClick={()=>chooseLanguage('en')}>English</button><button className="teacher-action" type="button" onClick={()=>chooseLanguage('hi')}>हिन्दी</button></div></section>;
-    return <div className="teacher-workspace" lang={language}><label className="field"><span>{t('Language','भाषा')}</span><select value={language} disabled={!!busy} onChange={e=>chooseLanguage(e.target.value)}><option value="en">English</option><option value="hi">हिन्दी</option></select></label><section className="teacher-banner"><div><span className="eyebrow">{t('REFLECT • SHARE • GROW','सोचें • साझा करें • आगे बढ़ें')}</span><h2>{t('Share your classroom journey.','अपनी कक्षा की तैयारी करें।')}</h2><p>{t('Record each class period, reflect on the lesson and share evidence of student learning.','पाठ योजना बनाएँ और कक्षा के बाद बच्चों की सीख साझा करें।')}</p></div><BookOpen className="teacher-art" size={88} strokeWidth={1}/></section>
- {admin && <SchoolSharingLinks schools={[...new Set(roster.map(r => r.school))].filter(Boolean).sort()}/>}
- {!data.uploadsEnabled && <div className="alert" role="status">Lesson details and written reflections are active. Photo, video and voice uploads are awaiting the administrator’s media-storage connection.</div>}
- {receipt && <section className="card"><div className="card-head"><h2><CheckCircle size={20}/> {receipt.alreadySaved ? t('Preparation already saved','पाठ योजना पहले ही सहेजी गई है') : t('Preparation saved','पाठ योजना सहेज ली गई')}</h2><span className="pill green">{receipt.periods} {t('period(s)','कालांश')}</span></div><p>{t('Receipt','रसीद')}: <code>{receipt.submissionId}</code></p><p className="hint">{t('After teaching, choose Submit Evidence and the planned lesson date, or use this return link.','पढ़ाने के बाद प्रमाण जमा करें चुनें और योजना की तिथि भरें, या नीचे दिए लिंक से पाठ पर लौटें।')}</p><label className="field"><span>{t('Return to this lesson','इस पाठ पर लौटें')}</span><input readOnly value={receipt.url} onFocus={e => e.target.select()}/></label><a className="button primary" href={receipt.url}>{t('Return to this lesson / add evidence','इस पाठ पर लौटें / प्रमाण जोड़ें')}</a></section>}
- <div className="teacher-actions" role="group" aria-label="What would you like to do?"><button className={'teacher-action' + (mode === 'preparation' ? ' selected' : '')} aria-pressed={mode === 'preparation'} type="button" disabled={!!busy} onClick={() => { const url = new URL(location.href); url.searchParams.delete('resume'); historyReplace(url); setMode('preparation'); }}><ClipboardList size={28}/><b>{t('Submit Lesson Plan','पाठ योजना बनाएँ और जमा करें')}</b><span>{t('Plan up to 10 class periods before teaching.','एक-एक चरण में अपने कालांश की तैयारी करें।')}</span></button><button className={'teacher-action' + (mode === 'evidence' ? ' selected' : '')} aria-pressed={mode === 'evidence'} type="button" disabled={!!busy} onClick={() => setMode('evidence')}><Camera size={28}/><b>{t('Submit Evidence','प्रमाण और चिंतन जमा करें')}</b><span>{t('After teaching, add photos, written work and your reflection.','कक्षा के बाद फोटो, लिखित कार्य और चिंतन साझा करें।')}</span></button></div>
- {savedLinks.some(l => l.school === selectedSchool && l.teacher === teacherValue) && <section className="card"><details><summary>{t('Saved lessons on this device','इस उपकरण पर सहेजे गए पाठ')}</summary>{savedLinks.filter(l => l.school === selectedSchool && l.teacher === teacherValue).map(l => <p key={l.submissionId}><a href={l.url}>{l.date} · {l.teacher} · Return to saved preparation</a></p>)}</details></section>}
- {mode === 'evidence' ? <><section className="card"><div className="form-grid">{admin ? <label className="field"><span>{t('School','विद्यालय')}</span><select value={selectedSchool} onChange={e => { setSchool(e.target.value); setTeacher(''); setResumeToken(''); }}>{schools.map(s => <option key={s}>{s}</option>)}</select></label> : <div className="field"><span>{t('School','विद्यालय')}</span><b>{selectedSchool}</b></div>}{admin || schoolLink ? <label className="field"><span>{t('Teacher','शिक्षक')}</span><select value={teacherValue} onChange={e => { if (schoolLink)
-            void selectTeacher(e.target.value, 'evidence');
-        else {
-            setTeacher(e.target.value);
-            setResumeToken('');
-        } }}><option value="">{t('Select teacher','शिक्षक चुनें')}</option>{teachers.map(t => <option key={t}>{t}</option>)}</select></label> : <div className="field"><span>{t('Teacher','शिक्षक')}</span><b>{teacherValue}</b></div>}</div></section><LessonEvidence language={language} key={selectedSchool + '|' + teacherValue + '|' + resumeToken} token={resumeToken} headers={contextHeaders} uploadsEnabled={data.uploadsEnabled} school={selectedSchool} teacher={teacherValue} onSaved={async () => { if (admin) await refresh(); }}/></> : mode === 'preparation' ? <GuidedPlan language={language} periods={periods} setPeriods={setPeriods} newPeriod={newPeriod} identity={<div className="form-grid">{admin ? <><label className="field"><span>{t('School','विद्यालय')}</span><select required value={selectedSchool} onChange={e => { setSchool(e.target.value); setTeacher(''); setPeriods([newPeriod()]); setId(crypto.randomUUID()); }}><option value="">{t('Select school','विद्यालय चुनें')}</option>{schools.map(s => <option key={s}>{s}</option>)}</select></label><label className="field"><span>{t('Teacher','शिक्षक')}</span>{teachers.length ? <select required value={teacherValue} onChange={e => {setTeacher(e.target.value);setPeriods([newPeriod()]);setId(crypto.randomUUID());}}><option value="">{t('Select teacher','शिक्षक चुनें')}</option>{teachers.map(t => <option key={t}>{t}</option>)}</select> : <input required value={teacher} onChange={e => {setTeacher(e.target.value);setPeriods([newPeriod()]);setId(crypto.randomUUID());}}/>}</label></> : schoolLink ? <><div className="field"><span>{t('School','विद्यालय')}</span><b>{selectedSchool}</b></div><label className="field"><span>{t('Teacher','शिक्षक')}</span><select required value={teacherValue} onChange={e => void selectTeacher(e.target.value)}><option value="">{t('Select teacher','शिक्षक चुनें')}</option>{teachers.map(t => <option key={t}>{t}</option>)}</select></label></> : <div className="field"><span>{t('School / teacher','विद्यालय / शिक्षक')}</span><b>{selectedSchool} · {teacherValue}</b></div>}<label className="field"><span>{t('Planned lesson date','पाठ की नियोजित तिथि')}</span><input type="date" required value={date} onChange={e => setDate(e.target.value)}/></label></div>} submit={submit} busy={busy} error={error} canSave={!!selectedSchool && !!teacherValue && /^\d{4}-\d{2}-\d{2}$/.test(date)} draftStatus={draftStatus}/> : null}
-</div>;
+    if(!language)return <section className="lp-language"><span className="lp-language-icon"><Languages size={28}/></span><h2>Choose your language</h2><p>अपनी भाषा चुनें</p><div className="lp-language-options"><button type="button" onClick={()=>chooseLanguage('en')}><span>Aa</span><b>English</b></button><button type="button" onClick={()=>chooseLanguage('hi')}><span>अ</span><b>हिन्दी</b></button></div></section>;
+    const identity = admin ? <div className="lp-shared"><label className="field"><span>{t('School','विद्यालय')}</span><select value={selectedSchool} onChange={e => { setSchool(e.target.value); setTeacher(''); }}><option value="">{t('Select school','विद्यालय चुनें')}</option>{schools.map(s => <option key={s}>{s}</option>)}</select></label><label className="field"><span>{t('Teacher','शिक्षक')}</span>{teachers.length ? <select value={teacherValue} onChange={e => setTeacher(e.target.value)}><option value="">{t('Select teacher','शिक्षक चुनें')}</option>{teachers.map(n => <option key={n}>{n}</option>)}</select> : <input value={teacher} onChange={e => setTeacher(e.target.value)}/>}</label></div>
+        : schoolLink ? <div className="lp-shared"><div className="field"><span>{t('School','विद्यालय')}</span><b>{selectedSchool}</b></div><label className="field"><span>{t('Teacher','शिक्षक')}</span><select value={teacherValue} onChange={e => void selectTeacher(e.target.value)}><option value="">{t('Select teacher','शिक्षक चुनें')}</option>{teachers.map(n => <option key={n}>{n}</option>)}</select></label></div> : null;
+    const who = JSON.stringify([data.actor.email || data.actor.role, selectedSchool, teacherValue]);
+    return <div className="teacher-workspace tp" lang={language} ref={top}>
+     <div className="tp-top">
+      <div><span className="eyebrow">{t('REFLECT • SHARE • GROW','सोचें • साझा करें • आगे बढ़ें')}</span><h2>{teacherValue ? t('Welcome, ','नमस्ते, ') + teacherValue : t('Teacher workspace','शिक्षक कार्यक्षेत्र')}</h2><p>{selectedSchool}</p></div>
+      <label className="tp-language"><Languages size={16}/><select aria-label={t('Language','भाषा')} value={language} disabled={!!busy} onChange={e=>chooseLanguage(e.target.value)}><option value="en">English</option><option value="hi">हिन्दी</option></select></label>
+     </div>
+     {admin && <SchoolSharingLinks schools={[...new Set(roster.map(r => r.school))].filter(Boolean).sort()}/>}
+     {!data.uploadsEnabled && <div className="alert" role="status">Lesson details and written reflections are active. Photo, video and voice uploads are awaiting the administrator’s media-storage connection.</div>}
+     {teacherValue && mode !== 'preparation' && <SummaryStrip summary={summary} language={language}/>}
+     {receipt && <section className="ts-card tp-receipt" role="status"><div className="ts-card-head"><div><h3><CheckCircle size={20}/> {receipt.type === 'weekly' ? t('Weekly plan saved','साप्ताहिक योजना सहेजी गई') : t('Lesson plan saved','पाठ योजना सहेजी गई')}</h3><p>{t('After teaching, your lessons appear under “Lessons needing evidence”.','पढ़ाने के बाद आपके पाठ “प्रमाण बाकी वाले पाठ” में दिखेंगे।')}</p></div></div>
+      <ul className="tp-receipt-list">{receipt.items.map(r => <li key={r.submissionId}><span><b>{dayLabel(r.date, language)}</b>{r.periods.map((p, i) => <small key={i}>{[option(p.grade) + (p.section && p.section !== 'Not Applicable' ? ' ' + p.section : ''), option(p.subject), p.topic].filter(Boolean).join(' · ')}</small>)}</span><a className="text-button" href={r.url}>{t('Return link','वापसी लिंक')}</a></li>)}</ul>
+      <p className="hint">{t('Receipt','रसीद')}: <code>{receipt.items.map(r => r.submissionId.slice(0, 8)).join(', ')}</code></p></section>}
+     {mode && <button type="button" className="text-button tp-back" onClick={() => go('')}><ArrowLeft size={15}/>{t('Back to home','मुख्य पृष्ठ पर लौटें')}</button>}
+     <div className={'teacher-actions tp-actions' + (mode ? ' compact' : '')} role="group" aria-label={t('What would you like to do?','आप क्या करना चाहेंगे?')}>
+      <button className={'teacher-action' + (mode === 'preparation' ? ' selected' : '')} aria-pressed={mode === 'preparation'} type="button" disabled={!!busy} onClick={() => go('preparation')}><span className="tp-action-icon"><ClipboardList size={24}/></span><b>{t('Submit lesson plan','पाठ योजना जमा करें')}</b><span>{t('Plan the next day, or one subject for the week.','अगले दिन की, या एक विषय की साप्ताहिक योजना बनाएँ।')}</span></button>
+      <button className={'teacher-action' + (mode === 'evidence' ? ' selected' : '')} aria-pressed={mode === 'evidence'} type="button" disabled={!!busy} onClick={() => go('evidence')}><span className="tp-action-icon c2"><Camera size={24}/></span><b>{t('Add evidence','प्रमाण जोड़ें')}</b><span>{t('After teaching, add photos, written work and your reflection.','कक्षा के बाद फोटो, लिखित कार्य और चिंतन जोड़ें।')}</span></button>
+     </div>
+     {mode === '' && teacherValue && <div className="tp-home-grid">
+      <PendingEvidence summary={summary} language={language} onOpen={openLesson} limit={3} onShowAll={() => go('evidence')} loading={summaryLoading} error={summaryError} onRetry={loadSummary}/>
+      <FeedbackCard summary={summary} language={language} who={who} onOpen={openLesson}/>
+     </div>}
+     {mode === '' && !teacherValue && (admin || schoolLink) && <section className="ts-card"><div className="ts-empty"><BookOpenCheck size={28}/><p>{t('Choose a teacher to see their lessons.','पाठ देखने के लिए शिक्षक चुनें।')}</p></div>{identity}</section>}
+     {mode === 'evidence' && <>
+      {(admin || schoolLink) && <section className="ts-card">{identity}</section>}
+      {!resumeToken && <PendingEvidence summary={summary} language={language} onOpen={openLesson} loading={summaryLoading} error={summaryError} onRetry={loadSummary}/>}
+      <div id="lesson-evidence"><LessonEvidence language={language} key={selectedSchool + '|' + teacherValue + '|' + resumeToken} token={resumeToken} headers={contextHeaders} uploadsEnabled={data.uploadsEnabled} school={selectedSchool} teacher={teacherValue} compactSearch onSaved={async () => { void loadSummary(); if (admin) await refresh(); }}/></div>
+      {savedLinks.some(l => l.school === selectedSchool && l.teacher === teacherValue) && <section className="ts-card"><details><summary>{t('Saved lessons on this device','इस उपकरण पर सहेजे गए पाठ')}</summary>{savedLinks.filter(l => l.school === selectedSchool && l.teacher === teacherValue).map(l => <p key={l.submissionId}><a href={l.url}>{dayLabel(l.date, language) || l.date} · {l.teacher}</a></p>)}</details></section>}
+     </>}
+     {mode === 'preparation' && <LessonPlanForm key={draftKey} language={language} plan={plan} setPlan={setPlan} identity={identity} submit={submit} busy={busy} error={error} canSave={!!selectedSchool && !!teacherValue} draftStatus={draftStatus} today={day()}/>}
+     {mode !== 'preparation' && error && <div className="alert error" role="alert">{error}</div>}
+    </div>;
 }
-

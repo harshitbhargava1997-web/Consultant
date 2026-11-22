@@ -1,21 +1,61 @@
 import {formatReflection} from './teacher-flow.js';
+// One-page lesson planning. Every field is visible at once; its guiding question and sentence starter are shown
+// as faded placeholder text inside the box (never inserted into the answer).
+// Entry: [key, [English title, Hindi title], [English placeholder, Hindi placeholder], max length]
 export const guide = [
- ['objective',['Learning outcome','सीखने का प्रतिफल'],['By the end of this class period, what will students be able to do?','इस कालांश के अंत तक बच्चे क्या कर पाएँगे?'],['By the end of this class period, students will be able to ___ .','इस कालांश के अंत तक बच्चे ___ कर पाएँगे।'],['Students will compare leaves by colour and size and explain their grouping.','बच्चे पत्तियों की तुलना रंग और आकार से करके अपने समूह बनाने का कारण बताएँगे।']],
- ['materials',['Teaching-learning materials','शिक्षण-अधिगम सामग्री'],['Which resources will children use? What will you prepare?','बच्चे किन साधनों का उपयोग करेंगे? आप क्या तैयारी करेंगे?'],['I will use ___ to help students ___ . Before class, I will prepare ___ .','बच्चों को ___ सिखाने के लिए मैं ___ का उपयोग करूँगा/करूँगी। कक्षा से पहले मैं ___ तैयार करूँगा/करूँगी।'],['Prepare leaves, trays and an observation sheet for each group.','हर समूह के लिए पत्तियाँ, ट्रे और अवलोकन पत्र तैयार रखूँगा/रखूँगी।']],
- ['teacher',['Teacher activities and questions','शिक्षक की गतिविधियाँ और प्रश्न'],['How will you introduce, demonstrate and guide the learning?','आप पाठ की शुरुआत, प्रदर्शन और बच्चों का मार्गदर्शन कैसे करेंगे?'],['I will begin by ___ . I will demonstrate ___ using ___ . I will guide students to ___ .','मैं ___ से शुरुआत करूँगा/करूँगी। ___ की मदद से ___ करके दिखाऊँगा/दिखाऊँगी। बच्चों को ___ करने में मार्गदर्शन दूँगा/दूँगी।'],['Recall trees children have seen. Demonstrate comparing two leaves before children explore.','बच्चों से देखे हुए पेड़ों पर बात करूँगा/करूँगी। दो पत्तियों की तुलना करके दिखाऊँगा/दिखाऊँगी।']],
- ['student',['Student activity and participation','बच्चों की गतिविधि और भागीदारी'],['What will every child do, individually, in pairs or in groups?','हर बच्चा अकेले, जोड़ी में या समूह में क्या करेगा?'],['Students will work ___ to ___ . Each child will ___ . They will share by ___ .','बच्चे ___ में काम करके ___ करेंगे। हर बच्चा ___ करेगा। बच्चे अपनी सीख ___ से साझा करेंगे।'],['In groups of four, children sort leaves. Each child describes one feature.','चार के समूह में बच्चे पत्तियाँ छाँटेंगे। हर बच्चा एक विशेषता बताएगा।']],
- ['practice',['Practice and application','अभ्यास और उपयोग'],['What classwork will help children practise and apply their learning?','बच्चे किस कक्षा कार्य से अभ्यास करेंगे और सीख का उपयोग करेंगे?'],['Students will practise ___ by completing ___ .','बच्चे ___ पूरा करके ___ का अभ्यास करेंगे।'],['Each child sorts a new leaf and explains the choice. Offer picture prompts where needed.','हर बच्चा नई पत्ती को समूह में रखकर कारण बताएगा। जरूरत पर चित्रों से मदद दूँगा/दूँगी।']],
- ['review',['Check learning and address difficulties','सीख की जाँच और कठिनाइयों में सहायता'],['What will show understanding? How will you help or challenge students next?','समझ का पता कैसे चलेगा? आगे आप बच्चों को मदद या नई चुनौती कैसे देंगे?'],['I will check understanding by ___ . I will look for ___ . Children needing support will ___ . Those ready for a challenge will ___ .','मैं ___ से समझ की जाँच करूँगा/करूँगी। मैं ___ पर ध्यान दूँगा/दूँगी। सहायता चाहने वाले बच्चे ___ करेंगे। तैयार बच्चों को ___ की चुनौती दूँगा/दूँगी।'],['Ask each child to sort and explain. Compare contrasting leaves with children needing support.','हर बच्चे से पत्ती छाँटने और कारण बताने को कहूँगा/कहूँगी। जरूरत पर दो अलग पत्तियों से फिर समझाऊँगा/समझाऊँगी।']]
+ ['objective',['Learning outcome','सीखने का प्रतिफल'],['By the end of this class period, students will be able to …','इस कालांश के अंत तक बच्चे … कर पाएँगे।'],650],
+ ['materials',['Teaching-learning materials','शिक्षण-अधिगम सामग्री'],['I will use … to help students … Before class, I will prepare …','बच्चों को … सिखाने के लिए मैं … का उपयोग करूँगा/करूँगी। कक्षा से पहले मैं … तैयार करूँगा/करूँगी।'],650],
+ ['teacher',['Teacher activities','शिक्षक की गतिविधियाँ'],['I will begin by … I will demonstrate … using … I will guide students to …','मैं … से शुरुआत करूँगा/करूँगी। … की मदद से … करके दिखाऊँगा/दिखाऊँगी। बच्चों को … करने में मार्गदर्शन दूँगा/दूँगी।'],650],
+ ['student',['Student activity and participation','बच्चों की गतिविधि और भागीदारी'],['Students will work … to … Each child will … They will share by …','बच्चे … में काम करके … करेंगे। हर बच्चा … करेगा। बच्चे अपनी सीख … से साझा करेंगे।'],650],
+ ['practice',['Classwork and practice','कक्षा कार्य और अभ्यास'],['Students will practise … by completing … (book / workbook pages)','बच्चे … पूरा करके … का अभ्यास करेंगे। (पुस्तक / कार्यपुस्तिका के पृष्ठ)'],650],
+ ['review',['Check learning and next steps','सीख की जाँच और आगे के कदम'],['I will check understanding by … Children needing support will … Those ready for a challenge will …','मैं … से समझ की जाँच करूँगा/करूँगी। सहायता चाहने वाले बच्चे … करेंगे। तैयार बच्चों को … की चुनौती दूँगा/दूँगी।'],650]
 ];
-export const blooms = [
- ['remember','Remember','याद करना','Can you name ___?','क्या आप ___ के नाम बता सकते हैं?'],
- ['understand','Understand','समझना','Can you explain ___ in your own words?','क्या आप ___ को अपने शब्दों में समझा सकते हैं?'],
- ['apply','Apply','उपयोग करना','How can you use ___ to solve ___?','आप ___ की मदद से ___ कैसे हल करेंगे?'],
- ['analyse','Analyse','विश्लेषण करना','How are ___ and ___ similar or different?','___ और ___ में क्या समानता या अंतर है?'],
- ['evaluate','Evaluate','परखना','Which ___ would you choose for ___, and why?','आप ___ के लिए कौन-सा ___ चुनेंगे और क्यों?'],
- ['create','Create','रचना करना','Can you create ___ using ___?','क्या आप ___ की मदद से ___ बना सकते हैं?']
-];
-export const actions=[['identify','पहचानना'],['explain','समझाना'],['read','पढ़ना'],['write','लिखना'],['solve','हल करना'],['compare','तुलना करना']];
-export function planningParts(p){const a=p.answers||{}, hi=p.answerLanguage==='hi';return {...a,teacher:[a.teacher,(p.bloomLevels||[]).length?(hi?'सोच के स्तर: ':'Thinking levels: ')+blooms.filter(b=>p.bloomLevels.includes(b[0])).map(b=>b[hi?2:1]).join(', '):'',a.questions?(hi?'नियोजित प्रश्न:\n':'Planned questions:\n')+a.questions:''].filter(Boolean).join('\n'),practice:[a.practice?(hi?'कक्षा कार्य:\n':'Classwork:\n')+a.practice:'',a.homework?(hi?'गृहकार्य:\n':'Homework:\n')+a.homework:''].filter(Boolean).join('\n')};}
+// Optional field, saved with classwork under the same heading.
+export const homework = ['homework',['Homework (optional)','गृहकार्य (वैकल्पिक)'],['At home, students will … to practise …','घर पर बच्चे … का अभ्यास करने के लिए … करेंगे।'],300];
+export const PLAN_TYPES = ['daily','weekly'];
+export const MAX_DAILY_PERIODS = 10, MAX_WEEKLY_DAYS = 6;
+
+export function planningParts(p){
+ const a=p.answers||{},hi=p.answerLanguage==='hi';
+ return {...a,practice:[a.practice?.trim()?(hi?'कक्षा कार्य:\n':'Classwork:\n')+a.practice.trim():'',a.homework?.trim()?(hi?'गृहकार्य:\n':'Homework:\n')+a.homework.trim():''].filter(Boolean).join('\n')};
+}
 export function withPlanning(p,changes){const n={...p,...changes};return {...n,reflection:formatReflection(planningParts(n)),materials:n.answers?.materials||''};}
-export function planningIssue(p){if(!p.grade||!p.subject||!p.topic?.trim())return 'details';const a=p.answers||{};for(const [key] of guide){if(!a[key]?.trim()||/_{2,}/.test(a[key]))return key;}if((p.bloomLevels||[]).length&&!a.questions?.trim())return 'teacher';if(/_{2,}/.test(a.questions||''))return 'teacher';if(/_{2,}/.test(a.homework||''))return 'practice';if(p.reflection.length>5000)return 'length';return '';}
+// First incomplete part of one block: 'details', 'date', a guide key, or 'length'. Empty string when complete.
+export function planningIssue(p,{needsDate=false}={}){
+ if(!p.grade||!p.subject||!p.topic?.trim())return 'details';
+ if(needsDate&&!/^\d{4}-\d{2}-\d{2}$/.test(p.date||''))return 'date';
+ const a=p.answers||{};
+ for(const [key] of guide)if(!a[key]?.trim())return key;
+ if((p.reflection||'').length>5000)return 'length';
+ return '';
+}
+// Calendar helpers on plain YYYY-MM-DD strings (no time zone shifts).
+const asDate=s=>new Date(s+'T00:00:00Z'),asText=d=>d.toISOString().slice(0,10);
+export function addDays(day,n){const d=asDate(day);d.setUTCDate(d.getUTCDate()+n);return asText(d);}
+export const isSunday=day=>asDate(day).getUTCDay()===0;
+// The next school day after `day` (Monday to Saturday).
+export function nextSchoolDay(day){let d=addDays(day,1);while(isSunday(d))d=addDays(d,1);return d;}
+// `count` school days starting at `start` (itself moved forward if it is a Sunday).
+export function schoolDays(start,count){const out=[];let d=start;while(isSunday(d))d=addDays(d,1);while(out.length<count){out.push(d);d=nextSchoolDay(d);}return out;}
+
+// Turns the form into the submissions saved by the existing preparation workflow. A daily plan is one submission
+// (one date, several periods). A weekly subject plan is one submission per day (one period each), so every saved
+// lesson keeps its own planned date and existing records, reports and evidence work unchanged.
+export function planSubmissions({type,date,shared,blocks,school,teacher}){
+ const strip=({answers,answerLanguage,submissionId,date:_d,savedReceipt,...rest})=>rest;
+ if(type==='weekly'){
+  return blocks.map(b=>({id:b.submissionId,school,teacher,date:b.date,periods:[strip({...b,grade:shared.grade,section:shared.section,subject:shared.subject})],block:b.id}));
+ }
+ return [{id:shared.submissionId,school,teacher,date,periods:blocks.map(strip),block:null}];
+}
+// Problems that apply across blocks (shown at the top of the form).
+export function planProblem({type,date,shared,blocks}){
+ if(!blocks.length)return 'empty';
+ if(type==='daily'){if(!/^\d{4}-\d{2}-\d{2}$/.test(date||''))return 'date';if(blocks.length>MAX_DAILY_PERIODS)return 'count';return '';}
+ if(!shared.grade||!shared.subject)return 'subject';
+ if(blocks.length>MAX_WEEKLY_DAYS)return 'count';
+ const dates=blocks.map(b=>b.date);
+ if(dates.some(d=>!/^\d{4}-\d{2}-\d{2}$/.test(d||'')))return 'date';
+ if(new Set(dates).size!==dates.length)return 'duplicate-date';
+ return '';
+}
