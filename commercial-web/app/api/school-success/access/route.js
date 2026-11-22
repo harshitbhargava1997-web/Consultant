@@ -1,19 +1,10 @@
 import {withRequest,sessionIdentity,actor,database,checkOrigin,failure} from '@/lib/school-success/server';
 import {service,checked} from '@/lib/school-success/database';
 import {moduleGrantSchema,readModuleGrant} from '@/lib/school-success/module-access';
+import {moduleSchools} from '@/lib/school-success/module-schools';
 
 export const dynamic='force-dynamic';
 const headers={'Cache-Control':'no-store'};
-async function moduleSchools(){
- const db=service();
- const [roster,members,local,archives]=await Promise.all([
-  checked(db.rpc('school_success_roster')),
-  checked(db.from('success_members').select('school')),
-  checked(db.from('success_entries').select('school').eq('kind','school')),
-  checked(db.from('success_config').select('value').like('key','directoryArchive:%'))
- ]);
- return [...new Set([...roster,...members,...local,...archives.map(r=>JSON.parse(r.value))].map(r=>r.school).filter(Boolean))].sort();
-}
 export async function GET(req){return withRequest(req,async()=>{try{
  const {user,isSuperAdmin}=await sessionIdentity(req),db=service();
  const saved=isSuperAdmin?null:await checked(db.from('success_config').select('value').eq('key','moduleAccess:'+user.id).maybeSingle());

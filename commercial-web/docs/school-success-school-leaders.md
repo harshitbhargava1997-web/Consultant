@@ -6,10 +6,24 @@
 - principals and coordinators have the same access;
 - leaders may reset teacher PINs.
 
-## Granting access (Super Admin)
-1. The principal or coordinator signs in to Vision with an existing account (mobile number + password, or email + password). Vision literacy accounts are reused only as a sign-in; no Vision literacy school or membership is linked.
-2. Super Admin opens **School Success → Module access** and selects the account.
-3. Choose role **School leader (principal or coordinator)**, tick their school, and save. Existing grants are unchanged: they keep the **Consultant** role.
+## Adding principals and coordinators (Super Admin, inside School Success)
+1. Open **School Success → Schools & teachers → School leaders** (Super Admin only).
+2. Choose the school, then enter:
+   - full name;
+   - role (**Principal** or **Coordinator**);
+   - **mobile number**;
+   - **starting password** (prefilled `123456`).
+3. Click **Add school leader**. This:
+   - creates a mobile-number sign-in, marked to change its password at first sign-in. If an account already exists for that mobile number, it is **linked** instead of duplicated.
+   - grants **School leader** access to that school. Super Admin accounts and existing consultants are refused.
+4. Share the link `https://schoolsuccess.in/school-success`, the mobile number and the starting password.
+5. **First sign-in:**
+   - the leader signs in with mobile + password and must set their own password (12 or more characters, Vision's existing first-login screen);
+   - they then return to School Success automatically.
+6. **List and actions:** the list shows each leader's name, role, mobile and status (*Waiting for first sign-in* / *Active*).
+   - **Reset password** (back to `123456`, change required again) is offered only for sign-ins created here. Accounts created elsewhere are reset where they were made.
+   - **Remove** ends access to that school but keeps the sign-in.
+- The Module access page can also grant the School leader role to any existing account.
 
 ## What a school leader sees (their assigned school only)
 - **School 360°**, including the **Teacher PINs** panel (reset a teacher's PIN; set the school starting PIN).
