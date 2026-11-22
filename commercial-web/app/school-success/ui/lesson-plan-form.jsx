@@ -1,11 +1,11 @@
 'use client';
-import {useState,useRef} from 'react';
+import {useState,useRef,useEffect} from 'react';
 import {CalendarDays,CalendarRange,ChevronDown,Check,Plus,Trash2,Target,Package,Presentation,Users,PencilLine,ListChecks,House,CircleAlert} from 'lucide-react';
-import {guide,homework,withPlanning,planningIssue,planProblem,MAX_DAILY_PERIODS,MAX_WEEKLY_DAYS,nextSchoolDay} from '@/lib/school-success/planning-guide';
+import {guide,withPlanning,planningIssue,planProblem,MAX_DAILY_PERIODS,MAX_WEEKLY_DAYS,nextSchoolDay} from '@/lib/school-success/planning-guide';
 import {teacherGrades,teacherSections,teacherSubjects} from '@/lib/school-success/teacher-flow';
 
 export const hindiOptions={'Nursery':'नर्सरी','LKG':'एलकेजी','UKG':'यूकेजी','Not Applicable':'लागू नहीं','All Subjects Together':'सभी विषय एक साथ','Phonics / Literacy':'ध्वनि एवं साक्षरता','Mathematics':'गणित','Numeracy':'संख्या ज्ञान','English':'अंग्रेज़ी','Hindi':'हिन्दी','Environmental Studies (EVS)':'पर्यावरण अध्ययन','Science':'विज्ञान','Social Science':'सामाजिक विज्ञान','General Knowledge (GK)':'सामान्य ज्ञान','English Grammar':'अंग्रेज़ी व्याकरण','Computer':'कंप्यूटर','Play Activity':'खेल गतिविधि','Play Time':'खेल का समय','Play Based':'खेल आधारित'};
-const icons={objective:Target,materials:Package,teacher:Presentation,student:Users,practice:PencilLine,review:ListChecks,homework:House};
+const icons={objective:Target,materials:Package,teacher:Presentation,student:Users,practice:PencilLine,review:ListChecks,classwork:House};
 const months={en:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],hi:['जन','फ़र','मार्च','अप्रै','मई','जून','जुल','अग','सित','अक्टू','नव','दिस']};
 const weekdays={en:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],hi:['रवि','सोम','मंगल','बुध','गुरु','शुक्र','शनि']};
 export function dayLabel(day,language='en'){const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(day||'');if(!m)return '';const d=new Date(day+'T00:00:00Z');return weekdays[language][d.getUTCDay()]+', '+Number(m[3])+' '+months[language][Number(m[2])-1];}
@@ -17,6 +17,7 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
  const hi=language==='hi',t=(en,hn)=>hi?hn:en;
  const [open,setOpen]=useState(()=>new Set(plan.blocks.slice(0,1).map(b=>b.id))),[warning,setWarning]=useState(null);
  const refs=useRef({});
+ useEffect(()=>{setOpen(s=>plan.blocks.some(b=>s.has(b.id))?s:new Set(plan.blocks.slice(0,1).map(b=>b.id)));},[plan.blocks.map(b=>b.id).join()]);
  const weekly=plan.type==='weekly',option=v=>hi?(hindiOptions[v]||v.replace('Grade ','कक्षा ')):v;
  const merged=b=>weekly?{...b,grade:plan.shared.grade,section:plan.shared.section,subject:plan.shared.subject}:b;
  const issue=b=>planningIssue(merged(b),{needsDate:weekly});
@@ -97,10 +98,10 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
       <label className={'field lp-topic'+(missing(b,'details')&&!b.topic?.trim()?' invalid':'')}><span>{t('Lesson number and topic','पाठ क्रमांक और विषयवस्तु')}</span><input id={weekly?'plan-'+b.id+'-details':undefined} maxLength={1000} value={b.topic} placeholder={t('Example: LP 12 — Plants around us','उदाहरण: पाठ 12 — हमारे आस-पास के पौधे')} onChange={e=>updateBlock(b.id,{topic:e.target.value})}/></label>
      </div>
      <div className="lp-fields">
-      {[...guide,homework].map(([key,titles,placeholders,max])=>{const Icon=icons[key],value=b.answers?.[key]||'',optional=key==='homework';
-       return <label key={key} className={'lp-field'+(optional?' optional':'')+(missing(b,key)?' invalid':'')+(value.trim()?' filled':'')}>
-        <span className="lp-field-label"><span className="lp-field-icon"><Icon size={16}/></span>{titles[hi?1:0]}{value.trim()&&!optional&&<Check size={14} className="lp-tick"/>}</span>
-        <textarea id={'plan-'+b.id+'-'+key} rows={optional?2:3} maxLength={max} value={value} placeholder={placeholders[hi?1:0]} onChange={e=>answer(b,key,e.target.value)}/>
+      {guide.map(([key,titles,placeholders,max])=>{const Icon=icons[key],value=b.answers?.[key]||'';
+       return <label key={key} className={'lp-field'+(key==='classwork'?' wide':'')+(missing(b,key)?' invalid':'')+(value.trim()?' filled':'')}>
+        <span className="lp-field-label"><span className="lp-field-icon"><Icon size={16}/></span>{titles[hi?1:0]}{value.trim()&&<Check size={14} className="lp-tick"/>}</span>
+        <textarea id={'plan-'+b.id+'-'+key} rows={3} maxLength={max} value={value} placeholder={placeholders[hi?1:0]} onChange={e=>answer(b,key,e.target.value)}/>
         {missing(b,key)?<small className="lp-field-error">{fieldMessage}</small>:value.length>max*.8&&<small className="lp-count">{value.length}/{max}</small>}
        </label>;})}
      </div>

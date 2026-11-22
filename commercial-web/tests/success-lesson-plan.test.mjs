@@ -1,38 +1,45 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {guide,homework,withPlanning,planningIssue,planSubmissions,planProblem,schoolDays,nextSchoolDay,isSunday,MAX_WEEKLY_DAYS} from '../lib/school-success/planning-guide.js';
+import {guide,requiredKeys,withPlanning,planningIssue,planSubmissions,planProblem,schoolDays,nextSchoolDay,isSunday,MAX_WEEKLY_DAYS} from '../lib/school-success/planning-guide.js';
 import {parseLessonPlan} from '../lib/school-success/lesson-records.js';
 import {submissionSchema} from '../lib/school-success/teacher-submissions.js';
 const id=()=>crypto.randomUUID();
 const answersFor=text=>Object.fromEntries(guide.map(([key])=>[key,text]));
 const block=(extra={})=>withPlanning({id:id(),submissionId:id(),grade:'',section:'A',subject:'',topic:'LP 12 — Leaves',...extra},{answers:answersFor('Children sort leaves and explain.'),answerLanguage:'en'});
 
-test('every planning field has a bilingual title and a faded placeholder starter; no starter buttons or Bloom levels remain',async()=>{
- for(const [key,titles,placeholders,max] of [...guide,homework]){
+test('fields follow the lesson order with I do / We do / You do, no field is labelled optional, and three are required',async()=>{
+ assert.deepEqual(guide.map(g=>g[0]),['objective','materials','teacher','student','practice','review','classwork']);
+ assert.deepEqual(guide.map(g=>g[1][0]),['Learning outcome','Teaching-learning materials','Teacher activity (I do)','Student activity and participation (We do)','Practice and apply (You do)','Check learning and next steps','Classwork and homework']);
+ for(const [key,titles,placeholders,max] of guide){
   assert.equal(titles.length,2,key);assert.equal(placeholders.length,2,key);assert.ok(placeholders.every(Boolean),key);assert.ok(max>0,key);
+  assert.ok(!titles.some(t=>/optional|वैकल्पिक/i.test(t)),'no "optional" label: '+key);
  }
- assert.deepEqual(guide.map(g=>g[0]),['objective','materials','teacher','student','practice','review'],'same six saved sections, in the agreed order');
- const mod=await import('../lib/school-success/planning-guide.js');assert.equal(mod.blooms,undefined);assert.equal(mod.actions,undefined);
+ assert.deepEqual(requiredKeys,[],'no planning field is mandatory');
+ const mod=await import('../lib/school-success/planning-guide.js');assert.equal(mod.blooms,undefined);assert.equal(mod.homework,undefined);
 });
 
-test('one-page answers keep the existing saved lesson structure in English and Hindi, with optional homework',()=>{
+test('answers keep the existing saved lesson structure in English and Hindi; classwork and homework come after the learning check',()=>{
  for(const lang of ['en','hi']){
-  const answers={...answersFor(lang==='hi'?'बच्चे पत्तियाँ छाँटेंगे।':'Children sort leaves.'),homework:'Observe a leaf at home.'};
+  const answers={...answersFor(lang==='hi'?'बच्चे पत्तियाँ छाँटेंगे।':'Children sort leaves.'),review:'Ask each child to explain.',classwork:'Workbook page 12. Homework: observe a leaf at home.'};
   const p=withPlanning({id:id(),grade:'Grade 2',section:'A',subject:'EVS',topic:'Leaves'},{answers,answerLanguage:lang});
   assert.equal(planningIssue(p),'');
   const parsed=JSON.stringify(parseLessonPlan(p.reflection,p.materials));
   for(const v of Object.values(answers))assert.ok(parsed.includes(v),v);
+  assert.ok(p.reflection.indexOf(answers.review)<p.reflection.indexOf(answers.classwork),'classwork and homework after the review');
   submissionSchema.parse({id:id(),school:'Alpha',teacher:'Asha',date:'2026-11-23',periods:[p],files:[]});
  }
- const maxed=withPlanning({grade:'Grade 2',subject:'English',topic:'Leaves'},{answerLanguage:'hi',answers:{...Object.fromEntries(guide.map(([k,,,max])=>[k,'अ'.repeat(max)])),homework:'ग'.repeat(homework[3])}});
+ const maxed=withPlanning({grade:'Grade 2',subject:'English',topic:'Leaves'},{answerLanguage:'hi',answers:Object.fromEntries(guide.map(([k,,,max])=>[k,'अ'.repeat(max)]))});
  assert.equal(planningIssue(maxed),'');assert.ok(maxed.reflection.length<=5000,'maximum answers fit the existing limit');
+ const old=withPlanning({grade:'Grade 2',subject:'EVS',topic:'Leaves'},{answers:{objective:'x',homework:'Earlier draft homework'},answerLanguage:'en'});
+ assert.match(old.reflection,/Classwork and homework:\nEarlier draft homework/,'earlier drafts keep their homework');
 });
 
-test('incomplete parts are found in field order; homework stays optional',()=>{
- const full=block({grade:'Grade 2',subject:'EVS'});
- assert.equal(planningIssue({...full,topic:' '}),'details');
- assert.equal(planningIssue(withPlanning(full,{answers:{...full.answers,materials:''}})),'materials');
- assert.equal(planningIssue(withPlanning(full,{answers:{...full.answers,homework:''}})),'');
- assert.equal(planningIssue({...full,date:''},{needsDate:true}),'date');
+test('no planning field is mandatory; only class, subject and topic identify the lesson',()=>{
+ const empty=withPlanning({grade:'Grade 2',subject:'EVS',topic:'Leaves'},{answers:{},answerLanguage:'en'});
+ assert.equal(planningIssue(empty),'','a plan may be submitted with every field blank');
+ submissionSchema.parse({id:id(),school:'Alpha',teacher:'Asha',date:'2026-11-23',periods:[{id:id(),...empty}],files:[]});
+ assert.equal(planningIssue({...empty,topic:' '}),'details');
+ assert.equal(planningIssue({...empty,subject:''}),'details');
+ assert.equal(planningIssue({...empty,date:''},{needsDate:true}),'date');
 });
 
 test('school days skip Sundays',()=>{
