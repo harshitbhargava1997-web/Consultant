@@ -34,7 +34,7 @@ export default function SchoolLeaders({schools,initialSchool=''}){
  useEffect(()=>{if(initialSchool)void load(initialSchool);},[]);
  const set=k=>e=>setForm(f=>({...f,[k]:e.target.value}));
  return <section className="card leaders-admin">
-  <div className="card-head"><div><h2><ShieldCheck size={18}/> School leaders</h2><p>Principals and coordinators sign in with their mobile number and see only their school: School 360°, Teacher 360°, lesson reviews and classroom visits.</p></div></div>
+  <div className="card-head"><div><h2><ShieldCheck size={18}/> School leaders</h2><p>Principals, coordinators and school management sign in with their mobile number and see only their school: School 360°, Teacher 360°, lesson reviews and classroom visits.</p></div></div>
   <label className="field"><span>School</span><select value={school} onChange={e=>{setSchool(e.target.value);setNotice('');void load(e.target.value);}}><option value="">Select school</option>{schools.map(s=><option key={s}>{s}</option>)}</select></label>
   {error&&<p className="lp-error" role="alert"><CircleAlert size={16}/>{error}</p>}
   {notice&&<div className="alert success" role="status">{notice}</div>}
@@ -43,12 +43,12 @@ export default function SchoolLeaders({schools,initialSchool=''}){
    {data&&(data.leaders.length?<ul className="pin-list">{data.leaders.map(l=><li key={l.userId}><div><b>{l.name||'(no name)'}</b><small>{[l.title,l.mobile||l.email].filter(Boolean).join(' · ')}</small></div><span className={'pill '+(l.status==='Active'?'green':'amber')}>{l.status}</span>
      {l.managed&&<button type="button" className="button" disabled={!!busy} onClick={()=>reset(l)}><RotateCcw size={14}/>{busy===l.userId?'…':'Reset password'}</button>}
      <button type="button" className="button" disabled={!!busy} onClick={()=>remove(l)}><UserMinus size={14}/>Remove</button></li>)}</ul>
-    :<p className="hint">No principal or coordinator has access to {school} yet.</p>)}
+    :<p className="hint">No school leader has access to {school} yet.</p>)}
    <form className="leaders-form" onSubmit={add}>
-    <h3><UserPlus size={16}/> Add principal or coordinator</h3>
+    <h3><UserPlus size={16}/> Add principal, coordinator or school management</h3>
     <div className="form-grid">
      <label className="field"><span>Full name</span><input required minLength={2} maxLength={160} value={form.name} onChange={set('name')}/></label>
-     <label className="field"><span>Role</span><select value={form.title} onChange={set('title')}><option>Principal</option><option>Coordinator</option></select></label>
+     <label className="field"><span>Role</span><select value={form.title} onChange={set('title')}><option>Principal</option><option>Coordinator</option><option>School management</option></select></label>
      <label className="field"><span>Mobile number</span><input required inputMode="tel" placeholder="10-digit mobile number" value={form.mobile} onChange={set('mobile')}/></label>
      <label className="field"><span>Starting password</span><input required minLength={6} maxLength={128} value={form.password} onChange={set('password')}/><small>They must replace it with their own password at first sign-in.</small></label>
     </div>

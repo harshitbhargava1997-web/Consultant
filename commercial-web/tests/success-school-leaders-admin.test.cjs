@@ -76,3 +76,11 @@ test('only Super Admin can manage school leaders; inputs are validated',async()=
  assert.equal((await add(h,{password:'123'})).status,400);
  assert.equal(h.users.size,0);
 });
+
+test('School management is a third school leader role with the same access',async()=>{
+ const h=harness(),r=await add(h,{name:'Rakesh Jain',title:'School management',mobile:'9811122233'});
+ assert.equal(r.status,200,JSON.stringify(r.body));
+ const u=[...h.users.values()].find(x=>x.user_metadata.full_name==='Rakesh Jain');
+ assert.deepEqual([h.grant(u.id).role,h.grant(u.id).title],['leader','School management']);
+ assert.equal((await add(h,{title:'Owner',mobile:'9811122244'})).status,400,'only the three titles');
+});

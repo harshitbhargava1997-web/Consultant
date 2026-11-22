@@ -1,4 +1,4 @@
-# School leaders (principals and coordinators) in School Success
+# School leaders (principals, coordinators and school management) in School Success
 
 22 November 2026. Phase 1 of stakeholder access (owner-approved):
 - the CRM is hidden from school leaders;
@@ -10,7 +10,7 @@
 1. Open **School Success → Schools & teachers → School leaders** (Super Admin only).
 2. Choose the school, then enter:
    - full name;
-   - role (**Principal** or **Coordinator**);
+   - role (**Principal**, **Coordinator** or **School management**);
    - **mobile number**;
    - **starting password** (prefilled `123456`).
 3. Click **Add school leader**. This:

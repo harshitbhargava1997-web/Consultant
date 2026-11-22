@@ -13,7 +13,7 @@ const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
 const text=z.string().trim();
 const body=z.discriminatedUnion('action',[
  z.object({action:z.literal('list'),school:text.min(1).max(1000)}),
- z.object({action:z.literal('add'),school:text.min(1).max(1000),name:text.min(2).max(160),title:z.enum(['Principal','Coordinator']),mobile:text.min(10).max(20),password:z.string().min(6).max(128)}),
+ z.object({action:z.literal('add'),school:text.min(1).max(1000),name:text.min(2).max(160),title:z.enum(['Principal','Coordinator','School management']),mobile:text.min(10).max(20),password:z.string().min(6).max(128)}),
  z.object({action:z.literal('reset'),school:text.min(1).max(1000),userId:z.string().uuid(),password:z.string().min(6).max(128)}),
  z.object({action:z.literal('remove'),school:text.min(1).max(1000),userId:z.string().uuid()})
 ]);
