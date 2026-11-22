@@ -5,10 +5,10 @@ export const moduleGrantSchema=z.object({
  enabled:z.boolean(),
  schools:z.array(z.string().trim().min(1).max(1000)).max(500),
  // consultant: full staff access to the assigned schools (unchanged behaviour for existing grants).
- // leader: school principal or coordinator; their own school's reports, lesson reviews, visits and teacher PINs only.
+ // leader: school principal, coordinator or school management; their own school's reports, lesson reviews, visits and teacher PINs only.
  role:z.enum(['consultant','leader']).default('consultant'),
  // For school leaders: shown to Super Admin in School Success → Schools & teachers.
- title:z.enum(['Principal','Coordinator']).optional()
+ title:z.enum(['Principal','Coordinator','School management']).optional()
 }).transform(value=>({...value,schools:[...new Set(value.schools)]})).refine(value=>!value.enabled||value.schools.length>0,'Choose at least one School Success school');
 
 export function readModuleGrant(value,userId){
