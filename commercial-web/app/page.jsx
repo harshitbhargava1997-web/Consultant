@@ -22,7 +22,7 @@ const ImplementationWorkspace=dynamic(()=>import("./ImplementationWorkspace"),{l
 const TeacherPortalWorkspace=dynamic(()=>import("./TeacherPortalWorkspace"),{loading:()=> <section className="panel">Opening teacher portal…</section>});
 const CurriculumEditor=dynamic(()=>import("./CurriculumEditor"),{loading:()=> <section className="panel">Opening workspace…</section>});
 const ConsultantWorkspace=dynamic(()=>import("./ConsultantWorkspace"),{loading:()=> <section className="panel">Opening consultant workspace…</section>});
-import {isEmail,loginLabel,normalizePhone} from "../lib/auth";
+import {isEmail,loginLabel,normalizePhone,mobileLoginEmail} from "../lib/auth";
 import {safeReturnPath} from "../lib/return-path";
 import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNoAxesCombined,
  BookMarked,Eye,Menu,X,LogOut,Plus,Trash2,Search,ChevronRight,RefreshCw,LockKeyhole,
@@ -225,9 +225,15 @@ export default function Home(){
     const {error}=await client.auth.resetPasswordForEmail(value,{redirectTo:window.location.origin+"/reset"});if(error)throw error;
     setMessage("If an account exists, a password reset email will arrive.");
    }else{
-    const credentials=isEmail(value)?{email:value.toLowerCase(),password}:{phone:normalizePhone(value),password};
-    if(!credentials.email&&!credentials.phone)throw Error("Enter a valid email address or 10-digit teacher mobile number.");
-    const {error}=await client.auth.signInWithPassword(credentials);if(error)throw error;
+    if(isEmail(value)){const {error}=await client.auth.signInWithPassword({email:value.toLowerCase(),password});if(error)throw error;}
+    else{
+     const phone=normalizePhone(value);
+     if(!phone)throw Error("Enter a valid email address or 10-digit mobile number.");
+     // Mobile numbers sign in through their internal sign-in address (no SMS needed); older phone-only accounts
+     // still use phone sign-in when it is enabled.
+     const viaMobile=await client.auth.signInWithPassword({email:mobileLoginEmail(phone),password});
+     if(viaMobile.error){const viaPhone=await client.auth.signInWithPassword({phone,password});if(viaPhone.error)throw(/disabled/i.test(viaPhone.error.message||"")?viaMobile.error:viaPhone.error);}
+    }
    }
   }catch(e){setMessage(e.message);}finally{setBusy(false);}
  }
