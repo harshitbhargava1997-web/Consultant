@@ -149,13 +149,13 @@
 .success-app .lp-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .success-app .lp-field{display:flex;flex-direction:column;gap:7px;padding:12px;border-radius:12px;background:#f8faf7;border:1px solid transparent;transition:background .15s,border-color .15s}
 .success-app .lp-field:focus-within{background:white;border-color:#bcd6c6;box-shadow:0 0 0 3px #2b6d5512}
-.success-app .lp-field.optional{grid-column:1/-1}
+.success-app .lp-field.wide{grid-column:1/-1}
 .success-app .lp-field-label{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:var(--ink)}
 .success-app .lp-field-icon{display:inline-flex;padding:6px;border-radius:8px;background:white;color:var(--green);border:1px solid var(--line)}
 .success-app .lp-tick{color:var(--green);margin-left:auto}
 .success-app .lp-field{font-weight:400}.success-app .lp-form input,.success-app .lp-form select,.success-app .lp-form textarea,.success-app .teacher-evidence textarea{font-weight:400;font-size:14px}
 .success-app .lp-field textarea{border-color:#e1e8e2;background:white;font-size:14px;line-height:1.55;min-height:84px}
-.success-app .lp-field.optional textarea{min-height:56px}
+
 .success-app .lp-field textarea::placeholder,.success-app .lp-form input::placeholder,.success-app .teacher-evidence textarea::placeholder{color:#a3b0a8;font-style:italic}
 .success-app .lp-field textarea:focus{outline:none}
 .success-app .lp-count{text-align:right;font-size:10.5px}

@@ -1,23 +1,31 @@
 import {formatReflection} from './teacher-flow.js';
 // One-page lesson planning. Every field is visible at once; its guiding question and sentence starter are shown
 // as faded placeholder text inside the box (never inserted into the answer).
-// Entry: [key, [English title, Hindi title], [English placeholder, Hindi placeholder], max length]
+// Entry: [key, [English title, Hindi title], [English placeholder, Hindi placeholder], max length, required]
+// Order follows the lesson: outcome, materials, I do, We do, You do, review, then classwork and homework.
+// No planning field is required (owner decision); only class, subject and topic identify the lesson. The screen never
+// labels a field optional.
 export const guide = [
- ['objective',['Learning outcome','सीखने का प्रतिफल'],['By the end of this class period, students will be able to …','इस कालांश के अंत तक बच्चे … कर पाएँगे।'],650],
- ['materials',['Teaching-learning materials','शिक्षण-अधिगम सामग्री'],['I will use … to help students … Before class, I will prepare …','बच्चों को … सिखाने के लिए मैं … का उपयोग करूँगा/करूँगी। कक्षा से पहले मैं … तैयार करूँगा/करूँगी।'],650],
- ['teacher',['Teacher activities','शिक्षक की गतिविधियाँ'],['I will begin by … I will demonstrate … using … I will guide students to …','मैं … से शुरुआत करूँगा/करूँगी। … की मदद से … करके दिखाऊँगा/दिखाऊँगी। बच्चों को … करने में मार्गदर्शन दूँगा/दूँगी।'],650],
- ['student',['Student activity and participation','बच्चों की गतिविधि और भागीदारी'],['Students will work … to … Each child will … They will share by …','बच्चे … में काम करके … करेंगे। हर बच्चा … करेगा। बच्चे अपनी सीख … से साझा करेंगे।'],650],
- ['practice',['Classwork and practice','कक्षा कार्य और अभ्यास'],['Students will practise … by completing … (book / workbook pages)','बच्चे … पूरा करके … का अभ्यास करेंगे। (पुस्तक / कार्यपुस्तिका के पृष्ठ)'],650],
- ['review',['Check learning and next steps','सीख की जाँच और आगे के कदम'],['I will check understanding by … Children needing support will … Those ready for a challenge will …','मैं … से समझ की जाँच करूँगा/करूँगी। सहायता चाहने वाले बच्चे … करेंगे। तैयार बच्चों को … की चुनौती दूँगा/दूँगी।'],650]
+ ['objective',['Learning outcome','सीखने का प्रतिफल'],['By the end of this class period, students will be able to …','इस कालांश के अंत तक बच्चे … कर पाएँगे।'],650,false],
+ ['materials',['Teaching-learning materials','शिक्षण-अधिगम सामग्री'],['I will use … to help students … Before class, I will prepare …','बच्चों को … सिखाने के लिए मैं … का उपयोग करूँगा/करूँगी। कक्षा से पहले मैं … तैयार करूँगा/करूँगी।'],650,false],
+ ['teacher',['Teacher activity (I do)','शिक्षक की गतिविधि (मैं करूँ)'],['I will begin by … I will demonstrate … using … I will guide students to …','मैं … से शुरुआत करूँगा/करूँगी। … की मदद से … करके दिखाऊँगा/दिखाऊँगी। बच्चों को … करने में मार्गदर्शन दूँगा/दूँगी।'],650,false],
+ ['student',['Student activity and participation (We do)','बच्चों की गतिविधि और भागीदारी (हम करें)'],['Together we will … Students will work … to … Each child will … They will share by …','हम मिलकर … करेंगे। बच्चे … में काम करके … करेंगे। हर बच्चा … करेगा। बच्चे अपनी सीख … से साझा करेंगे।'],650,false],
+ ['practice',['Practice and apply (You do)','अभ्यास और उपयोग (आप करें)'],['On their own, students will practise … by …','बच्चे स्वयं … करके … का अभ्यास करेंगे।'],650,false],
+ ['review',['Check learning and next steps','सीख की जाँच और आगे के कदम'],['I will check understanding by … Children needing support will … Those ready for a challenge will …','मैं … से समझ की जाँच करूँगा/करूँगी। सहायता चाहने वाले बच्चे … करेंगे। तैयार बच्चों को … की चुनौती दूँगा/दूँगी।'],650,false],
+ ['classwork',['Classwork and homework','कक्षा कार्य और गृहकार्य'],['Classwork: … (book / workbook pages). Homework: …','कक्षा कार्य: … (पुस्तक / कार्यपुस्तिका के पृष्ठ)। गृहकार्य: …'],500,false]
 ];
-// Optional field, saved with classwork under the same heading.
-export const homework = ['homework',['Homework (optional)','गृहकार्य (वैकल्पिक)'],['At home, students will … to practise …','घर पर बच्चे … का अभ्यास करने के लिए … करेंगे।'],300];
+export const requiredKeys = guide.filter(g=>g[4]).map(g=>g[0]);
 export const PLAN_TYPES = ['daily','weekly'];
 export const MAX_DAILY_PERIODS = 10, MAX_WEEKLY_DAYS = 6;
 
 export function planningParts(p){
  const a=p.answers||{},hi=p.answerLanguage==='hi';
- return {...a,practice:[a.practice?.trim()?(hi?'कक्षा कार्य:\n':'Classwork:\n')+a.practice.trim():'',a.homework?.trim()?(hi?'गृहकार्य:\n':'Homework:\n')+a.homework.trim():''].filter(Boolean).join('\n')};
+ // Drafts from the earlier form kept homework separately; it now belongs to classwork and homework.
+ const classwork=(a.classwork??a.homework??'').trim();
+ // Saved under the existing six headings, so lesson PDFs and records read it unchanged. Classwork and homework
+ // come after the learning check, inside the review section.
+ const {classwork:_c,homework:_h,...rest}=a;
+ return {...rest,practice:a.practice?.trim()||'',review:[a.review?.trim()||'',classwork?(hi?'कक्षा कार्य और गृहकार्य:\n':'Classwork and homework:\n')+classwork:''].filter(Boolean).join('\n')};
 }
 export function withPlanning(p,changes){const n={...p,...changes};return {...n,reflection:formatReflection(planningParts(n)),materials:n.answers?.materials||''};}
 // First incomplete part of one block: 'details', 'date', a guide key, or 'length'. Empty string when complete.
@@ -25,7 +33,7 @@ export function planningIssue(p,{needsDate=false}={}){
  if(!p.grade||!p.subject||!p.topic?.trim())return 'details';
  if(needsDate&&!/^\d{4}-\d{2}-\d{2}$/.test(p.date||''))return 'date';
  const a=p.answers||{};
- for(const [key] of guide)if(!a[key]?.trim())return key;
+ for(const key of requiredKeys)if(!a[key]?.trim())return key;
  if((p.reflection||'').length>5000)return 'length';
  return '';
 }
