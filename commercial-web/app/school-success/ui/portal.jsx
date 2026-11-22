@@ -1,6 +1,7 @@
 'use client';
 import {requestJson} from '@/lib/school-success/request-json';
 import {successFetch} from '@/lib/school-success/client';
+import {teacherSession,clearTeacherSession} from '@/lib/school-success/teacher-session';
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 const LessonReviewWorkspace=dynamic(()=>import('./lesson-review'),{loading:()=> <section className="card">Loading lesson reviews…</section>});
@@ -35,9 +36,12 @@ export default function Portal() {
     const [data, setData] = useState(null), [page, setPage] = useState('Overview'), [school, setSchool] = useState(''), [query, setQuery] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [modal, setModal] = useState(''), [form, setForm] = useState({}), [mobile, setMobile] = useState(false), [from, setFrom] = useState(today().slice(0, 8) + '01'), [to, setTo] = useState(today()), [statusFilter, setStatusFilter] = useState('Active'), [entity, setEntity] = useState('Principal'), [draft, setDraft] = useState(''), [importType, setImportType] = useState('usage'), [importRows, setImportRows] = useState(null), [importName, setImportName] = useState(''), [files, setFiles] = useState([]), [category, setCategory] = useState('Activity'), [teacherFilter, setTeacherFilter] = useState(''), [targets, setTargets] = useState([10, 30, 10, 10]), [holidays, setHolidays] = useState(''), [schoolLinks, setSchoolLinks] = useState({});
     async function refresh(period) {
         const params = new URLSearchParams(location.search);
-        const query = new URLSearchParams({...period || {from, to}, ...Object.fromEntries([...params].filter(([key]) => ['access', 'teacher'].includes(key)))});
+        // School links send the teacher only through the PIN session header (see successFetch).
+        const query = new URLSearchParams({...period || {from, to}, ...Object.fromEntries([...params].filter(([key]) => key === 'access' || (key === 'teacher' && !params.has('access'))))});
         if (params.has('access')) query.set('view', 'teacher');
-        const d = await requestJson(() => successFetch('/api/school-success/portal?' + query));
+        let d;
+        try { d = await requestJson(() => successFetch('/api/school-success/portal?' + query)); }
+        catch (e) { if (!(params.has('access') && e.status === 401 && teacherSession())) throw e; clearTeacherSession(); d = await requestJson(() => successFetch('/api/school-success/portal?' + query)); }
         setData(d);
         if (d.actor.role !== 'admin' || params.get('view') === 'teacher') {setPage('Teacher portal');setSchool(d.actor.school);}
     }
