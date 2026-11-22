@@ -86,6 +86,25 @@ async function rawGateway(req) {
                 throw Error('Too many lessons for this date. Contact your administrator.');
             return json({ rows: rows.filter(r => r.Center === b.school && r.FullName === b.teacher && r.Uploaded_By === b.actor && r.planned_lesson_on === b.date && r.lesson_stage && r.submission_id) });
         }
+        if (b.action === 'teacherLessons') {
+            // One teacher's own saved lessons in a planned-date window, plus the review feedback recorded on exactly
+            // those lesson records. Scoped like findLessons: school, teacher and the submitting account.
+            const valid = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && Number.isFinite(Date.parse(s)) && new Date(s).toISOString().slice(0, 10) === s;
+            if (!b.actor || !b.school || !b.teacher || !valid(b.from) || !valid(b.to) || b.from > b.to || Date.parse(b.to) - Date.parse(b.from) > 120 * 86400000)
+                throw Error('Invalid lesson summary request');
+            const q = new URLSearchParams({ select: 'id,submission_id,Center,FullName,Uploaded_By,planned_lesson_on,lesson_stage,lesson_period_id,Grade,Section,Subject,Book,evidence_submitted_at', Center: 'eq.' + b.school, FullName: 'eq.' + b.teacher, Uploaded_By: 'eq.' + b.actor, and: '(planned_lesson_on.gte.' + b.from + ',planned_lesson_on.lte.' + b.to + ')', lesson_stage: 'not.is.null', order: 'planned_lesson_on.desc,id', limit: '1000' });
+            const rows = (await request('/rest/v1/teacher_records?' + q)).filter(r => r.Center === b.school && r.FullName === b.teacher && r.Uploaded_By === b.actor && r.lesson_stage && r.submission_id && r.planned_lesson_on >= b.from && r.planned_lesson_on <= b.to);
+            const ids = rows.map(r => String(r.id)).filter(id => lessonRecordId.safeParse(id).success), scope = { school: 'eq.' + b.school }, reviews = [];
+            for (let i = 0; i < ids.length; i += 200) {
+                const batch = ids.slice(i, i + 200);
+                const [legacy, rubrics] = await Promise.all([
+                    request('/rest/v1/portal_evidence_reviews?' + new URLSearchParams({ ...scope, record_id: 'in.(' + batch.join(',') + ')', select: 'record_id,school,feedback,updated_at' })),
+                    readRubricRows(batch, scope, all)
+                ]);
+                reviews.push(...[...legacy, ...rubrics].filter(r => batch.includes(String(r.record_id)) && r.feedback));
+            }
+            return json({ rows, reviews });
+        }
         if (b.action === 'readLesson') {
             if (!/^[a-f0-9-]{36}$/i.test(b.id) || !b.actor || !b.school || !b.teacher)
                 throw Error('Invalid lesson access');

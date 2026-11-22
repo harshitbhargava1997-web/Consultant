@@ -24,7 +24,7 @@ const render=actor=>renderToStaticMarkup(React.createElement(TeacherPortal,{data
 
 test('teacher landing starts with two language choices and no recording or submission form',()=>{
  const html=render({role:'school-teacher',school:'Alpha School',name:'Asha',email:'x@school.invalid'});
- assert.match(html,/Choose your preferred language/);assert.match(html,/English/);assert.match(html,/हिन्दी/);
+ assert.match(html,/Choose your language/);assert.match(html,/English/);assert.match(html,/हिन्दी/);
  assert.ok(!html.includes('Record audio reflection'));assert.ok(!html.includes('teacher-submission-form'));
 });
 

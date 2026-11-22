@@ -35,6 +35,34 @@ async function handlerPOST(req) {
             }
             return Response.json({ lessons: [...grouped.values()] }, { headers: { 'Cache-Control': 'no-store' } });
         }
+        if (body.action === 'myLessons') {
+            // The teacher's own home summary: lessons planned in the last 60 days and next 30, which still need
+            // evidence, and the review feedback recorded on those lessons. Same scope as findLessons.
+            const school = a.role === 'admin' ? String(body.school || '') : a.school, teacher = a.role === 'admin' ? String(body.teacher || '') : a.name;
+            if (!school || !teacher)
+                throw Error('Select a teacher');
+            const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), shift = n => new Date(Date.parse(today + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+            const data = await gateway({ action: 'teacherLessons', school, teacher, from: shift(-60), to: shift(30), actor: a.email });
+            const grouped = new Map(), byRecord = new Map();
+            for (const row of data.rows) {
+                if (row.Center !== school || row.FullName !== teacher || row.Uploaded_By !== a.email || !row.lesson_stage || !row.submission_id)
+                    continue;
+                let lesson = grouped.get(row.submission_id);
+                if (!lesson) {
+                    lesson = { id: row.submission_id, plannedOn: row.planned_lesson_on, periods: [], resumeToken: await seal({ kind: 'lesson-resume', id: row.submission_id, school, teacher, email: a.email, exp: Date.now() + 365 * 86400000 }, signer) };
+                    grouped.set(row.submission_id, lesson);
+                }
+                const period = { grade: row.Grade || '', section: row.Section || '', subject: row.Subject || '', topic: row.Book || '', evidence: row.lesson_stage === 'evidence_submitted' };
+                lesson.periods.push(period);
+                byRecord.set(String(row.id), { lesson, period });
+            }
+            const lessons = [...grouped.values()].map(l => ({ ...l, evidence: l.periods.every(p => p.evidence) }));
+            const feedback = (data.reviews || []).filter(r => byRecord.has(String(r.record_id))).map(r => {
+                const { lesson, period } = byRecord.get(String(r.record_id));
+                return { lessonId: lesson.id, plannedOn: lesson.plannedOn, grade: period.grade, section: period.section, subject: period.subject, topic: period.topic, text: String(r.feedback), date: r.updated_at || '', resumeToken: lesson.resumeToken };
+            }).sort((x, y) => String(y.date).localeCompare(String(x.date)));
+            return Response.json({ today, lessons, feedback }, { headers: { 'Cache-Control': 'no-store' } });
+        }
         if (body.action === 'resume') {
             const grant = await resumeGrant(body.resume);
             const data = await gateway({ action: 'readLesson', id: grant.id, school: grant.school, teacher: grant.teacher, actor: a.email });
