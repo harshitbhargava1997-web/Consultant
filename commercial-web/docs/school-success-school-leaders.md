@@ -89,3 +89,17 @@ Server permissions are unchanged: leaders still read only their own school and c
   The rule lives in `lib/password-policy.js`.
 - **Adding a leader with an existing mobile number** is refused, with "This mobile number is already registered. Please change the details and use a different mobile number." (or "already a school leader for this school"). Previously the existing account was linked, keeping its own password and email, so the leader could not sign in with what was shared.
 - **Accounts linked earlier:** they have no Reset password button. Remove them from the school and add the person again with a mobile number that has no account, or reset their password where the account was created.
+
+## 24 November 2026: School Success's own sign-in (owner decision)
+School Success and Vision literacy are separate programmes, and School Success staff sign in at **schoolsuccess.in/school-success**.
+- **Sign-in page:**
+  - School Success branding, mobile number (or email) and password;
+  - friendly errors ("The mobile number or password is not correct.").
+  It is shown whenever a principal, coordinator, school management member or consultant is not signed in. There is no "Sign in to Vision" button.
+- **First sign-in:** "Set your own password" (at least 6 characters), then straight into School Success.
+- **No access:** a signed-in account without School Success access sees "No School Success access", with Sign out.
+- **Sign out:** stays on School Success's sign-in page.
+- **Unchanged:** teachers keep the school link and PIN; Vision's own sign-in page; user management.
+- **Accounts:** leader accounts are created in School Success → School leaders. Their access comes from School Success module access, not Vision school memberships, so they do not appear in Vision's user management. The shared sign-in service only checks the password.
+- **Code:** `app/school-success/ui/success-sign-in.jsx`, wired in `portal.jsx`.
+- **Tests:** `tests/success-sign-in.test.mjs`. A phone browser check of the whole flow was run with a fake sign-in service.
