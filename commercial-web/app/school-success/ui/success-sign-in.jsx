@@ -12,7 +12,7 @@ import {PASSWORD_MIN,validPassword} from '@/lib/password-policy';
 // Friendly text for the sign-in service's messages.
 export function signInMessage(error){
  const m=String(error?.message||error||'');
- if(/invalid login|invalid credentials|invalid grant/i.test(m))return 'The mobile number or password is not correct.';
+ if(/invalid login|invalid credentials|invalid grant/i.test(m))return 'The sign-in details are not correct. Check your mobile number (or email) and password.';
  if(/not confirmed/i.test(m))return 'This account is not active yet. Ask your School Success administrator.';
  if(/rate|too many/i.test(m))return 'Too many attempts. Wait a minute and try again.';
  return m||'Could not sign in. Please try again.';
@@ -52,11 +52,20 @@ export default function SuccessSignIn({mode='signin',message='',onDone}){
   if(next!==confirm){setError('The two passwords do not match.');return;}
   setBusy(true);
   try{
-   const {data}=await client.auth.getSession();
-   const res=await fetch('/api/password-changed',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+data.session?.access_token},body:JSON.stringify({password:next})});
-   const out=await res.json().catch(()=>({}));
+   // Use a fresh sign-in for the save.
+   let {data:{session}}=await client.auth.getSession();
+   if(!session){setStep('signin');throw Error('Your sign-in has expired. Please sign in again with your starting password.');}
+   const fresh=await client.auth.refreshSession();if(fresh.data?.session)session=fresh.data.session;
+   const save=body=>fetch('/api/password-changed',{method:'POST',headers:{'Content-Type':'application/json',...(session?.access_token?{Authorization:'Bearer '+session.access_token}:{})},body:JSON.stringify(body)});
+   let res=await save({password:next}),out=await res.json().catch(()=>({}));
+   if(res.status===401){
+    // Backup path: set the password with the person's own session, then confirm it on the server.
+    const up=await client.auth.updateUser({password:next});
+    if(up.error)throw Error(/same|different from the old/i.test(up.error.message||'')?'Choose a password different from your starting password.':signInMessage(up.error));
+    res=await save({password:next,confirm:'new-password',login:session.user?.email||session.user?.phone||''});out=await res.json().catch(()=>({}));
+   }
    if(!res.ok)throw Error(out.error||'Your password could not be saved.');
-   const {error:refreshError}=await client.auth.refreshSession();if(refreshError)throw refreshError;
+   await client.auth.refreshSession().catch(()=>{});
    onDone();
   }catch(err){setError(err.message);}finally{setBusy(false);}
  }
@@ -74,7 +83,7 @@ export default function SuccessSignIn({mode='signin',message='',onDone}){
  return <main className="ss-auth"><form className="ss-card" onSubmit={signIn}><Brand/><h1>Sign in</h1>
   <p className="ss-lead">For principals, coordinators, school management and School Success consultants.</p>
   {error&&<p className="ss-error" role="alert"><CircleAlert size={16}/>{error}</p>}
-  <label className="ss-field"><span>Mobile number</span><input autoComplete="username" inputMode="tel" placeholder="10-digit mobile number (or email)" required value={login} onChange={e=>setLogin(e.target.value)}/></label>
+  <label className="ss-field"><span>Mobile number or email</span><input autoComplete="username" inputMode="email" placeholder="10-digit mobile number or email" required value={login} onChange={e=>setLogin(e.target.value)}/></label>
   <label className="ss-field"><span>Password</span><span className="ss-pass"><input type={show?'text':'password'} autoComplete="current-password" required value={password} onChange={e=>setPassword(e.target.value)}/><button type="button" aria-label={show?'Hide password':'Show password'} onClick={()=>setShow(v=>!v)}>{show?<EyeOff size={18}/>:<Eye size={18}/>}</button></span></label>
   <button className="ss-btn" disabled={busy}><LogIn size={18}/>{busy?'Signing in…':'Sign in'}</button>
   <p className="ss-note">Forgot your password? Ask your School Success administrator to reset it.</p>

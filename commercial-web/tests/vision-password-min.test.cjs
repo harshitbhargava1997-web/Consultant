@@ -28,3 +28,19 @@ test('the shared rule: 6 to 128 characters, digits allowed, no letter or symbol 
  assert.equal(validPassword('123456'),true);assert.equal(validPassword('abcdef'),true);assert.equal(validPassword('12345'),false);
  assert.equal(validPassword('x'.repeat(128)),true);assert.equal(validPassword('x'.repeat(129)),false);assert.equal(validPassword(123456),false);
 });
+test('backup path: after the browser sets the new password, signing in with it clears "must change"; a wrong one does not',async()=>{
+ const user={id:'u3',email:'9800000003@mobile.schoolsuccess.in',app_metadata:{must_change_password:true,school_success_leader:true}};
+ const updates=[],signIns=[];let accept=true;
+ const client={auth:{getUser:async()=>({data:{user:null},error:{status:401,code:'bad_jwt'}}),admin:{updateUserById:async(id,patch)=>{updates.push([id,patch]);return {error:null};}},
+  signInWithPassword:async c=>{signIns.push(c);return accept?{data:{user},error:null}:{data:{user:null},error:{status:400,code:'invalid_credentials'}};},signOut:async()=>({})}};
+ process.env.NEXT_PUBLIC_SUPABASE_URL='https://fixture.invalid';process.env.SUPABASE_SERVICE_ROLE_KEY='x';process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY='y';
+ const route=load('app/api/password-changed/route.js',{'@supabase/supabase-js':{createClient:()=>client}});
+ const call=async(body,auth='Bearer t')=>{const res=await route.POST(new Request('http://app.test/api/password-changed',{method:'POST',headers:{...(auth?{authorization:auth}:{}),'content-type':'application/json'},body:JSON.stringify(body)}));return {status:res.status,body:await res.json()};};
+ const bad=await call({password:'482915'});assert.equal(bad.status,401);assert.match(bad.body.error,/could not be verified/);assert.equal(updates.length,0);
+ const none=await call({password:'482915'},'');assert.equal(none.status,401);assert.match(none.body.error,/expired/);
+ const ok=await call({password:'482915',confirm:'new-password',login:user.email},'');
+ assert.equal(ok.status,200);assert.deepEqual(signIns.at(-1),{email:user.email,password:'482915'});
+ assert.deepEqual(updates,[['u3',{app_metadata:{must_change_password:false,school_success_leader:true}}]],'only the flag is cleared; the password itself was set by the person');
+ accept=false;const wrong=await call({password:'000000',confirm:'new-password',login:user.email},'');assert.equal(wrong.status,401);assert.equal(updates.length,1);
+ assert.equal((await call({password:'12',confirm:'new-password',login:user.email},'')).status,400);
+});

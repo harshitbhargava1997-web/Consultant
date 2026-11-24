@@ -13,7 +13,7 @@ test('a mobile number signs in through its internal address, then phone; email s
  const ok=fake([{error:null}]);await m.exports.signInWithLogin(ok,'98000 00001','123456');
  assert.deepEqual(ok.calls,[{email:mobileLoginEmail(normalizePhone('9800000001')),password:'123456'}]);
  const both=fake([{error:{message:'Invalid login credentials'}},{error:{message:'Phone logins are disabled'}}]);
- await assert.rejects(m.exports.signInWithLogin(both,'9800000001','x'),/mobile number or password is not correct/);
+ await assert.rejects(m.exports.signInWithLogin(both,'9800000001','x'),/sign-in details are not correct/);
  assert.equal(both.calls.length,2);assert.ok(both.calls[1].phone);
  const mail=fake([{error:null}]);await m.exports.signInWithLogin(mail,'Principal@School.test','123456');assert.deepEqual(mail.calls,[{email:'principal@school.test',password:'123456'}]);
  await assert.rejects(m.exports.signInWithLogin(fake([]),'12345','x'),/10-digit mobile number/);
