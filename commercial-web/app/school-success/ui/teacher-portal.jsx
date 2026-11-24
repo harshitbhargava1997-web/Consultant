@@ -8,7 +8,8 @@ import TeacherLogin, {ChangePin} from './teacher-login';
 import TeacherPinAdmin from './teacher-pin-admin';
 import {clearTeacherSession} from '@/lib/school-success/teacher-session';
 import LessonPlanForm, {newBlock, dayLabel, hindiOptions} from './lesson-plan-form';
-import {SummaryStrip, RecentLessons, FeedbackCard} from './teacher-summary';
+import {SummaryStrip, RecentLessons, FeedbackCard, newFeedbackCount} from './teacher-summary';
+import {TeacherHome, TabBar, ProfileSheet, PlanReader, todaysLessons} from './teacher-app';
 import SchoolSharingLinks from './school-sharing-links';
 import LessonEvidence from './lesson-evidence';
 import { submissionSchema } from '@/lib/school-success/teacher-submissions';
@@ -32,6 +33,8 @@ export default function TeacherPortal({ data, school, refresh }) {
     const [plan, setPlan] = useState(() => emptyPlan('daily')), [busy, setBusy] = useState(''), [error, setError] = useState(''), [receipt, setReceipt] = useState(null), [mode, setMode] = useState(''), [resumeToken, setResumeToken] = useState(''), [savedLinks, setSavedLinks] = useState([]);
     const [summary, setSummary] = useState(null), [summaryError, setSummaryError] = useState(''), [summaryLoading, setSummaryLoading] = useState(false);
     const top = useRef(null), [pinPanel, setPinPanel] = useState(false), [pinNotice, setPinNotice] = useState('');
+    // Teacher app (school-link teachers): the plan being read, the period Add evidence opens on, and the profile menu.
+    const [readTarget, setReadTarget] = useState(null), [evPeriod, setEvPeriod] = useState(null), [sheet, setSheet] = useState(false);
     useEffect(() => { if (admin && school) setSchool(school); }, [admin, school]);
     useEffect(() => { const token = new URLSearchParams(location.search).get('resume'); if (token) { setResumeToken(token); setMode('evidence'); } try {
         const stored = JSON.parse(localStorage.getItem('school-success:teacher-lesson-links-v1') || '[]');
@@ -68,7 +71,8 @@ export default function TeacherPortal({ data, school, refresh }) {
     async function signOut() { clearTeacherSession(); setMode(''); setResumeToken(''); setReceipt(null); setPinPanel(false); const url = new URL(location.href); url.searchParams.delete('teacher'); url.searchParams.delete('resume'); historyReplace(url); try { await refresh(); } catch (e) { setError(e.message); } }
     function historyReplace(url) { window.history.replaceState(null, '', url.href); }
     function go(next) { const url = new URL(location.href); url.searchParams.delete('resume'); historyReplace(url); if (next !== 'evidence') setResumeToken(''); setMode(next); setError(''); requestAnimationFrame(() => top.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }
-    function openLesson(token) { setResumeToken(token); setMode('evidence'); setReceipt(null); requestAnimationFrame(() => document.getElementById('lesson-evidence')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }
+    function openLesson(token, period = null) { setEvPeriod(Number.isInteger(period) ? period : null); setResumeToken(token); setMode('evidence'); setReceipt(null); requestAnimationFrame(() => (schoolLink ? top.current : document.getElementById('lesson-evidence'))?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }
+    function readPlan(token, period = 0, match = null) { setReadTarget({ token, period, match }); setMode('read'); setReceipt(null); requestAnimationFrame(() => top.current?.scrollIntoView({ block: 'start' })); }
 
     // Saves one submission through the existing preparation workflow (PDF, direct upload, prepare/commit).
     async function saveOne(sub) {
@@ -127,6 +131,29 @@ export default function TeacherPortal({ data, school, refresh }) {
     const identity = admin ? <div className="lp-shared"><label className="field"><span>{t('School','विद्यालय')}</span><select value={selectedSchool} onChange={e => { setSchool(e.target.value); setTeacher(''); }}><option value="">{t('Select school','विद्यालय चुनें')}</option>{schools.map(s => <option key={s}>{s}</option>)}</select></label><label className="field"><span>{t('Teacher','शिक्षक')}</span>{teachers.length ? <select value={teacherValue} onChange={e => setTeacher(e.target.value)}><option value="">{t('Select teacher','शिक्षक चुनें')}</option>{teachers.map(n => <option key={n}>{n}</option>)}</select> : <input value={teacher} onChange={e => setTeacher(e.target.value)}/>}</label></div>
         : null;
     const who = JSON.stringify([data.actor.email || data.actor.role, selectedSchool, teacherValue]);
+    const receiptCard = receipt ? <section className="ts-card tp-receipt" role="status"><div className="ts-card-head"><div><h3><CheckCircle size={20}/> {receipt.type === 'weekly' ? t('Weekly plan saved','साप्ताहिक योजना सहेजी गई') : t('Lesson plan saved','पाठ योजना सहेजी गई')}</h3><p>{t('After teaching, your lessons appear under “Recent lessons”.','पढ़ाने के बाद आपके पाठ “हाल के पाठ” में दिखेंगे।')}</p></div></div>
+      <ul className="tp-receipt-list">{receipt.items.map(r => <li key={r.submissionId}><span><b>{dayLabel(r.date, language)}</b>{r.periods.map((p, i) => <small key={i}>{[option(p.grade) + (p.section && p.section !== 'Not Applicable' ? ' ' + p.section : ''), option(p.subject), p.topic].filter(Boolean).join(' · ')}</small>)}</span><a className="text-button" href={r.url}>{t('Return link','वापसी लिंक')}</a></li>)}</ul>
+      <p className="hint">{t('Receipt','रसीद')}: <code>{receipt.items.map(r => r.submissionId.slice(0, 8)).join(', ')}</code></p></section> : null;
+    if (schoolLink) {
+        const initials = String(teacherValue || '').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+        const label = p => [[option(p.grade), p.section && p.section !== 'Not Applicable' ? p.section : ''].filter(Boolean).join(' '), option(p.subject)].filter(Boolean).join(' · ');
+        const next = todaysLessons(summary).find(l => l.resumeToken !== resumeToken && !l.evidence);
+        const tab = next => { setSheet(false); if (next === 'read') return; go(next); };
+        return <div className="teacher-workspace tp ta-app" lang={language} ref={top}>
+         <div className="ta-top"><div className="ta-brand"><i>S</i>School Success</div><button type="button" className="ta-avatar" aria-label={t('Your profile','आपकी प्रोफ़ाइल')} onClick={() => setSheet(true)}>{initials}</button></div>
+         {pinPanel && <ChangePin language={language} teacher={teacherValue} onCancel={() => setPinPanel(false)} onDone={() => { setPinPanel(false); setPinNotice(t('Your new PIN is saved. Other phones were signed out.','आपका नया PIN सहेजा गया। दूसरे फ़ोन से साइन आउट हो गया।')); }}/>}
+         {pinNotice && <div className="alert success" role="status">{pinNotice}</div>}
+         {!data.uploadsEnabled && <div className="alert" role="status">{t('Lesson plans and written reflections are active. Photo and video uploads are waiting for the school’s media storage.','पाठ योजना और लिखित चिंतन चालू हैं। फोटो और वीडियो अपलोड मीडिया भंडारण जुड़ने के बाद चालू होंगे।')}</div>}
+         {mode === '' && <TeacherHome summary={summary} language={language} teacher={teacherValue} school={selectedSchool} newFeedback={newFeedbackCount(summary, who)} onRead={readPlan} onEvidence={openLesson} onPlan={() => go('preparation')} loading={summaryLoading} error={summaryError} onRetry={loadSummary} notice={receiptCard}/>}
+         {mode === 'read' && readTarget && <PlanReader key={readTarget.token + ':' + readTarget.period} token={readTarget.token} periodIndex={readTarget.period} match={readTarget.match} request={request} language={language} today={summary?.today || day()} onBack={() => go('')} onEvidence={openLesson}/>}
+         {mode === 'evidence' && <div id="lesson-evidence"><LessonEvidence language={language} key={selectedSchool + '|' + teacherValue + '|' + resumeToken} token={resumeToken} headers={contextHeaders} uploadsEnabled={data.uploadsEnabled} school={selectedSchool} teacher={teacherValue} compactSearch lessonChoices={summary?.lessons} onPickLesson={token => openLesson(token)} initialPeriod={evPeriod} onReadPlan={readPlan} onHome={() => go('')} nextLesson={next && { badge: dayLabel(next.plannedOn, language).split(',')[0], title: label(next.periods[0] || {}) + (next.periods.length > 1 ? ' +' + (next.periods.length - 1) : ''), subtitle: (next.periods[0]?.topic || '') + ' · ' + t('Read plan','योजना पढ़ें'), onOpen: () => readPlan(next.resumeToken, 0, next.periods[0]) }} onSaved={async () => { void loadSummary(); }}/></div>}
+         {mode === 'feedback' && <div className="ta-feedback"><FeedbackCard summary={summary} language={language} who={who} onOpen={token => readPlan(token, 0)}/></div>}
+         {mode === 'preparation' && <LessonPlanForm key={draftKey} language={language} plan={plan} setPlan={setPlan} identity={identity} submit={submit} busy={busy} error={error} canSave={!!selectedSchool && !!teacherValue} draftStatus={draftStatus} today={day()}/>}
+         {mode !== 'preparation' && error && <div className="alert error" role="alert">{error}</div>}
+         <TabBar mode={mode} onGo={tab} badge={mode === 'feedback' ? 0 : newFeedbackCount(summary, who)} language={language} disabled={!!busy}/>
+         <ProfileSheet open={sheet} onClose={() => setSheet(false)} name={teacherValue} school={selectedSchool} language={language} onLanguage={chooseLanguage} onChangePin={() => { setSheet(false); setPinNotice(''); setPinPanel(true); requestAnimationFrame(() => top.current?.scrollIntoView({ block: 'start' })); }} onLogout={() => { setSheet(false); void signOut(); }}/>
+        </div>;
+    }
     return <div className="teacher-workspace tp" lang={language} ref={top}>
      <div className="tp-top">
       <div><span className="eyebrow">{t('REFLECT • SHARE • GROW','सोचें • साझा करें • आगे बढ़ें')}</span><h2>{teacherValue ? t('Welcome, ','नमस्ते, ') + teacherValue : t('Teacher workspace','शिक्षक कार्यक्षेत्र')}</h2><p>{selectedSchool}</p></div>
@@ -139,9 +166,7 @@ export default function TeacherPortal({ data, school, refresh }) {
      {admin && <TeacherPinAdmin schools={[...new Set(roster.map(r => r.school))].filter(Boolean).sort()}/>}
      {!data.uploadsEnabled && <div className="alert" role="status">Lesson details and written reflections are active. Photo, video and voice uploads are awaiting the administrator’s media-storage connection.</div>}
      {teacherValue && mode !== 'preparation' && <SummaryStrip summary={summary} language={language}/>}
-     {receipt && <section className="ts-card tp-receipt" role="status"><div className="ts-card-head"><div><h3><CheckCircle size={20}/> {receipt.type === 'weekly' ? t('Weekly plan saved','साप्ताहिक योजना सहेजी गई') : t('Lesson plan saved','पाठ योजना सहेजी गई')}</h3><p>{t('After teaching, your lessons appear under “Recent lessons”.','पढ़ाने के बाद आपके पाठ “हाल के पाठ” में दिखेंगे।')}</p></div></div>
-      <ul className="tp-receipt-list">{receipt.items.map(r => <li key={r.submissionId}><span><b>{dayLabel(r.date, language)}</b>{r.periods.map((p, i) => <small key={i}>{[option(p.grade) + (p.section && p.section !== 'Not Applicable' ? ' ' + p.section : ''), option(p.subject), p.topic].filter(Boolean).join(' · ')}</small>)}</span><a className="text-button" href={r.url}>{t('Return link','वापसी लिंक')}</a></li>)}</ul>
-      <p className="hint">{t('Receipt','रसीद')}: <code>{receipt.items.map(r => r.submissionId.slice(0, 8)).join(', ')}</code></p></section>}
+     {receiptCard}
      {mode && <button type="button" className="text-button tp-back" onClick={() => go('')}><ArrowLeft size={15}/>{t('Back to home','मुख्य पृष्ठ पर लौटें')}</button>}
      <div className={'teacher-actions tp-actions' + (mode ? ' compact' : '')} role="group" aria-label={t('What would you like to do?','आप क्या करना चाहेंगे?')}>
       <button className={'teacher-action' + (mode === 'preparation' ? ' selected' : '')} aria-pressed={mode === 'preparation'} type="button" disabled={!!busy} onClick={() => go('preparation')}><span className="tp-action-icon"><ClipboardList size={24}/></span><b>{t('Submit lesson plan','पाठ योजना जमा करें')}</b><span>{t('Plan the next day, or one subject for the week.','अगले दिन की, या एक विषय की साप्ताहिक योजना बनाएँ।')}</span></button>

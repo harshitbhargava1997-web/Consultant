@@ -18,7 +18,13 @@ export function monthStats(summary){
 }
 // "Yesterday" / "3 days ago" from two YYYY-MM-DD strings.
 export function ago(today,day,language='en'){const n=Math.round((Date.parse(today+'T00:00:00Z')-Date.parse(day+'T00:00:00Z'))/86400000);if(language==='hi')return n===1?'कल':n+' दिन पहले';return n===1?'Yesterday':n+' days ago';}
-const seenKey=who=>'school-success:feedback-seen:'+who;
+export const seenKey=who=>'school-success:feedback-seen:'+who;
+// Feedback the teacher has not seen yet on this device (the Feedback tab marks it as seen).
+export function newFeedbackCount(summary,who){
+ const items=summary?.feedback||[];if(!items.length)return 0;
+ let seen='';try{seen=localStorage.getItem(seenKey(who))||'';}catch{}
+ return items.filter(f=>String(f.date)>seen).length;
+}
 function lessonTitle(p,language){const o=v=>language==='hi'?(hindiOptions[v]||v.replace('Grade ','कक्षा ')):v;return [p.grade&&o(p.grade)+(p.section&&p.section!=='Not Applicable'?' '+p.section:''),p.subject&&o(p.subject)].filter(Boolean).join(' · ');}
 
 export function SummaryStrip({summary,language}){
