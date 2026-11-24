@@ -209,8 +209,8 @@ export default function SchoolManagementWorkspace({
       <label>Teacher mobile login (optional)<input type="tel" inputMode="tel" value={staff.mobile} onChange={e=>setStaff({...staff,mobile:e.target.value})} placeholder="9876543210"/></label>
       {canManageAllRoles&&!isAdmin&&<label>Stakeholder role<select value={staff.role} onChange={e=>setStaff({...staff,role:e.target.value})}>
        {["teacher","owner","principal","coordinator"].map(r=><option value={r} key={r}>{r}</option>)}</select></label>}
-      <label>Initial password (new accounts)<input type="password" minLength={12} maxLength={128} autoComplete="new-password" value={staff.initialPassword} onChange={e=>setStaff({...staff,initialPassword:e.target.value})}/></label>
-      <label>Confirm password<input type="password" minLength={12} maxLength={128} autoComplete="new-password" value={staff.confirmPassword} onChange={e=>setStaff({...staff,confirmPassword:e.target.value})}/></label>
+      <label>Initial password (new accounts)<input type="password" minLength={6} maxLength={128} autoComplete="new-password" value={staff.initialPassword} onChange={e=>setStaff({...staff,initialPassword:e.target.value})}/></label>
+      <label>Confirm password<input type="password" minLength={6} maxLength={128} autoComplete="new-password" value={staff.confirmPassword} onChange={e=>setStaff({...staff,confirmPassword:e.target.value})}/></label>
       <p className="helper">Provide an email, mobile number, or both for a teacher. Indian 10-digit numbers are stored with +91. New accounts require a strong password. Leave passwords blank to assign an existing user without changing their login.</p>
       <button className="btn primary" type="submit" disabled={busy}>Save staff member</button>
      </form>

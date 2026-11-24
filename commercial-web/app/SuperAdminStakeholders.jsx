@@ -103,12 +103,12 @@ export default function SuperAdminStakeholders({session,schools=[],selectedSchoo
      <label>Login email<input required type="email" value={form.email}
       onChange={e=>setForm({...form,email:e.target.value})} placeholder="person@school.edu"/></label>
      <label>Initial password (new account)<input type="password" autoComplete="new-password"
-      minLength={12} maxLength={128} value={form.initialPassword}
+      minLength={6} maxLength={128} value={form.initialPassword}
       onChange={e=>setForm({...form,initialPassword:e.target.value})} placeholder="Choose strong initial password"/></label>
      <label>Confirm initial password<input type="password" autoComplete="new-password"
-      minLength={12} maxLength={128} value={form.confirmPassword}
+      minLength={6} maxLength={128} value={form.confirmPassword}
       onChange={e=>setForm({...form,confirmPassword:e.target.value})} placeholder="Enter the same password"/></label>
-     <p className="helper">New accounts need 12–128 characters including upper- and lowercase letters, a number, and a symbol. To assign an existing email to this school, leave both password fields blank. Existing passwords are never shown or changed.</p>
+     <p className="helper">New accounts need a password of 6 to 128 characters (6 digits are fine). To assign an existing email to this school, leave both password fields blank. Existing passwords are never shown or changed.</p>
      <button className="btn primary" type="submit" disabled={busy||!schoolId}>
       <UserRoundPlus size={16}/>{busy?"Creating account…":"Create / assign login"}
      </button>

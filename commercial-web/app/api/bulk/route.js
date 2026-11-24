@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
 import {isConfirmedUser,isEmail,normalizePhone} from "../../../lib/auth";
+import { validPassword } from '@/lib/password-policy';
 
 export const runtime="nodejs";
 const ROLES=["owner","principal","coordinator","teacher"];
@@ -81,7 +82,7 @@ async function allRows(queryBuilder){
 }
 function clean(value){return typeof value==="string"?value.trim():String(value??"").trim();}
 function strong(value){
- return value.length>=12&&value.length<=128&&/[a-z]/.test(value)&&/[A-Z]/.test(value)&&/[0-9]/.test(value)&&/[^a-zA-Z0-9]/.test(value);
+ return validPassword(value);
 }
 function rowResult(row,status,detail){
  return {row_number:Number(row.row_number)||0,status,detail};
@@ -121,7 +122,7 @@ async function importPeople(ctx,rows){
    results.push(rowResult(row,"error","This user already has a higher school role."));continue;
   }
   if(!user&&!strong(password)){
-   results.push(rowResult(row,"error","New users require a 12–128 character password with upper/lowercase, number and symbol."));continue;
+   results.push(rowResult(row,"error","New users require a password of 6 to 128 characters (6 digits are fine)."));continue;
   }
   let wasCreated=false;
   try{

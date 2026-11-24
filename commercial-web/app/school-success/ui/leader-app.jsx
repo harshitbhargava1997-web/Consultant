@@ -66,7 +66,7 @@ export default function LeaderApp({data,refresh}){
  const label={week:'This week',last:'Last week',month:'This month',range:'Selected dates'}[filter];
  const span=ready?(formatDay(range.from)+(range.from===range.to?'':' – '+formatDay(filter==='week'?addDays(weekStart(today),5):range.to))):'Choose dates';
  const role=actor.title||'School leader';
- async function signOut(){try{await browserClient()?.auth.signOut();}catch{}location.href='/';}
+ async function signOut(){try{await browserClient()?.auth.signOut();}catch{}location.href='/school-success';}
  const top=<div className="ta-top"><div className="ta-brand"><i>S</i>School Success</div><button type="button" className="ta-avatar la-avatar" aria-label="Your profile" onClick={()=>setSheet(true)}>{initials(actor.name)}</button></div>;
  const sheetEl=sheet&&<><div className="ta-sheet-bg" onClick={()=>setSheet(false)}/><div className="ta-sheet" role="dialog" aria-modal="true" aria-label="Your profile"><div className="ta-grab"/><button type="button" className="ta-sheet-x icon" aria-label="Close" onClick={()=>setSheet(false)}><X size={18}/></button>
   <div className="ta-me"><span className="ta-avatar big la-avatar">{initials(actor.name)}</span><div><b>{actor.name}</b><small>{role} · {school}</small></div></div>

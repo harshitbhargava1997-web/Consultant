@@ -4,6 +4,7 @@ import {successFetch} from '@/lib/school-success/client';
 import {teacherSession,clearTeacherSession} from '@/lib/school-success/teacher-session';
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+const SuccessSignIn=dynamic(()=>import('./success-sign-in'),{loading:()=> <main className="ss-auth"><p>Opening sign-in…</p></main>});
 const LeaderApp=dynamic(()=>import('./leader-app'),{loading:()=> <section className="card">Opening your dashboard…</section>});
 const LessonReviewWorkspace=dynamic(()=>import('./lesson-review'),{loading:()=> <section className="card">Loading lesson reviews…</section>});
 const LessonReviewDialog=dynamic(()=>import('./lesson-review').then(m=>m.LessonReviewDialog),{ssr:false});
@@ -37,6 +38,8 @@ export default function Portal() {
     const [reviewId,setReviewId]=useState('');
     const openReview=row=>setReviewId(String(row.recordId || row.id));
     const [crmRecord, setCrmRecord] = useState(null), [docLink, setDocLink] = useState(null), [signInHref, setSignInHref] = useState('/');
+    // School Success's own sign-in: '' (signed in), 'signin', 'change' (set own password) or 'noaccess'.
+    const [auth, setAuth] = useState({ step: '', message: '' });
     const [school360View,setSchool360View]=useState({level:'portfolio',school:'',teacherKey:'',includeArchived:false,status:'all',sort:'name',tab:'teachers',evidenceTeacher:'',category:'all',review:'all',order:'oldest',evidencePage:1});
     const [data, setData] = useState(null), [page, setPage] = useState('Overview'), [school, setSchool] = useState(''), [query, setQuery] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [modal, setModal] = useState(''), [form, setForm] = useState({}), [mobile, setMobile] = useState(false), [from, setFrom] = useState(today().slice(0, 8) + '01'), [to, setTo] = useState(today()), [statusFilter, setStatusFilter] = useState('Active'), [entity, setEntity] = useState('Principal'), [draft, setDraft] = useState(''), [importType, setImportType] = useState('usage'), [importRows, setImportRows] = useState(null), [importName, setImportName] = useState(''), [files, setFiles] = useState([]), [category, setCategory] = useState('Activity'), [teacherFilter, setTeacherFilter] = useState(''), [targets, setTargets] = useState([10, 30, 10, 10]), [holidays, setHolidays] = useState(''), [schoolLinks, setSchoolLinks] = useState({});
     async function refresh(period) {
@@ -55,7 +58,14 @@ export default function Portal() {
         // A Teacher 360° "Open lesson documentation" link: load exactly its period through the authorised read.
         const params = new URLSearchParams(location.search), docView = params.get('view') === LESSON_DOCS_VIEW, link = docView ? parseLessonDocumentationLink(location.search) : null;
         if (docView) { setDocLink({ link }); setSignInHref('/?next=' + encodeURIComponent(location.pathname + location.search)); if (link) { setFrom(link.from); setTo(link.to); } }
-        refresh(link ? { from: link.from, to: link.to } : undefined).then(() => { if (docView) setPage('Lesson documentation'); }).catch(e => setError(e.message));
+        refresh(link ? { from: link.from, to: link.to } : undefined).then(() => { if (docView) setPage('Lesson documentation'); }).catch(e => {
+            // Staff (principals, coordinators, school management, consultants) sign in here, in School Success.
+            // School links keep their own teacher name + PIN sign-in.
+            if (!params.has('access') && e.status === 401) setAuth({ step: 'signin', message: '' });
+            else if (!params.has('access') && e.status === 403 && /initial .*password/i.test(e.message)) setAuth({ step: 'change', message: '' });
+            else if (!params.has('access') && e.status === 403 && /module access|School Success/i.test(e.message)) setAuth({ step: 'noaccess', message: '' });
+            else setError(e.message);
+        });
         const s = params.get('school'); if (s)
         setSchool(s); }, []);
     const entries = data?.entries || [], members = data?.members || [];
@@ -99,8 +109,10 @@ export default function Portal() {
     const changePage = (p) => { if(p === 'School 360°' && page !== p){setSchool('');setSchool360View(old=>({...old,level:'portfolio',school:'',teacherKey:'',restoreScroll:0}));} setPage(p); setMobile(false); setQuery(''); };
     const search = (r) => JSON.stringify(r).toLowerCase().includes(query.toLowerCase());
     const csvExport = (rows, name) => download(name + '.csv', csv(rows.map(({ id, version, kind, feedbackNotes, ...r }) => r)));
+    if (auth.step)
+        return <SuccessSignIn mode={auth.step} message={auth.message} onDone={() => location.reload()}/>;
     if (!data)
-        return <main className="welcome"><div className="brand-icon"><GraduationCap /></div><h1>School Success</h1><p>{error || 'Opening your academic workspace…'}</p>{error && <a className="button primary" href={signInHref} target="_top">Sign in to Vision</a>}</main>;
+        return <main className="welcome"><div className="brand-icon"><GraduationCap /></div><h1>School Success</h1><p>{error || 'Opening your academic workspace…'}</p>{error && <button className="button primary" onClick={() => location.reload()}>Try again</button>}</main>;
     // Teachers signed in through their school link get the teacher app alone: no staff sidebar, breadcrumb, usage bar
     // or "New preparation" header (owner-approved design, 24 November 2026).
     // School leaders (principal, coordinator, school management) get the review dashboard only (owner decision,

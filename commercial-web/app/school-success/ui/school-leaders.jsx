@@ -17,7 +17,7 @@ export default function SchoolLeaders({schools,initialSchool=''}){
  async function add(e){
   e.preventDefault();setBusy('add');setError('');setNotice('');
   try{const r=await call({action:'add',school,...form});
-   setNotice(form.name+' can now sign in at schoolsuccess.in/school-success with mobile '+form.mobile+(r.created?' and the starting password '+form.password+'. They will set their own password at first sign-in.':' using their existing password.'));
+   setNotice(form.name+' can now sign in at schoolsuccess.in/school-success with mobile '+form.mobile+' and the starting password '+form.password+'. At first sign-in they set their own password (at least 6 characters).');
    setForm(f=>({...f,name:'',mobile:'',password:STARTING_PASSWORD}));await load();}
   catch(err){setError(err.message);}finally{setBusy('');}
  }
@@ -50,7 +50,7 @@ export default function SchoolLeaders({schools,initialSchool=''}){
      <label className="field"><span>Full name</span><input required minLength={2} maxLength={160} value={form.name} onChange={set('name')}/></label>
      <label className="field"><span>Role</span><select value={form.title} onChange={set('title')}><option>Principal</option><option>Coordinator</option><option>School management</option></select></label>
      <label className="field"><span>Mobile number</span><input required inputMode="tel" placeholder="10-digit mobile number" value={form.mobile} onChange={set('mobile')}/></label>
-     <label className="field"><span>Starting password</span><input required minLength={6} maxLength={128} value={form.password} onChange={set('password')}/><small>They must replace it with their own password at first sign-in.</small></label>
+     <label className="field"><span>Starting password</span><input required minLength={6} maxLength={128} value={form.password} onChange={set('password')}/><small>At first sign-in they replace it with their own password (at least 6 characters, digits are fine). Each leader needs a mobile number that is not already registered.</small></label>
     </div>
     <button type="submit" className="button primary" disabled={!!busy||!form.name.trim()||!form.mobile.trim()}>{busy==='add'?'Saving…':'Add school leader'}</button>
    </form>

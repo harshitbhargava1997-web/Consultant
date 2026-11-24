@@ -7,7 +7,7 @@ import {normalizePhone,mobileLoginEmail} from '@/lib/auth';
 export const runtime='nodejs';
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
 // School leaders (principals and coordinators) managed by Super Admin from School Success → Schools & teachers.
-// Adding a leader creates a mobile-number sign-in (or reuses an existing account with that mobile number) and grants
+// Adding a leader creates a new mobile-number sign-in (a number that already has an account is refused) and grants
 // School leader access to that school. A starting password must be replaced at first sign-in (Vision's existing
 // first-login screen). Accounts created here are marked so that only they can have their password reset here.
 const text=z.string().trim();
@@ -70,18 +70,17 @@ async function handlePOST(req){
   if(input.action==='add'){
    const phone=normalizePhone(input.mobile);
    if(!phone)throw Error('Enter a valid 10-digit mobile number');
-   let user=await userByPhone(phone),created=false;
-   if(user){
-    const admin=await checked(service().from('literacy_platform_admins').select('user_id').eq('user_id',user.id).maybeSingle());
-    const g=all.get(user.id);
-    if(admin)throw Error('409:This mobile number belongs to a Super Admin account.');
-    if(g?.enabled&&g.role!=='leader')throw Error('409:This mobile number already has consultant access to School Success.');
-    user=await ensureMobileLogin(auth,user);
-   }else{
-    const made=await auth.createUser({phone,phone_confirm:true,email:mobileLoginEmail(phone),email_confirm:true,password:input.password,user_metadata:{full_name:input.name},app_metadata:{must_change_password:true,school_success_leader:true}});
-    if(made.error)throw Error(/password/i.test(made.error.message||'')?'The sign-in service rejected this starting password. Try a longer one.':'409:Could not create the sign-in for this mobile number.');
-    user=made.data.user;created=true;
+   // A mobile number that already has an account is refused (owner decision, 24 November 2026): linking an
+   // existing account kept its own password and email, so the leader could not sign in with what was shared.
+   const existing=await userByPhone(phone);
+   if(existing){
+    const g=all.get(existing.id);
+    if(g?.enabled&&g.role==='leader'&&g.schools.includes(input.school))throw Error('409:This mobile number is already a school leader for '+input.school+'. Use Reset password in the list if they cannot sign in.');
+    throw Error('409:This mobile number is already registered. Please change the details and use a different mobile number.');
    }
+   const made=await auth.createUser({phone,phone_confirm:true,email:mobileLoginEmail(phone),email_confirm:true,password:input.password,user_metadata:{full_name:input.name},app_metadata:{must_change_password:true,school_success_leader:true}});
+   if(made.error)throw Error(/already|registered|exists/i.test(made.error.message||'')?'409:This mobile number is already registered. Please change the details and use a different mobile number.':/password/i.test(made.error.message||'')?'The sign-in service rejected this starting password. Use at least 6 characters.':'409:Could not create the sign-in for this mobile number.');
+   let user=made.data.user;const created=true;
    const g=all.get(user.id),schools=[...new Set([...(g?.enabled&&g.role==='leader'?g.schools:[]),input.school])];
    try{await saveGrant({userId:user.id,enabled:true,schools,role:'leader',title:input.title},a,'grant-school-leader');}
    catch(e){if(created)await auth.deleteUser(user.id);throw e;}

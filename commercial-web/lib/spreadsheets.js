@@ -49,7 +49,7 @@ function addGuide(book,kind,allowRoles){
   ["Teacher login","For teachers, provide email, mobile_number, or both. Enter Indian mobile numbers as 10 digits or +91 format"],
   ["Leadership login","School owners, principals and coordinators must use email; mobile login is teacher-only"],
   ["Allowed roles",allowRoles?"owner, principal, coordinator, teacher":"teacher only for your school"],
-  ["New accounts","Provide a distinct strong initial password; 12–128 characters with uppercase, lowercase, number and symbol"],
+  ["New accounts","Provide an initial password of 6 to 128 characters (6 digits are fine)"],
   ["Existing accounts","Leave initial_password blank; existing password is never replaced"],
   ["School selection","School is chosen inside Vision, not in the spreadsheet"],
   ["Security","This template contains initial passwords. Treat as confidential; delete the completed file after upload"],

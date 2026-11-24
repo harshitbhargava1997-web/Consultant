@@ -12,10 +12,10 @@ export default function Reset(){
   return ()=>subscription.unsubscribe();
  },[client]);
  async function submit(e){
-  e.preventDefault();if(password!==confirm||password.length<12){setMessage("Passwords must match and contain at least 12 characters.");return;}
+  e.preventDefault();if(password!==confirm||password.length<6){setMessage("Passwords must match and contain at least 6 characters.");return;}
   const {error}=await client.auth.updateUser({password});
   if(error){setMessage(error.message);return;}
   await client.auth.signOut();setMessage("Password updated. Return to sign in.");setReady(false);
  }
- return <main className="auth-outer"><div className="auth-card"><span className="eyebrow">ACCOUNT RECOVERY</span><h1>Create a new password</h1><p>Open this page using the password recovery email from Supabase.</p>{message&&<div className="notice">{message}</div>}{ready?<form onSubmit={submit}><label>New password<input type="password" minLength={12} value={password} onChange={e=>setPassword(e.target.value)} required/></label><label>Confirm new password<input type="password" minLength={12} value={confirm} onChange={e=>setConfirm(e.target.value)} required/></label><button type="submit" className="btn primary">Save new password</button></form>:<p>Waiting for a valid recovery session. If the link expired, request another from Sign in.</p>}<Link href="/" className="link-button">Back to sign in</Link></div></main>;
+ return <main className="auth-outer"><div className="auth-card"><span className="eyebrow">ACCOUNT RECOVERY</span><h1>Create a new password</h1><p>Open this page using the password recovery email from Supabase.</p>{message&&<div className="notice">{message}</div>}{ready?<form onSubmit={submit}><label>New password<input type="password" minLength={6} value={password} onChange={e=>setPassword(e.target.value)} required/></label><label>Confirm new password<input type="password" minLength={6} value={confirm} onChange={e=>setConfirm(e.target.value)} required/></label><button type="submit" className="btn primary">Save new password</button></form>:<p>Waiting for a valid recovery session. If the link expired, request another from Sign in.</p>}<Link href="/" className="link-button">Back to sign in</Link></div></main>;
 }
