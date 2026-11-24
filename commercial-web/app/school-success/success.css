@@ -233,3 +233,4 @@
 .success-app .ev-period{margin:12px 0}.success-app .ev-period .lp-block-body.teacher-period{border-top:1px solid var(--line);margin-top:0;padding:16px 18px 20px}
 .success-app .ev-period .lp-block-body[hidden]{display:none}.success-app .ev-period .lp-block-toggle:disabled{cursor:default;opacity:1;color:inherit}
 .success-app .ev-period .lp-block-head .pill{flex:none}
+.success-app .ts-lesson-text em.ts-done{color:var(--green);background:var(--mint);border-radius:999px;padding:1px 7px}

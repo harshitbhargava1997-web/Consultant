@@ -4,7 +4,7 @@
 
 ## What the teacher sees
 1. **Lesson day** dropdown at the top of Add evidence.
-   - It lists the teacher's lessons planned on or before today, newest first. Each item shows the date, the class and subject (+N for more periods), and "evidence needed" or "evidence added".
+   - It lists the teacher's lessons planned on or before today, newest first. Each item shows the date, the class and subject (+N for more periods), and "✓ evidence added" where evidence exists (lessons without evidence carry no label; see below).
    - Daily plans and each day of a weekly plan appear as separate days. Future lessons are not listed.
    - Choosing a day opens that lesson; no date search is needed. Search by planned date is still available under "Can't find your lesson?".
    - If files or a reflection are added but not submitted, switching day asks first.
@@ -30,3 +30,12 @@ Upload, prepare/commit, update IDs, retry behaviour, server checks and evidence 
 
 ## Rollback
 Revert the PR.
+
+## 24 November 2026: no "needing evidence" wording (owner decision, option (a))
+Not every lesson needs classroom evidence. Evidence is measured against the school's targets for the review period, not per lesson. Changes:
+- Teacher home: "Lessons needing evidence" is now **Recent lessons**.
+  - It lists all lessons planned up to today.
+  - There is no count badge and no "Yesterday" / "4 days ago" labels.
+  - Lessons with evidence show "Evidence added" and "Add more".
+- Month strip: "2/7 with classroom evidence" and its bar are replaced by **Evidence shared this month** (the number of class periods this month with evidence), with no target.
+- Day dropdown: "evidence needed" is removed; "✓ evidence added" stays.

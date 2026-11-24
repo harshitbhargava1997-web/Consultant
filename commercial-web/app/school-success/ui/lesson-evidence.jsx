@@ -106,7 +106,7 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
         requestAnimationFrame(() => document.getElementById('ev-period-' + id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     }
     function togglePeriod(id) { setOpen(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); setFocus(id); }
-    const dayOption = l => { const first = l.periods?.[0] || {}; return (dayLabel(l.plannedOn, language) || l.plannedOn) + ' · ' + [[first.grade, first.section && first.section !== 'Not Applicable' ? first.section : ''].filter(Boolean).join(' '), first.subject].filter(Boolean).join(' · ') + ((l.periods?.length || 0) > 1 ? ' +' + (l.periods.length - 1) : '') + ' · ' + (l.evidence ? t('evidence added','प्रमाण जमा') : t('evidence needed','प्रमाण बाकी')); };
+    const dayOption = l => { const first = l.periods?.[0] || {}; return (dayLabel(l.plannedOn, language) || l.plannedOn) + ' · ' + [[first.grade, first.section && first.section !== 'Not Applicable' ? first.section : ''].filter(Boolean).join(' '), first.subject].filter(Boolean).join(' · ') + ((l.periods?.length || 0) > 1 ? ' +' + (l.periods.length - 1) : '') + (l.evidence ? ' · ✓ ' + t('evidence added','प्रमाण जमा') : ''); };
     // On any failure the typed reflections and chosen files stay on screen with the same update ID, so a retry
     // resubmits the same update and cannot create a duplicate.
     async function save(e) { e.preventDefault(); if (!lesson || busy)

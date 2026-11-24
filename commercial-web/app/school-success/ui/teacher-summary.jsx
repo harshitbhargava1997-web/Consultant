@@ -1,13 +1,14 @@
 'use client';
 import {useEffect,useState} from 'react';
-import {ClipboardList,Camera,MessageSquareText,ArrowRight,RefreshCw,CircleCheck,Clock} from 'lucide-react';
+import {ClipboardList,Camera,MessageSquareText,ArrowRight,RefreshCw,CircleCheck} from 'lucide-react';
 import {dayLabel,hindiOptions} from './lesson-plan-form';
 
 const monthNames={en:['January','February','March','April','May','June','July','August','September','October','November','December'],hi:['जनवरी','फ़रवरी','मार्च','अप्रैल','मई','जून','जुलाई','अगस्त','सितंबर','अक्टूबर','नवंबर','दिसंबर']};
-// Lessons still waiting for photos, written work or a reflection: planned on or before today, without evidence.
-export function pendingLessons(summary){
+// Recent lessons: every lesson planned on or before today, newest first, with or without evidence. Evidence is
+// measured against the school's targets for the period, not per lesson, so nothing here is shown as overdue.
+export function recentLessons(summary){
  if(!summary)return [];
- return summary.lessons.filter(l=>l.plannedOn<=summary.today&&!l.evidence).sort((a,b)=>b.plannedOn.localeCompare(a.plannedOn));
+ return summary.lessons.filter(l=>l.plannedOn<=summary.today).sort((a,b)=>b.plannedOn.localeCompare(a.plannedOn)||String(a.id).localeCompare(String(b.id)));
 }
 export function monthStats(summary){
  if(!summary)return {planned:0,withEvidence:0,feedback:0,upcoming:0};
@@ -22,28 +23,27 @@ function lessonTitle(p,language){const o=v=>language==='hi'?(hindiOptions[v]||v.
 
 export function SummaryStrip({summary,language}){
  const t=(en,hi)=>language==='hi'?hi:en,s=monthStats(summary),month=summary?monthNames[language][Number(summary.today.slice(5,7))-1]:'';
- const pct=s.planned?Math.round(s.withEvidence/s.planned*100):0;
  return <section className="ts-strip" aria-label={t('Your month','आपका महीना')}>
   <div className="ts-stat"><span className="ts-icon c1"><ClipboardList size={18}/></span><div><strong>{summary?s.planned:'–'}</strong><small>{t('Lessons planned in ','योजना बनाई — ')+month}</small>{s.upcoming>0&&<em>{s.upcoming} {t('coming up','आने वाले')}</em>}</div></div>
-  <div className="ts-stat"><span className="ts-icon c2"><Camera size={18}/></span><div><strong>{summary?s.withEvidence:'–'}<span>/{summary?s.planned:'–'}</span></strong><small>{t('With classroom evidence','कक्षा के प्रमाण सहित')}</small><span className="ts-bar" aria-hidden="true"><span style={{width:pct+'%'}}/></span></div></div>
+  <div className="ts-stat"><span className="ts-icon c2"><Camera size={18}/></span><div><strong>{summary?s.withEvidence:'–'}</strong><small>{t('Evidence shared this month','इस महीने साझा किए गए प्रमाण')}</small></div></div>
   <div className="ts-stat"><span className="ts-icon c3"><MessageSquareText size={18}/></span><div><strong>{summary?s.feedback:'–'}</strong><small>{t('Feedback received this month','इस महीने मिली प्रतिक्रिया')}</small></div></div>
  </section>;
 }
 
-export function PendingEvidence({summary,language,onOpen,limit,onShowAll,loading,error,onRetry}){
- const t=(en,hi)=>language==='hi'?hi:en,items=pendingLessons(summary),shown=limit?items.slice(0,limit):items;
+export function RecentLessons({summary,language,onOpen,limit,onShowAll,loading,error,onRetry}){
+ const t=(en,hi)=>language==='hi'?hi:en,items=recentLessons(summary),shown=limit?items.slice(0,limit):items;
  return <section className="ts-card">
-  <div className="ts-card-head"><div><h3>{t('Lessons needing evidence','प्रमाण बाकी वाले पाठ')}</h3><p>{t('Tap a lesson to add photos, written work and your reflection.','पाठ चुनकर फोटो, लिखित कार्य और चिंतन जोड़ें।')}</p></div>{items.length>0&&<span className="ts-count">{items.length}</span>}</div>
+  <div className="ts-card-head"><div><h3>{t('Recent lessons','हाल के पाठ')}</h3><p>{t('Add photos, written work or a reflection when you have them.','जब आपके पास हों, फोटो, लिखित कार्य या चिंतन जोड़ें।')}</p></div></div>
   {error?<div className="ts-empty"><p>{error}</p><button type="button" className="button" onClick={onRetry}><RefreshCw size={15}/>{t('Try again','फिर कोशिश करें')}</button></div>
   :loading&&!summary?<div className="ts-skeleton" aria-busy="true"><span/><span/></div>
-  :!items.length?<div className="ts-empty"><CircleCheck size={28}/><p>{t('All caught up. Every planned lesson so far has evidence.','सब पूरा है। अब तक के हर पाठ के प्रमाण जमा हैं।')}</p></div>
-  :<ul className="ts-list">{shown.map(l=>{const m=/^\d{4}-(\d{2})-(\d{2})$/.exec(l.plannedOn);const first=l.periods[0]||{},overdue=l.plannedOn<summary.today;
+  :!items.length?<div className="ts-empty"><ClipboardList size={28}/><p>{t('Your lessons appear here after their planned day.','आपके पाठ नियोजित दिन के बाद यहाँ दिखेंगे।')}</p></div>
+  :<ul className="ts-list">{shown.map(l=>{const m=/^\d{4}-(\d{2})-(\d{2})$/.exec(l.plannedOn);const first=l.periods[0]||{};
     return <li key={l.id}><button type="button" className="ts-lesson" onClick={()=>onOpen(l.resumeToken)}>
      <span className="ts-date"><b>{m?Number(m[2]):''}</b><small>{dayLabel(l.plannedOn,language).split(',')[0]}</small></span>
-     <span className="ts-lesson-text"><b>{lessonTitle(first,language)}{l.periods.length>1?' +'+(l.periods.length-1):''}</b><small>{first.topic}</small>{overdue&&<em><Clock size={12}/>{ago(summary.today,l.plannedOn,language)}</em>}</span>
-     <span className="ts-go">{t('Add evidence','प्रमाण जोड़ें')}<ArrowRight size={15}/></span>
+     <span className="ts-lesson-text"><b>{lessonTitle(first,language)}{l.periods.length>1?' +'+(l.periods.length-1):''}</b><small>{first.topic}</small>{l.evidence&&<em className="ts-done"><CircleCheck size={12}/>{t('Evidence added','प्रमाण जोड़ा गया')}</em>}</span>
+     <span className="ts-go">{l.evidence?t('Add more','और जोड़ें'):t('Add evidence','प्रमाण जोड़ें')}<ArrowRight size={15}/></span>
     </button></li>;})}</ul>}
-  {limit&&items.length>limit&&<button type="button" className="text-button" onClick={onShowAll}>{t('Show all','सभी देखें')} ({items.length})<ArrowRight size={14}/></button>}
+  {limit&&items.length>limit&&<button type="button" className="text-button" onClick={onShowAll}>{t('Show all recent lessons','सभी हाल के पाठ देखें')} ({items.length})<ArrowRight size={14}/></button>}
  </section>;
 }
 

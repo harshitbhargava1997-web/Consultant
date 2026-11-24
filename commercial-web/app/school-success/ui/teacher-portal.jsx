@@ -8,7 +8,7 @@ import TeacherLogin, {ChangePin} from './teacher-login';
 import TeacherPinAdmin from './teacher-pin-admin';
 import {clearTeacherSession} from '@/lib/school-success/teacher-session';
 import LessonPlanForm, {newBlock, dayLabel, hindiOptions} from './lesson-plan-form';
-import {SummaryStrip, PendingEvidence, FeedbackCard} from './teacher-summary';
+import {SummaryStrip, RecentLessons, FeedbackCard} from './teacher-summary';
 import SchoolSharingLinks from './school-sharing-links';
 import LessonEvidence from './lesson-evidence';
 import { submissionSchema } from '@/lib/school-success/teacher-submissions';
@@ -139,7 +139,7 @@ export default function TeacherPortal({ data, school, refresh }) {
      {admin && <TeacherPinAdmin schools={[...new Set(roster.map(r => r.school))].filter(Boolean).sort()}/>}
      {!data.uploadsEnabled && <div className="alert" role="status">Lesson details and written reflections are active. Photo, video and voice uploads are awaiting the administrator’s media-storage connection.</div>}
      {teacherValue && mode !== 'preparation' && <SummaryStrip summary={summary} language={language}/>}
-     {receipt && <section className="ts-card tp-receipt" role="status"><div className="ts-card-head"><div><h3><CheckCircle size={20}/> {receipt.type === 'weekly' ? t('Weekly plan saved','साप्ताहिक योजना सहेजी गई') : t('Lesson plan saved','पाठ योजना सहेजी गई')}</h3><p>{t('After teaching, your lessons appear under “Lessons needing evidence”.','पढ़ाने के बाद आपके पाठ “प्रमाण बाकी वाले पाठ” में दिखेंगे।')}</p></div></div>
+     {receipt && <section className="ts-card tp-receipt" role="status"><div className="ts-card-head"><div><h3><CheckCircle size={20}/> {receipt.type === 'weekly' ? t('Weekly plan saved','साप्ताहिक योजना सहेजी गई') : t('Lesson plan saved','पाठ योजना सहेजी गई')}</h3><p>{t('After teaching, your lessons appear under “Recent lessons”.','पढ़ाने के बाद आपके पाठ “हाल के पाठ” में दिखेंगे।')}</p></div></div>
       <ul className="tp-receipt-list">{receipt.items.map(r => <li key={r.submissionId}><span><b>{dayLabel(r.date, language)}</b>{r.periods.map((p, i) => <small key={i}>{[option(p.grade) + (p.section && p.section !== 'Not Applicable' ? ' ' + p.section : ''), option(p.subject), p.topic].filter(Boolean).join(' · ')}</small>)}</span><a className="text-button" href={r.url}>{t('Return link','वापसी लिंक')}</a></li>)}</ul>
       <p className="hint">{t('Receipt','रसीद')}: <code>{receipt.items.map(r => r.submissionId.slice(0, 8)).join(', ')}</code></p></section>}
      {mode && <button type="button" className="text-button tp-back" onClick={() => go('')}><ArrowLeft size={15}/>{t('Back to home','मुख्य पृष्ठ पर लौटें')}</button>}
@@ -148,13 +148,13 @@ export default function TeacherPortal({ data, school, refresh }) {
       <button className={'teacher-action' + (mode === 'evidence' ? ' selected' : '')} aria-pressed={mode === 'evidence'} type="button" disabled={!!busy} onClick={() => go('evidence')}><span className="tp-action-icon c2"><Camera size={24}/></span><b>{t('Add evidence','प्रमाण जोड़ें')}</b><span>{t('After teaching, add photos, written work and your reflection.','कक्षा के बाद फोटो, लिखित कार्य और चिंतन जोड़ें।')}</span></button>
      </div>
      {mode === '' && teacherValue && <div className="tp-home-grid">
-      <PendingEvidence summary={summary} language={language} onOpen={openLesson} limit={3} onShowAll={() => go('evidence')} loading={summaryLoading} error={summaryError} onRetry={loadSummary}/>
+      <RecentLessons summary={summary} language={language} onOpen={openLesson} limit={3} onShowAll={() => go('evidence')} loading={summaryLoading} error={summaryError} onRetry={loadSummary}/>
       <FeedbackCard summary={summary} language={language} who={who} onOpen={openLesson}/>
      </div>}
      {mode === '' && !teacherValue && admin && <section className="ts-card"><div className="ts-empty"><BookOpenCheck size={28}/><p>{t('Choose a teacher to see their lessons.','पाठ देखने के लिए शिक्षक चुनें।')}</p></div>{identity}</section>}
      {mode === 'evidence' && <>
       {admin && <section className="ts-card">{identity}</section>}
-      {!resumeToken && <PendingEvidence summary={summary} language={language} onOpen={openLesson} loading={summaryLoading} error={summaryError} onRetry={loadSummary}/>}
+      {!resumeToken && <RecentLessons summary={summary} language={language} onOpen={openLesson} loading={summaryLoading} error={summaryError} onRetry={loadSummary}/>}
       <div id="lesson-evidence"><LessonEvidence language={language} key={selectedSchool + '|' + teacherValue + '|' + resumeToken} token={resumeToken} headers={contextHeaders} uploadsEnabled={data.uploadsEnabled} school={selectedSchool} teacher={teacherValue} compactSearch lessonChoices={summary?.lessons} onPickLesson={openLesson} onSaved={async () => { void loadSummary(); if (admin) await refresh(); }}/></div>
       {savedLinks.some(l => l.school === selectedSchool && l.teacher === teacherValue) && <section className="ts-card"><details><summary>{t('Saved lessons on this device','इस उपकरण पर सहेजे गए पाठ')}</summary>{savedLinks.filter(l => l.school === selectedSchool && l.teacher === teacherValue).map(l => <p key={l.submissionId}><a href={l.url}>{dayLabel(l.date, language) || l.date} · {l.teacher}</a></p>)}</details></section>}
      </>}
