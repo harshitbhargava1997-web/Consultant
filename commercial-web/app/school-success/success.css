@@ -228,3 +228,8 @@
 @media(max-width:600px){.success-app .tl-card{padding:20px 16px;border-radius:16px}.success-app .tl-change-grid{grid-template-columns:1fr}.success-app .tp-top{flex-direction:column}.success-app .tp-tools{justify-content:flex-start}.success-app .pin-list li{flex-wrap:wrap}.success-app .pin-default{flex-direction:column;align-items:stretch}}
 
 .success-app .leaders-admin h2{display:flex;align-items:center;gap:8px}.success-app .leaders-form{border-top:1px solid var(--line);margin-top:16px;padding-top:16px}.success-app .leaders-form h3{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+/* Add evidence: day and period dropdowns, one collapsible block per class period (same look as the lesson plan form). */
+.success-app .ev-pick{display:block;margin:14px 0}.success-app .ev-pick select{width:100%;min-height:46px;font-size:15px}
+.success-app .ev-period{margin:12px 0}.success-app .ev-period .lp-block-body.teacher-period{border-top:1px solid var(--line);margin-top:0;padding:16px 18px 20px}
+.success-app .ev-period .lp-block-body[hidden]{display:none}.success-app .ev-period .lp-block-toggle:disabled{cursor:default;opacity:1;color:inherit}
+.success-app .ev-period .lp-block-head .pill{flex:none}
