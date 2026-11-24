@@ -1,6 +1,6 @@
 'use client';
 import {useEffect,useState} from 'react';
-import {ClipboardList,Camera,MessageSquareText,ArrowRight,RefreshCw,CircleCheck} from 'lucide-react';
+import {ClipboardList,Camera,MessageSquareText,ArrowRight,RefreshCw,CircleCheck,ThumbsUp} from 'lucide-react';
 import {dayLabel,hindiOptions} from './lesson-plan-form';
 
 const monthNames={en:['January','February','March','April','May','June','July','August','September','October','November','December'],hi:['जनवरी','फ़रवरी','मार्च','अप्रैल','मई','जून','जुलाई','अगस्त','सितंबर','अक्टूबर','नवंबर','दिसंबर']};
@@ -53,9 +53,11 @@ export function RecentLessons({summary,language,onOpen,limit,onShowAll,loading,e
  </section>;
 }
 
-export function FeedbackCard({summary,language,who,onOpen}){
+export function FeedbackCard({summary,language,who,onOpen,onNote}){
  const t=(en,hi)=>language==='hi'?hi:en,items=summary?.feedback||[];
- const [seen,setSeen]=useState(null),[expanded,setExpanded]=useState(false);
+ const [seen,setSeen]=useState(null),[expanded,setExpanded]=useState(false),[noting,setNoting]=useState(''),[noteError,setNoteError]=useState('');
+ // "Noted" tells the reviewer the teacher has read this feedback. It is saved once and cannot be undone.
+ async function note(f){const id=f.recordId+'|'+f.key;setNoting(id);setNoteError('');try{await onNote(f);}catch(e){setNoteError(e.message||t('Could not save. Please try again.','सहेजा नहीं जा सका। फिर कोशिश करें।'));}finally{setNoting('');}}
  useEffect(()=>{if(!summary)return;let last='';try{last=localStorage.getItem(seenKey(who))||'';}catch{}setSeen(last);
   // Items stay marked "New" during this visit; the next visit treats them as read.
   const newest=items[0]?.date;if(newest)try{localStorage.setItem(seenKey(who),newest);}catch{}},[summary,who]);
@@ -68,8 +70,10 @@ export function FeedbackCard({summary,language,who,onOpen}){
     <div className="ts-feed-head"><b>{lessonTitle(f,language)}</b>{isNew(f)&&<span className="ts-new small">{t('New','नई')}</span>}<small>{f.date?dayLabel(String(f.date).slice(0,10),language):''}</small></div>
     <p className="ts-topic">{f.topic}</p>
     <p className="ts-feed-text">{f.text}</p>
-    <button type="button" className="text-button" onClick={()=>onOpen(f.resumeToken)}>{t('Open lesson','पाठ खोलें')}<ArrowRight size={14}/></button>
+    <div className="ts-feed-actions">{onNote&&f.recordId&&(f.notedAt?<span className="ts-noted done"><CircleCheck size={14}/>{t('Noted on ','नोट किया · ')+dayLabel(String(f.notedAt).slice(0,10),language)}</span>:<button type="button" className="ts-noted" disabled={!!noting} onClick={()=>void note(f)}><ThumbsUp size={14}/>{noting===f.recordId+'|'+f.key?t('Saving…','सहेजा जा रहा है…'):t('Noted','नोट किया')}</button>)}<button type="button" className="text-button" onClick={()=>onOpen(f.resumeToken)}>{t('Open lesson','पाठ खोलें')}<ArrowRight size={14}/></button></div>
    </li>)}</ul>}
+  {noteError&&<p className="alert error" role="alert">{noteError}</p>}
+  {onNote&&items.length>0&&<p className="hint">{t('Tap “Noted” to let your reviewer know you have read their feedback.','समीक्षक को बताने के लिए कि आपने प्रतिक्रिया पढ़ ली है, “नोट किया” दबाएँ।')}</p>}
   {items.length>3&&<button type="button" className="text-button" onClick={()=>setExpanded(v=>!v)}>{expanded?t('Show less','कम दिखाएँ'):t('Show all feedback','सभी प्रतिक्रिया देखें')+' ('+items.length+')'}</button>}
  </section>;
 }

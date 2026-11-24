@@ -340,3 +340,7 @@
 .success-app .ta-tab:focus{outline:none}.success-app .ta-tab:focus-visible{outline:2px solid var(--green);outline-offset:-3px;border-radius:12px}
 .success-app .ev-add-btn.primary small{color:#e3f1ea;opacity:1}
 .success-app .ta-filters .ta-chip{padding:6px 10px;font-size:12px;gap:4px}
+.success-app .ts-feed-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px}
+.success-app .ts-noted{display:inline-flex;align-items:center;gap:6px;border:1.5px solid var(--green);color:var(--green);border-radius:999px;padding:7px 13px;font-weight:800;font-size:12.5px;background:#fff}
+.success-app .ts-noted.done{background:var(--green);color:#fff}
+.success-app .ts-noted:disabled{opacity:.6}

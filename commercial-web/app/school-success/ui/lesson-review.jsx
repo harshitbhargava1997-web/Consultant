@@ -30,7 +30,7 @@ export default function LessonReviewWorkspace({data,school,from,to,setFrom,setTo
    <label className="field"><span>Review status</span><select value={status} onChange={e=>{setStatus(e.target.value);setPage(0);}}><option value="all">All lessons</option><option value="pending">Awaiting feedback</option><option value="reviewed">Feedback recorded</option></select></label>
   </div>
   {visible.slice(current*pageSize,(current+1)*pageSize).map(l=><article className="teacher-period review-list-row" key={l.key}><div>
-   <b>{l.topic}</b><p>{[l.teacher,l.school,classLine(l),formatDay(l.plannedDate||l.firstDate)].filter(Boolean).join(' · ')}</p><small>{l.feedback||l.reviewOutsidePeriod?'Feedback recorded':'Awaiting feedback'}</small></div>
+   <b>{l.topic}</b><p>{[l.teacher,l.school,classLine(l),formatDay(l.plannedDate||l.firstDate)].filter(Boolean).join(' · ')}</p><small>{l.feedback||l.reviewOutsidePeriod?'Feedback recorded':'Awaiting feedback'}{l.feedbackNoted?' · '+(l.feedbackNoted.all?'Teacher noted':'Teacher noted earlier feedback')+' '+formatDay(String(l.feedbackNoted.notedAt).slice(0,10)):''}</small></div>
    <button className="button" onClick={()=>onReview(l)}>Review lesson</button></article>)}
   {!visible.length&&<p role="status">No lessons match these filters.</p>}
   {visible.length>pageSize&&<div className="actions"><button className="button" disabled={!current} onClick={()=>setPage(current-1)}>Previous</button><span>Page {current+1} of {Math.ceil(visible.length/pageSize)}</span><button className="button" disabled={(current+1)*pageSize>=visible.length} onClick={()=>setPage(current+1)}>Next</button></div>}
@@ -80,7 +80,7 @@ export function LessonReviewDialog({recordId,onClose,onSaved}) {
     <EvidenceLinks title="Lesson plan files" files={lesson.planFiles}/>{!lesson.plan.fields.length&&!lesson.plan.notes&&!lesson.planFiles.length&&<p>No written plan or plan file has been submitted.</p>}</section>
    <EvidenceLinks title="Classroom activities" files={lesson.activities}/><EvidenceLinks title="Student work" files={lesson.writing}/><EvidenceLinks title="Recordings" files={lesson.audio}/><EvidenceLinks title="Other classroom evidence" files={lesson.additional}/>
    {!lesson.activities.length&&!lesson.writing.length&&<p className="hint">No classroom activity or student work has been submitted yet.</p>}
-   {lesson.feedback&&<section className="feedback"><h4>Earlier feedback</h4><p className="review-note">{lesson.feedback.text}</p></section>}
+   {lesson.feedback&&<section className="feedback"><h4>Earlier feedback</h4><p className="review-note">{lesson.feedback.text}</p><p className="hint">{lesson.feedbackNoted?(lesson.feedbackNoted.all?'✓ The teacher noted this feedback on ':'✓ The teacher noted earlier feedback on ')+formatDay(String(lesson.feedbackNoted.notedAt).slice(0,10))+'.':'The teacher has not marked this feedback as noted yet.'}</p></section>}
    <form onSubmit={save}><h3>Academic review</h3><p className="hint">Review either area or both. Add one or two sentences for each rating.</p>
     {Object.entries(reviewCriteria).map(([key,c])=><fieldset key={key} className="review-criterion" disabled={saving}><legend>{c.label}</legend><p>{c.question}</p>
      <label className="field"><span>{c.label} rating</span><select value={draft[key]?.level||''} onChange={e=>edit(key,'level',e.target.value)}><option value="">Not reviewed</option>{Object.entries(reviewLevels).map(([level,label])=><option key={level} value={level}>{level} · {label}</option>)}</select></label>

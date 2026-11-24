@@ -3,6 +3,7 @@ import { env } from '@/lib/school-success/environment';
 import { actor, database, checkOrigin, failure, assertConsultant } from '@/lib/school-success/server';
 import { gateway, publicBase } from '@/lib/school-success/live';
 import { currentMediaUrl } from '@/lib/school-success/live-mapping';
+import { feedbackKey } from '@/lib/school-success/feedback-notes';
 import { scopedSubmission, evidencePlan, submissionRecords } from '@/lib/school-success/teacher-submissions';
 import { seal, unseal, r2UploadsConfigured, r2Request, loadR2Config } from '@/lib/school-success/r2-evidence';
 import { assertResumeAccess, lessonFromRows, assertEvidenceMatches } from '@/lib/school-success/lesson-workflow';
@@ -61,11 +62,19 @@ async function handlerPOST(req) {
                 byRecord.set(String(row.id), { lesson, period });
             }
             const lessons = [...grouped.values()].map(l => ({ ...l, evidence: l.periods.every(p => p.evidence) }));
+            const noted = new Map((data.notes || []).map(n => [String(n.record_id) + '|' + n.key, n.noted_at]));
             const feedback = (data.reviews || []).filter(r => byRecord.has(String(r.record_id))).map(r => {
-                const { lesson, period } = byRecord.get(String(r.record_id));
-                return { lessonId: lesson.id, plannedOn: lesson.plannedOn, grade: period.grade, section: period.section, subject: period.subject, topic: period.topic, text: String(r.feedback), date: r.updated_at || '', resumeToken: lesson.resumeToken };
+                const { lesson, period } = byRecord.get(String(r.record_id)), key = feedbackKey(r);
+                return { lessonId: lesson.id, recordId: String(r.record_id), key, notedAt: noted.get(String(r.record_id) + '|' + key) || '', plannedOn: lesson.plannedOn, grade: period.grade, section: period.section, subject: period.subject, topic: period.topic, text: String(r.feedback), date: r.updated_at || '', resumeToken: lesson.resumeToken };
             }).sort((x, y) => String(y.date).localeCompare(String(x.date)));
             return Response.json({ today, lessons, feedback }, { headers: { 'Cache-Control': 'no-store' } });
+        }
+        if (body.action === 'noteFeedback') {
+            // The signed-in teacher marks one piece of feedback on their own lesson as read.
+            if (a.role !== 'school-teacher')
+                throw Error('403:Only the teacher can mark their feedback as noted');
+            const result = await gateway({ action: 'noteFeedback', recordId: String(body.recordId || ''), key: String(body.key || ''), school: a.school, teacher: a.name, actor: a.email });
+            return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
         }
         if (body.action === 'resume') {
             const grant = await resumeGrant(body.resume);

@@ -97,7 +97,7 @@ export default function Portal() {
     const amount = (m) => usage.filter(r => r.module === m).reduce((n, r) => n + r.minutes, 0);
     const changePage = (p) => { if(p === 'School 360°' && page !== p){setSchool('');setSchool360View(old=>({...old,level:'portfolio',school:'',teacherKey:'',restoreScroll:0}));} setPage(p); setMobile(false); setQuery(''); };
     const search = (r) => JSON.stringify(r).toLowerCase().includes(query.toLowerCase());
-    const csvExport = (rows, name) => download(name + '.csv', csv(rows.map(({ id, version, kind, ...r }) => r)));
+    const csvExport = (rows, name) => download(name + '.csv', csv(rows.map(({ id, version, kind, feedbackNotes, ...r }) => r)));
     if (!data)
         return <main className="welcome"><div className="brand-icon"><GraduationCap /></div><h1>School Success</h1><p>{error || 'Opening your academic workspace…'}</p>{error && <a className="button primary" href={signInHref} target="_top">Sign in to Vision</a>}</main>;
     // Teachers signed in through their school link get the teacher app alone: no staff sidebar, breadcrumb, usage bar
