@@ -1,5 +1,5 @@
 import { normalizeUsage, usageIdentity, canonical } from './domain.js';
-import {feedbackText} from './lesson-reviews.js';
+import {feedbackTextWithReviewer,reviewerFromSignIn} from './lesson-reviews.js';
 import {feedbackKey} from './feedback-notes.js';
 const string = (x) => x == null ? '' : String(x).trim();
 // Media addresses used before the school's own media domain. Files stored under them are the same objects in the
@@ -69,12 +69,12 @@ export async function mapLive(raw, publicBase) {
         const files = evidenceFields.flatMap(k => string(r[k]).split(',').flatMap((value, i) => { const url = evidenceUrl(value, publicBase); return url ? [{ key: k + ':' + r.id + ':' + i, column: k, url, name: k.replaceAll('_', ' '), category: k.replaceAll('_', ' ') }] : []; }));
         if (files.length || r.Type === 'Classroom Reflection') {
             const reviews = (reviewsByRecord.get(String(r.id)) || []).filter(v => !v.school || v.school === school);
-            const reviewHistory = reviews.filter(v=>string(v.feedback)).map(v=>({text:v.feedback,date:v.updated_at || '',id:v.review_id || 'legacy',key:feedbackKey(v)}))
+            const reviewHistory = reviews.filter(v=>string(v.feedback)).map(v=>({text:v.feedback,date:v.updated_at || '',id:v.review_id || 'legacy',key:feedbackKey(v),by:v.by||reviewerFromSignIn(v.reviewer)}))
                 .sort((a,b)=>(Date.parse(a.date)||0)-(Date.parse(b.date)||0)||a.id.localeCompare(b.id));
             const reviewedAt = reviewHistory.at(-1)?.date || '';
             const review = reviews.find(v=>!v.review_id);
             const feedbackNotes = (notesByRecord.get(String(r.id)) || []).filter(n => !n.school || n.school === school).map(({ key, noted_at }) => ({ key, noted_at }));
-            const item = { feedbackNotes, id: String(r.id), recordId: String(r.id), kind: 'submission', school, teacher, date, grade: string(r.Grade), section: string(r.Section), subject: string(r.Subject), topic: string(r.Book) || 'Classroom practice', stage: r.lesson_stage || '', plannedDate: r.planned_lesson_on || '', conductedOn: r.conducted_on || '', evidenceAt: r.evidence_submitted_at || '', reflection: string(r.lesson_reflection), materials: string(r.materials_notes), files, review: feedbackText(reviewHistory), reviewHistory, version: review?.updated_at || null, uploadedBy: r.Uploaded_By, submissionId: r.submission_id, periodId: string(r.lesson_period_id), preparationSavedAt: string(r.preparation_saved_at), lessonSubmittedAt: string(r.submitted_at || r.created_at), reviewedAt };
+            const item = { feedbackNotes, id: String(r.id), recordId: String(r.id), kind: 'submission', school, teacher, date, grade: string(r.Grade), section: string(r.Section), subject: string(r.Subject), topic: string(r.Book) || 'Classroom practice', stage: r.lesson_stage || '', plannedDate: r.planned_lesson_on || '', conductedOn: r.conducted_on || '', evidenceAt: r.evidence_submitted_at || '', reflection: string(r.lesson_reflection), materials: string(r.materials_notes), files, review: feedbackTextWithReviewer(reviewHistory), reviewHistory, version: review?.updated_at || null, uploadedBy: r.Uploaded_By, submissionId: r.submission_id, periodId: string(r.lesson_period_id), preparationSavedAt: string(r.preparation_saved_at), lessonSubmittedAt: string(r.submitted_at || r.created_at), reviewedAt };
             if (r.lesson_stage && r.planned_lesson_on) {
                 const events = Array.isArray(r.lesson_evidence_history) ? r.lesson_evidence_history : [];
                 const eventUrls = new Set(events.flatMap((e) => Object.values(e.files || {}).flatMap(v => string(v).split(',').map(x => evidenceUrl(x, publicBase)).filter(Boolean))));

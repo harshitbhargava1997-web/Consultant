@@ -52,7 +52,7 @@ test('the complete-history view of the same lesson includes everything with stab
  const l=buildLessonRecords(await entriesP,from,to,{scope:'all'}).find(x=>x.recordId==='301');
  assert.deepEqual(l.activities.map(x=>[x.label,x.url.split('/').pop()]),[['Classroom activity 1','oct.jpg'],['Classroom activity 2','boundary-late.jpg'],['Classroom activity 3','nov.jpg']]);
  assert.deepEqual(names(l.writing),['nov-w.jpg']);
- assert.equal(l.feedback.text,'Reviewed in November.');assert.equal(l.outsidePeriodFiles,0);assert.equal(l.reviewOutsidePeriod,false);
+ assert.equal(l.feedback.text,'Reviewed in November.\n— School Success team','an older review shows who gave it by its sign-in');assert.equal(l.outsidePeriodFiles,0);assert.equal(l.reviewOutsidePeriod,false);
  assert.throws(()=>buildLessonRecords([],from,to,{scope:'everything'}),/Unknown/);
 });
 
@@ -63,7 +63,7 @@ test('a lesson prepared before the period appears for its in-period evidence wit
  assert.deepEqual(l.plan.fields.map(x=>x.text),['Objective for 302'],'lesson plan text is always shown');
  assert.deepEqual(l.planFiles,[]);assert.deepEqual(l.audio,[]);
  assert.deepEqual(names(l.activities),['boundary-early.jpg','act-oct.jpg'],'20 Oct 00:30 IST is inside the period');
- assert.equal(l.feedback.text,'Reviewed in October.');assert.equal(l.outsidePeriodFiles,2);
+ assert.equal(l.feedback.text,'Reviewed in October.\n— School Success team');assert.equal(l.outsidePeriodFiles,2);
 });
 
 test('lessons with no activity in the period are excluded; re-sent files count once with their original date',async()=>{

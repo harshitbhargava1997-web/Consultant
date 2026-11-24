@@ -7,7 +7,7 @@
 - leaders may reset teacher PINs.
 
 ## Adding principals and coordinators (Super Admin, inside School Success)
-1. Open **School Success → Schools & teachers → School leaders** (Super Admin only).
+1. Open **School Success → User management**, then **Add school leader** (or the **School leaders** tab). Super Admin only.
 2. Choose the school, then enter:
    - full name;
    - role (**Principal**, **Coordinator** or **School management**);
@@ -103,3 +103,18 @@ School Success and Vision literacy are separate programmes, and School Success s
 - **Accounts:** leader accounts are created in School Success → School leaders. Their access comes from School Success module access, not Vision school memberships, so they do not appear in Vision's user management. The shared sign-in service only checks the password.
 - **Code:** `app/school-success/ui/success-sign-in.jsx`, wired in `portal.jsx`.
 - **Tests:** `tests/success-sign-in.test.mjs`. A phone browser check of the whole flow was run with a fake sign-in service.
+
+## 24 November 2026: User management and "who gave the review"
+- **User management:** "Schools & teachers" is renamed **User management**.
+  - Actions at the top: **Add school**, **Add teacher** and **Add school leader** (Super Admin).
+  - Two tabs: **Schools & teachers** and **School leaders**.
+  - **Add school leader** opens the School leaders tab with the form ready. With a single school, it is preselected.
+- **Reviewer on every review:**
+  - **Saved with each new review:** the reviewer's name and role (Principal / Coordinator / School management / Consultant / Super Admin), stored with the rubric in the review's existing record. There is no schema change.
+  - **Older reviews:** labelled by how the reviewer signed in: "School leader" for mobile sign-ins, otherwise "School Success team".
+  - **Where it shows:**
+    - teacher Feedback tab ("From Meera Rao, Principal");
+    - Lesson reviews list ("Feedback recorded by …");
+    - review window and principal "Feedback given" ("— Meera Rao, Principal" under the remarks);
+    - lesson documentation text.
+- **Tests:** `tests/success-reviewer-name.test.mjs`.
