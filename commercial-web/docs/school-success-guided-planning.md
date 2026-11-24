@@ -7,7 +7,7 @@
 2. **Home screen:**
    - **This month:** lessons planned, how many have classroom evidence, and feedback received.
    - **Submit lesson plan** and **Add evidence**.
-   - **Lessons needing evidence:** lessons planned up to today that have no classroom evidence yet. One tap opens the lesson to add evidence.
+   - **Recent lessons:** lessons planned up to today, newest first, with a green "Evidence added" tick where evidence exists. One tap opens the lesson to add evidence. Not every lesson needs evidence (targets are per review period), so nothing is shown as overdue (changed 24 November 2026).
    - **Feedback received:** the newest academic-review comments on the teacher's own lessons. Items are marked "New" on the first visit after they arrive.
 3. **Submit lesson plan** (one page, no steps). At the top, choose the plan type:
 
@@ -31,7 +31,7 @@
    - **One "Submit lesson plan" button** sits in a bar fixed to the bottom of the screen. If anything is missing, the page opens and highlights the first incomplete field.
    - The plan type is remembered on the device. Switching type keeps the answers already typed.
 4. **Add evidence:**
-   - The teacher taps a lesson in "Lessons needing evidence".
+   - The teacher taps a lesson in "Recent lessons".
    - Searching by planned date remains available as a fallback ("Can't find your lesson?").
    - The after-class reflection also uses faded starters instead of buttons.
 
@@ -73,7 +73,7 @@
   - language choice and home summary on iPhone 13 emulation;
   - a daily plan with two periods of different classes and subjects, including validation and saving;
   - a weekly Hindi plan on desktop, saved as three submissions with consecutive dates;
-  - the "Lessons needing evidence" list and opening a lesson;
+  - the "Recent lessons" list and opening a lesson;
   - the empty state;
   - no JavaScript errors and no horizontal overflow.
 - **Not yet verified:**
