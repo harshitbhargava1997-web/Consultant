@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {changeSchoolStatus} from "../../../lib/school-lifecycle";
 import { createClient } from "@supabase/supabase-js";
 import {isConfirmedUser,isEmail,normalizePhone} from "../../../lib/auth";
+import { validPassword } from '@/lib/password-policy';
 
 export const runtime = "nodejs";
 function response(data, status=200) { return NextResponse.json(data, {status, headers:{"Cache-Control":"no-store"}}); }
@@ -84,9 +85,9 @@ export async function POST(request) {
    const roles=role==='principal'?['coordinator','teacher']:role==='owner'?['principal','coordinator','teacher']:['owner','principal','coordinator','teacher'];
    if(body.action==='accountList')return response({roles,people:await read(member().select('user_id,display_name,role').eq('school_id',schoolId).in('role',roles).neq('user_id',ctx.user.id).order('display_name'))});
    const name=String(body.name||'').trim(),email=String(body.email||'').trim().toLowerCase(),phone=normalizePhone(String(body.mobile||'').trim()),pass=body.password;
-   const strong=typeof pass==='string'&&pass.length>=12&&pass.length<=128&&/[A-Z]/.test(pass)&&/[a-z]/.test(pass)&&/[0-9]/.test(pass)&&/[^a-zA-Z0-9]/.test(pass);
+   const strong=validPassword(pass);
    if(['accountEdit','accountCreate'].includes(body.action)&&(name.length<2||name.length>160||!roles.includes(body.role)))return response({error:'Check the full name and permitted role.'},400);
-   if(['accountCreate','accountReset'].includes(body.action)&&!strong)return response({error:'Use 12–128 characters with upper and lower case, a number and a symbol.'},400);
+   if(['accountCreate','accountReset'].includes(body.action)&&!strong)return response({error:'Use a password with 6 to 128 characters (6 digits are fine).'},400);
    if(['accountCreate','accountLogin'].includes(body.action)&&((!email&&!phone)||(email&&!isEmail(email))||(body.mobile&&!phone)))return response({error:'Enter a valid email or teacher mobile number.'},400);
    if(body.action==='accountCreate'){
     if(phone&&body.role!=='teacher')return response({error:'Mobile login is for teachers only.'},400);
@@ -202,10 +203,8 @@ export async function POST(request) {
    if(isNewAccount){
     // Only the Super Admin sets initial credentials. Never persist or echo the plaintext password.
     // Existing accounts are assigned to additional schools without changing their credentials.
-    if(initialPassword.length<12||initialPassword.length>128||
-       !/[a-z]/.test(initialPassword)||!/[A-Z]/.test(initialPassword)||
-       !/[0-9]/.test(initialPassword)||!(/[^A-Za-z0-9]/.test(initialPassword))){
-      return response({error:"For a new account, enter an initial password of 12–128 characters with uppercase, lowercase, a number and a symbol."},400);
+    if(!validPassword(initialPassword)){
+      return response({error:"For a new account, enter an initial password of 6 to 128 characters (6 digits are fine)."},400);
     }
     const authIdentity={password:initialPassword,
       user_metadata:{full_name:fullName},

@@ -24,6 +24,7 @@ const CurriculumEditor=dynamic(()=>import("./CurriculumEditor"),{loading:()=> <s
 const ConsultantWorkspace=dynamic(()=>import("./ConsultantWorkspace"),{loading:()=> <section className="panel">Opening consultant workspace…</section>});
 import {isEmail,loginLabel,normalizePhone,mobileLoginEmail} from "../lib/auth";
 import {safeReturnPath} from "../lib/return-path";
+import { validPassword, PASSWORD_MIN } from "@/lib/password-policy";
 import {LayoutDashboard,ShieldCheck,School,Users,BookOpen,ClipboardCheck,ChartNoAxesCombined,
  BookMarked,Eye,Menu,X,LogOut,Plus,Trash2,Search,ChevronRight,RefreshCw,LockKeyhole,
  CircleCheck,ArrowRight,AlertCircle,GraduationCap,FileUp} from "lucide-react";
@@ -50,6 +51,8 @@ function Notice({message}){return message?<div className="notice"><AlertCircle s
 function Empty({title,detail}){return <div className="empty"><BookOpen size={26}/><h3>{title}</h3><p>{detail}</p></div>}
 function Box({title,action,children}){return <section className="panel"><div className="panel-head"><h2>{title}</h2>{action}</div>{children}</section>}
 
+// Every account: at least 6 characters (owner decision, 24 November 2026; see lib/password-policy).
+function initialPasswordMin(){return PASSWORD_MIN;}
 export default function Home(){
  const client=useMemo(()=>browserClient(),[]);
  const [session,setSession]=useState(null),[checked,setChecked]=useState(false);
@@ -238,7 +241,7 @@ export default function Home(){
   }catch(e){setMessage(e.message);}finally{setBusy(false);}
  }
  async function changeInitialPassword(e){
-  e.preventDefault();if(newPassword.length<12){setMessage("Use a password of at least 12 characters.");return;}
+  e.preventDefault();const min=initialPasswordMin(session.user);if(newPassword.length<min){setMessage("Use a password of at least "+min+" characters.");return;}
   setBusy(true);setMessage("");
   try{
    const res=await fetch("/api/password-changed",{method:"POST",
@@ -262,10 +265,8 @@ export default function Home(){
   if(newUser.initialPassword!==newUser.confirmPassword){
    setMessage("Initial and confirmation passwords must match.");return;
   }
-  if(newUser.initialPassword && (newUser.initialPassword.length<12 || newUser.initialPassword.length>128 ||
-   !/[a-z]/.test(newUser.initialPassword)||!/[A-Z]/.test(newUser.initialPassword)||
-   !/[0-9]/.test(newUser.initialPassword)||!(/[^A-Za-z0-9]/.test(newUser.initialPassword)))){
-   setMessage("Use 12–128 characters with uppercase, lowercase, a number and a symbol.");return;
+  if(newUser.initialPassword && !validPassword(newUser.initialPassword)){
+   setMessage("Use a password with 6 to 128 characters (6 digits are fine).");return;
   }
   if(!can("users.manage")){setMessage("User management is not enabled for your role.");return;}
   const onboardingSchool=identity.admin?newUser.school:schoolId;
@@ -364,7 +365,7 @@ export default function Home(){
  if(!checked)return <main className="splash"><span className="loader"/> Loading secure workspace…</main>;
  if(!client)return <main className="setup"><div className="setup-logo"><GraduationCap size={29}/></div><span className="eyebrow">VISION SCHOOL PLATFORM</span><h1>A connected home for every school.</h1><p>Teacher implementation, literacy assessments and learning progress in one workspace.</p><div className="notice"><LockKeyhole size={19}/><span>Deployment is in setup mode. Configure Supabase public environment variables to enable secure sign-in. No student data is exposed.</span></div><a href="https://github.com/harshitbhargava1997-web/Consultant/tree/commercial-staging/commercial-web" target="_blank" rel="noreferrer" className="btn primary">View staging source <ArrowRight size={16}/></a></main>;
  if(!session)return <main className="auth-outer vision-signin"><div className="auth-brand"><span className="brand-mark"><GraduationCap size={24}/></span><span>VISION <small>School Platform</small></span></div><div className="auth-card"><LearningArt/><div className="eyebrow">VISION LITERACY</div><h1>{signMode==="forgot"?"Reset your password":"Welcome back"}</h1><p>{signMode==="forgot"?"Email accounts can request a reset link. For other login IDs, contact your administrator.":"Use your registered login ID and password."}</p><Notice message={message}/><form onSubmit={handleLogin}><label>{signMode==="forgot"?"Email address":"Email or mobile number"}<input type={signMode==="forgot"?"email":"text"} inputMode={signMode==="forgot"?"email":"text"} autoComplete="username" required value={login} onChange={e=>setLogin(e.target.value)} placeholder={signMode==="forgot"?"you@school.edu":"you@school.edu or 9876543210"}/></label>{signMode==="signin"&&<label>Password<input type="password" required value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter password"/></label>}<Btn type="submit" kind="primary wide" disabled={busy}>{busy?"Please wait…":signMode==="forgot"?"Email reset link":"Sign in"} <ArrowRight size={16}/></Btn></form><button className="link-button" onClick={()=>{setSignMode(signMode==="forgot"?"signin":"forgot");setMessage("");}}>{signMode==="forgot"?"Back to sign in":"Forgot password?"}</button></div><div className="auth-note">Built for school leaders, teachers and academic assessors</div></main>;
- if(session.user?.app_metadata?.must_change_password)return <main className="auth-outer vision-signin"><div className="auth-card"><span className="eyebrow">ACCOUNT SECURITY</span><h1>Set your personal password</h1><p>Replace the temporary password before continuing.</p><Notice message={message}/><form onSubmit={changeInitialPassword}><label>New password<input type="password" minLength={12} value={newPassword} onChange={e=>setNewPassword(e.target.value)} required/></label><Btn type="submit" kind="primary wide" disabled={busy}>Update password</Btn></form><button className="link-button" onClick={logout}>Sign out</button></div></main>;
+ if(session.user?.app_metadata?.must_change_password)return <main className="auth-outer vision-signin"><div className="auth-card"><span className="eyebrow">ACCOUNT SECURITY</span><h1>Set your personal password</h1><p>Replace the temporary password before continuing.</p><Notice message={message}/><form onSubmit={changeInitialPassword}><label>New password<input type="password" minLength={initialPasswordMin(session.user)} value={newPassword} onChange={e=>setNewPassword(e.target.value)} required/></label><p className="muted">At least {initialPasswordMin(session.user)} characters{' (6 digits are fine)'}.</p><Btn type="submit" kind="primary wide" disabled={busy}>Update password</Btn></form><button className="link-button" onClick={logout}>Sign out</button></div></main>;
 
  const navFeature={
   schools:"schools.view",users:"users.manage",

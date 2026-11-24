@@ -42,15 +42,18 @@ test('Super Admin adds a principal: mobile sign-in with starting password 123456
  assert.deepEqual(h.audit,['grant-school-leader']);
 });
 
-test('an existing account with that mobile number is linked, not duplicated; consultants and Super Admins are refused',async()=>{
+test('a mobile number that is already registered is refused with a clear message; nothing is linked or created',async()=>{
  const h=harness();await add(h);
- const again=await add(h,{school:'Green Valley School',title:'Coordinator'});
- assert.equal(again.body.created,false);assert.equal(h.users.size,1);
- const [u]=[...h.users.values()];assert.deepEqual(h.grant(u.id).schools,[S,'Green Valley School']);
+ const same=await add(h);
+ assert.equal(same.status,409);assert.match(same.body.error,/already a school leader for/);
+ const other=await add(h,{school:'Green Valley School',title:'Coordinator'});
+ assert.equal(other.status,409);assert.match(other.body.error,/already registered\. Please change the details/);
+ assert.equal(h.users.size,1);const [u]=[...h.users.values()];assert.deepEqual(h.grant(u.id).schools,[S],'the existing leader is not linked to another school');
  h.config.set('moduleAccess:'+u.id,JSON.stringify({userId:u.id,enabled:true,schools:[S],role:'consultant'}));
  assert.equal((await add(h)).status,409,'already a consultant');
  h.config.delete('moduleAccess:'+u.id);h.admins.add(u.id);
  assert.equal((await add(h)).status,409,'Super Admin account');
+ assert.equal(h.users.size,1);
 });
 
 test('reset returns to the starting password with a forced change; only for sign-ins created here; remove drops this school only',async()=>{
@@ -60,7 +63,7 @@ test('reset returns to the starting password with a forced change; only for sign
  assert.equal(u.password,'123456');assert.equal(u.app_metadata.must_change_password,true);
  u.app_metadata.school_success_leader=false;
  assert.equal((await h.call({action:'reset',school:S,userId:u.id,password:'123456'})).status,403,'accounts made elsewhere are reset where they were made');
- await add(h,{school:'Green Valley School'});
+ h.config.set('moduleAccess:'+u.id,JSON.stringify({...JSON.parse(h.config.get('moduleAccess:'+u.id)),schools:[S,'Green Valley School']}));
  assert.equal((await h.call({action:'remove',school:S,userId:u.id})).status,200);
  assert.deepEqual(h.grant(u.id).schools,['Green Valley School']);assert.equal(h.users.has(u.id),true,'the sign-in itself is kept');
  assert.equal((await h.call({action:'remove',school:'Green Valley School',userId:u.id})).status,200);

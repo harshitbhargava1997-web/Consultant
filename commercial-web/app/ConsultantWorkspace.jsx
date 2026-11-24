@@ -59,8 +59,8 @@ export function ConsultantManagement({session,schools,onChanged}){
     <form className="stack" onSubmit={provision}>
      <label>Consultant full name<input required maxLength={160} value={newPerson.displayName} onChange={e=>setNewPerson({...newPerson,displayName:e.target.value})}/></label>
      <label>Consultant login email<input required type="email" value={newPerson.email} onChange={e=>setNewPerson({...newPerson,email:e.target.value})}/></label>
-     <label>Initial password (new accounts)<input type="password" minLength={12} maxLength={128} value={newPerson.password} onChange={e=>setNewPerson({...newPerson,password:e.target.value})} autoComplete="new-password"/></label>
-     <label>Confirm initial password<input type="password" minLength={12} maxLength={128} value={newPerson.confirm} onChange={e=>setNewPerson({...newPerson,confirm:e.target.value})} autoComplete="new-password"/></label>
+     <label>Initial password (new accounts)<input type="password" minLength={6} maxLength={128} value={newPerson.password} onChange={e=>setNewPerson({...newPerson,password:e.target.value})} autoComplete="new-password"/></label>
+     <label>Confirm initial password<input type="password" minLength={6} maxLength={128} value={newPerson.confirm} onChange={e=>setNewPerson({...newPerson,confirm:e.target.value})} autoComplete="new-password"/></label>
      <p className="helper">A new account needs a strong initial password. For an existing login, leave both password fields blank; its password will remain unchanged. Share initial passwords privately.</p>
      <button className="btn primary" type="submit" disabled={busy}><Plus size={15}/> Register consultant</button>
     </form>

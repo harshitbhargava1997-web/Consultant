@@ -2,11 +2,12 @@ import {activeSchoolError} from "../../../lib/school-lifecycle";
 import {NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
 import {isConfirmedUser} from "../../../lib/auth";
+import { validPassword } from '@/lib/password-policy';
 export const runtime="nodejs";
 function send(data,status=200){return NextResponse.json(data,{status,headers:{"Cache-Control":"no-store"}});}
 function text(x){return typeof x==="string"?x.trim():String(x??"").trim();}
 function uuid(x){return /^[a-f\d]{8}-[a-f\d]{4}-[1-8a-f\d][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(text(x));}
-function strong(p){return p.length>=12&&p.length<=128&&/[a-z]/.test(p)&&/[A-Z]/.test(p)&&/[0-9]/.test(p)&&/[^A-Za-z0-9]/.test(p);}
+function strong(p){return validPassword(p);}
 function connect(key){return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL,key,{auth:{persistSession:false,autoRefreshToken:false}});}
 async function context(request){
  const token=(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"");
@@ -164,7 +165,7 @@ export async function POST(request){
     }
     let newAccount=false;
     if(!user){
-     if(!strong(password))return send({error:"New consultants need a 12–128 character initial password with uppercase, lowercase, number and symbol."},400);
+     if(!strong(password))return send({error:"New consultants need an initial password of 6 to 128 characters (6 digits are fine)."},400);
      const {data,error}=await ctx.admin.auth.admin.createUser({
       email,password,email_confirm:true,user_metadata:{full_name:name},app_metadata:{must_change_password:true}
      });
