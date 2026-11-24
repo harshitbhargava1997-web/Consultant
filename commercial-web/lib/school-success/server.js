@@ -69,7 +69,7 @@ async function identify(req){
  const saved=isSuperAdmin?null:await checked(db.from('success_config').select('value').eq('key','moduleAccess:'+user.id).maybeSingle());
  const grant=readModuleGrant(saved?.value,user.id);
  if(!isSuperAdmin&&!grant)throw Error('403:Ask Super Admin to assign your School Success module access');
- return {email:user.email||user.phone,name:user.user_metadata?.full_name||user.email||user.phone||'Administrator',role:'admin',leader:!isSuperAdmin&&grant?.role==='leader',staffRole:isSuperAdmin?'super_admin':grant.role,visionRole:isSuperAdmin?'super_admin':grant.role==='leader'?'school_leader':'consultant',isSuperAdmin,userId:user.id,school:'',allowedSchools:isSuperAdmin?null:grant.schools};
+ return {email:user.email||user.phone,name:user.user_metadata?.full_name||user.email||user.phone||'Administrator',role:'admin',leader:!isSuperAdmin&&grant?.role==='leader',staffRole:isSuperAdmin?'super_admin':grant.role,visionRole:isSuperAdmin?'super_admin':grant.role==='leader'?'school_leader':'consultant',isSuperAdmin,title:!isSuperAdmin&&grant?.role==='leader'?grant.title||'':undefined,userId:user.id,school:'',allowedSchools:isSuperAdmin?null:grant.schools};
 }
 // School leaders (principals, coordinators) are staff for their own school's reports, lesson reviews, classroom
 // visits and teacher PINs. Everything else that staff can do is consultant-only and fails closed for leaders.

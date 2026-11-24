@@ -344,3 +344,29 @@
 .success-app .ts-noted{display:inline-flex;align-items:center;gap:6px;border:1.5px solid var(--green);color:var(--green);border-radius:999px;padding:7px 13px;font-weight:800;font-size:12.5px;background:#fff}
 .success-app .ts-noted.done{background:var(--green);color:#fff}
 .success-app .ts-noted:disabled{opacity:.6}
+/* School leader dashboard */
+.success-app .leader-app .la-avatar{background:#e9f0fa;color:#3d6aa6}
+.success-app .la-filters{background:#fff;border:1px solid var(--line);border-radius:18px;padding:12px 14px;margin-bottom:12px}
+.success-app .la-selects{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}.success-app .la-selects .field{margin:0}.success-app .la-selects select{width:100%;min-height:42px}
+.success-app .la-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.success-app .la-stats .ta-stat b small{font-size:13px;color:var(--muted);font-weight:700}
+.success-app .la-bar{display:block;height:6px;border-radius:9px;background:#e9efeb;margin-top:8px;overflow:hidden}.success-app .la-bar i{display:block;height:100%;background:var(--green);border-radius:9px}.success-app .la-bar.blue i{background:#3d6aa6}.success-app .la-bar.violet i{background:#7a5a9c}
+.success-app .leader-app .ta-card h3{display:flex;align-items:center;gap:7px}
+.success-app .la-count{background:var(--mint);color:var(--green);font-weight:800;font-size:12px;border-radius:999px;padding:3px 10px}.success-app .la-count.soft{background:#f0f3f1;color:var(--muted)}
+.success-app .la-list{list-style:none;margin:0;padding:0}.success-app .la-list li{display:flex;align-items:center;gap:11px;padding:11px 0;border-top:1px solid var(--line)}.success-app .la-list li:first-child{border-top:0}
+.success-app .la-face{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:12.5px;flex:none}
+.success-app .la-face.c1{background:#e8f1ea;color:#2b6d55}.success-app .la-face.c2{background:#e9f0fa;color:#3d6aa6}.success-app .la-face.c3{background:#f2ecf8;color:#7a5a9c}.success-app .la-face.c4{background:#fbf1e3;color:#a87532}
+.success-app .la-text{flex:1;min-width:0}.success-app .la-text b{display:block;font-size:14px}.success-app .la-text small{display:block;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.success-app .la-btn{flex:none;padding:8px 14px;min-height:0;font-size:13px}
+.success-app .la-date{width:44px;text-align:center;border:1px solid var(--line);border-radius:12px;padding:4px 0;flex:none}.success-app .la-date b{display:block;font-size:16px}.success-app .la-date small{font-size:10.5px;color:var(--muted)}
+.success-app .la-pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}.success-app .la-pills em{font-style:normal;font-size:10.5px;font-weight:700;border-radius:999px;padding:1px 7px;background:#f0f3f1;color:var(--muted)}.success-app .la-pills em.ok{background:var(--mint);color:var(--green)}.success-app .la-pills em.wait{background:#fbf1e3;color:#a87532}
+.success-app .la-feed{list-style:none;margin:0;padding:0;display:grid;gap:10px}.success-app .la-feed li{border-left:4px solid var(--green);background:#f8fbf9;border-radius:12px;padding:11px 12px 10px 13px}
+.success-app .la-feed-head{display:flex;justify-content:space-between;gap:8px}.success-app .la-feed-head b{font-size:13.5px}.success-app .la-feed-head small,.success-app .la-feed-class{color:var(--muted);font-size:12px}
+.success-app .la-feed p{margin:6px 0 8px;font-size:13.5px;line-height:1.45;white-space:pre-wrap}
+.success-app .la-feed-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.success-app .la-noted{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:var(--green)}.success-app .la-noted.wait{color:#a87532}
+.success-app main.leader-shell{padding-bottom:40px}
+@media(max-width:380px){.success-app .la-stats .ta-stat b{font-size:19px}}
+.success-app .la-stats .ta-stat b{white-space:nowrap}.success-app .la-stats .ta-stat b small{display:inline}
+.success-app .lesson-review-dialog .card-head{display:flex;flex-wrap:nowrap;align-items:flex-start;justify-content:space-between;gap:10px}.success-app .lesson-review-dialog .card-head>div{min-width:0}
+.success-app .leader-app .pin-admin>summary{pointer-events:none;list-style:none}.success-app .leader-app .pin-admin>summary::-webkit-details-marker{display:none}

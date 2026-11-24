@@ -65,3 +65,18 @@ Enforced on the server, not just hidden in the menu:
 
 ## Rollback
 Revert the PR. Leader grants then behave as consultant grants for the same schools, so **revoke leader grants first** if rolling back.
+
+## 24 November 2026: review dashboard only (owner decision)
+School leaders (Principal, Coordinator, School management) now open **one review dashboard** instead of the staff workspace. There is no sidebar, School 360°, Teacher 360°, Classroom visits or Teacher portal for them. Super Admin and consultants are unchanged.
+- **Header:** their title and school, for example "Principal · Sunrise Public School".
+- **Filters:**
+  - dates: This week (Monday to today), Last week, This month, or a date range of up to 100 days. Dates outside the loaded period are loaded on choice.
+  - teacher and subject.
+- **Numbers:** teachers who planned / all teachers, evidence files shared, and lessons reviewed / lessons.
+- **New evidence to review:** lessons with evidence and no feedback, each with **Review**. This opens the existing review window (plan, evidence, Planning and Execution ratings with remarks).
+- **No plan yet:** teachers with no lesson plan in the dates (and subject), with their last plan date.
+- **Lesson plans:** every lesson in the filters, with plan, evidence, reviewed or awaiting, and teacher-noted status, plus Review / Open.
+- **Feedback given:** remarks with date and whether the teacher has noted them.
+- **Profile menu:** **Teacher PINs** (opens on their school) and **Sign out**.
+
+Server permissions are unchanged: leaders still read only their own school and can only record reviews and reset PINs. Their job title (`title`) is now included in the signed-in identity. Code: `app/school-success/ui/leader-app.jsx`. Tests: `tests/success-leader-dashboard.test.mjs`.
