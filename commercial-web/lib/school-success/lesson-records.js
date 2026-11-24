@@ -7,6 +7,7 @@
 import {fileCategory,lessonIdentity} from './school-portfolio.js';
 import {teacherKey} from './reports.js';
 import {feedbackText} from './lesson-reviews.js';
+import {noteSummary} from './feedback-notes.js';
 import {chronologicalRows} from '../report-sequence.js';
 import {isReflectionTextUrl} from './reflection-text.js';
 
@@ -139,7 +140,9 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
   ...Object.fromEntries(Object.entries(sections).map(([key,list])=>[key,scoped(list)])),
   outsidePeriodFiles:scope==='all'?0:all.filter(f=>!keep(f)).length,
   reviewOutsidePeriod:visibleReviews.length<history.length,
-  feedback:visibleReviews.length?{label:'Academic Review',text:feedbackText(visibleReviews),date:utcStamp(visibleReviews.at(-1).date)}:null
+  feedback:visibleReviews.length?{label:'Academic Review',text:feedbackText(visibleReviews),date:utcStamp(visibleReviews.at(-1).date)}:null,
+  // The teacher's "Noted" on the feedback shown here: latest date, and whether every item was noted.
+  feedbackNoted:noteSummary(visibleReviews.filter(r=>r.key),first.feedbackNotes||[])
  };
 }
 

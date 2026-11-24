@@ -34,6 +34,7 @@ async function harness(t){
     const entry=JSON.parse(init.body);assert.match(init.headers.Prefer,/ignore-duplicates/);
     if(saved.has(entry.id))result=[];else{saved.set(entry.id,entry);result=[{id:entry.id}];}
    }else if(q.has('id'))result=list.filter(r=>'eq.'+r.id===q.get('id')&&'eq.'+r.school===q.get('school'));
+   else if(q.get('kind')==='eq.feedback-noted'){assert.equal(q.get('school'),'in.("Alpha School")');result=[];} // teachers' "Noted" acknowledgements: none here
    else{
     assert.equal(q.get('kind'),'eq.lesson-review');assert.equal(q.get('school'),'in.("Alpha School")');
     const ids=[...q.get('or').matchAll(/id\.like\.lesson-review-(\d+)-\*/g)].map(m=>m[1]);

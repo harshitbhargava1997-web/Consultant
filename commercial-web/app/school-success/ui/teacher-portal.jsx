@@ -72,6 +72,11 @@ export default function TeacherPortal({ data, school, refresh }) {
     function historyReplace(url) { window.history.replaceState(null, '', url.href); }
     function go(next) { const url = new URL(location.href); url.searchParams.delete('resume'); historyReplace(url); if (next !== 'evidence') setResumeToken(''); setMode(next); setError(''); requestAnimationFrame(() => top.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }
     function openLesson(token, period = null) { setEvPeriod(Number.isInteger(period) ? period : null); setResumeToken(token); setMode('evidence'); setReceipt(null); requestAnimationFrame(() => (schoolLink ? top.current : document.getElementById('lesson-evidence'))?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }
+    // The teacher marks one piece of feedback as read; the reviewer sees "Teacher noted" with the date.
+    async function noteFeedback(f) {
+        const r = await request({ action: 'noteFeedback', recordId: f.recordId, key: f.key });
+        setSummary(s => s && ({ ...s, feedback: s.feedback.map(x => x.recordId === f.recordId && x.key === f.key ? { ...x, notedAt: r.notedAt || new Date().toISOString() } : x) }));
+    }
     function readPlan(token, period = 0, match = null) { setReadTarget({ token, period, match }); setMode('read'); setReceipt(null); requestAnimationFrame(() => top.current?.scrollIntoView({ block: 'start' })); }
 
     // Saves one submission through the existing preparation workflow (PDF, direct upload, prepare/commit).
@@ -147,7 +152,7 @@ export default function TeacherPortal({ data, school, refresh }) {
          {mode === '' && <TeacherHome summary={summary} language={language} teacher={teacherValue} school={selectedSchool} newFeedback={newFeedbackCount(summary, who)} onRead={readPlan} onEvidence={openLesson} onPlan={() => go('preparation')} loading={summaryLoading} error={summaryError} onRetry={loadSummary} notice={receiptCard}/>}
          {mode === 'read' && readTarget && <PlanReader key={readTarget.token + ':' + readTarget.period} token={readTarget.token} periodIndex={readTarget.period} match={readTarget.match} request={request} language={language} today={summary?.today || day()} onBack={() => go('')} onEvidence={openLesson}/>}
          {mode === 'evidence' && <div id="lesson-evidence"><LessonEvidence language={language} key={selectedSchool + '|' + teacherValue + '|' + resumeToken} token={resumeToken} headers={contextHeaders} uploadsEnabled={data.uploadsEnabled} school={selectedSchool} teacher={teacherValue} compactSearch lessonChoices={summary?.lessons} onPickLesson={token => openLesson(token)} initialPeriod={evPeriod} onReadPlan={readPlan} onHome={() => go('')} nextLesson={next && { badge: dayLabel(next.plannedOn, language).split(',')[0], title: label(next.periods[0] || {}) + (next.periods.length > 1 ? ' +' + (next.periods.length - 1) : ''), subtitle: (next.periods[0]?.topic || '') + ' · ' + t('Read plan','योजना पढ़ें'), onOpen: () => readPlan(next.resumeToken, 0, next.periods[0]) }} onSaved={async () => { void loadSummary(); }}/></div>}
-         {mode === 'feedback' && <div className="ta-feedback"><FeedbackCard summary={summary} language={language} who={who} onOpen={token => readPlan(token, 0)}/></div>}
+         {mode === 'feedback' && <div className="ta-feedback"><FeedbackCard summary={summary} language={language} who={who} onOpen={token => readPlan(token, 0)} onNote={noteFeedback}/></div>}
          {mode === 'preparation' && <LessonPlanForm key={draftKey} language={language} plan={plan} setPlan={setPlan} identity={identity} submit={submit} busy={busy} error={error} canSave={!!selectedSchool && !!teacherValue} draftStatus={draftStatus} today={day()}/>}
          {mode !== 'preparation' && error && <div className="alert error" role="alert">{error}</div>}
          <TabBar mode={mode} onGo={tab} badge={mode === 'feedback' ? 0 : newFeedbackCount(summary, who)} language={language} disabled={!!busy}/>

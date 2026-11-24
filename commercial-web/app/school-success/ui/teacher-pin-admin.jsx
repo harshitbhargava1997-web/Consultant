@@ -1,12 +1,12 @@
 'use client';
-import {useState} from 'react';
+import {useState,useEffect} from 'react';
 import {KeyRound,RefreshCw,RotateCcw,CircleAlert} from 'lucide-react';
 import {successFetch} from '@/lib/school-success/client';
 
 const labels={active:['PIN created','green'],default:['Using starting PIN','amber'],locked:['Locked (wrong PINs)','red']};
 // Teacher PIN administration: status per teacher, reset ("forgot PIN"), and the school's starting PIN.
-export default function TeacherPinAdmin({schools}){
- const [school,setSchool]=useState(''),[data,setData]=useState(null),[busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[pin,setPin]=useState('');
+export default function TeacherPinAdmin({schools,initialSchool='',open=false}){
+ const [school,setSchool]=useState(initialSchool),[data,setData]=useState(null),[busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[pin,setPin]=useState('');
  async function call(body){
   const res=await successFetch('/api/school-success/teacher-pins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const out=await res.json().catch(()=>({}));if(!res.ok)throw Error(out.error||'Please try again.');return out;
@@ -23,7 +23,9 @@ export default function TeacherPinAdmin({schools}){
   try{await call({action:'setDefault',school,pin});setNotice('Starting PIN updated for '+school+'. Teachers who already created their own PIN are not affected.');setPin('');await load();}catch(e){setError(e.message);}finally{setBusy('');}
  }
  const counts=data?Object.fromEntries(['active','default','locked'].map(k=>[k,data.teachers.filter(r=>r.status===k).length])):null;
- return <details className="card pin-admin">
+ // Opened from the school leader dashboard: already expanded on their school.
+ useEffect(()=>{if(initialSchool)void load(initialSchool);},[]);
+ return <details className="card pin-admin" open={open||undefined}>
   <summary><KeyRound size={16}/> Teacher PINs</summary>
   <p className="hint">Teachers open the school link, choose their name and enter their PIN. The first time, they use the school’s starting PIN (123456 unless you set another) and then create their own. If a teacher forgets their PIN, reset it here.</p>
   <div className="pin-admin-bar"><label className="field"><span>School</span><select value={school} onChange={e=>{setSchool(e.target.value);setData(null);setNotice('');void load(e.target.value);}}><option value="">Select school</option>{schools.map(s=><option key={s}>{s}</option>)}</select></label>{school&&<button type="button" className="button" disabled={!!busy} onClick={()=>load()}><RefreshCw size={14}/>Refresh</button>}</div>

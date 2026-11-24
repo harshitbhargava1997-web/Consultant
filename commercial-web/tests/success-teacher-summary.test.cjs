@@ -30,6 +30,8 @@ function harness(t,{actor={role:'teacher',school:S,name:T,email:EMAIL}}={}){
  const legacy=[{record_id:3,school:S,feedback:'Clear modelling of place value.',updated_at:shift(-1)+'T05:00:00+00:00'},{record_id:5,school:S,feedback:'For another teacher',updated_at:shift(-1)+'T05:00:00+00:00'}];
  const rubric=[{id:'lesson-review-1-'+crypto.randomUUID(),school:S,kind:'lesson-review',payload:JSON.stringify({planning:{level:'B',note:'Match the activity to the outcome.'}}),updated:shift(0)+'T04:00:00Z'}];
  const calls=[],state={actor};
+ const {noteId}=load('lib/school-success/feedback-notes.js',{});
+ const legacyKey='legacy:'+legacy[0].updated_at,notes=[{id:noteId('3',legacyKey),school:S,payload:JSON.stringify({recordId:'3',key:legacyKey,teacher:T,notedAt:shift(0)+'T06:00:00Z'}),updated:shift(0)+'T06:00:00Z'}];
  const original=global.fetch;t.after(()=>{global.fetch=original;});
  global.fetch=async rawUrl=>{
   const u=new URL(String(rawUrl).replace(/^undefined/,'https://fixture.invalid')),q=u.searchParams;let result;
@@ -43,6 +45,9 @@ function harness(t,{actor={role:'teacher',school:S,name:T,email:EMAIL}}={}){
   }else if(u.pathname.endsWith('/portal_evidence_reviews')){
    assert.equal(q.get('school'),'eq.'+S);
    result=legacy; // deliberately unfiltered: the gateway and route must keep only the teacher's own records
+  }else if(u.pathname.endsWith('/success_entries')&&q.get('kind')==='eq.feedback-noted'){
+   assert.equal(q.get('school'),'eq.'+S);
+   result=notes; // the teacher's "Noted" on the legacy feedback for record 3
   }else if(u.pathname.endsWith('/success_entries')){
    assert.equal(q.get('school'),'eq.'+S);assert.equal(q.get('kind'),'eq.lesson-review');
    const ids=[...q.get('or').matchAll(/id\.like\.lesson-review-(\d+)-\*/g)].map(m=>m[1]);
@@ -79,6 +84,8 @@ test('feedback received lists reviews on the teacher’s own lessons only, newes
  assert.deepEqual(body.feedback.map(f=>f.text),['Planning · B (Developing)\nMatch the activity to the outcome.','Clear modelling of place value.']);
  assert.ok(!JSON.stringify(body).includes('For another teacher'),'a review on another teacher’s record never reaches this teacher');
  assert.equal(body.feedback[1].subject,'Mathematics');assert.equal(body.feedback[0].lessonId,sub(1));
+ assert.equal(body.feedback[1].notedAt,shift(0)+'T06:00:00Z','the teacher’s Noted comes back with the feedback');assert.equal(body.feedback[0].notedAt,'','not noted yet');
+ assert.equal(body.feedback[1].key,'legacy:'+shift(-1)+'T05:00:00+00:00');assert.match(body.feedback[0].key,/^lesson-review-1-/);
 });
 
 test('a signed-in teacher cannot widen the summary to another teacher or school',async t=>{

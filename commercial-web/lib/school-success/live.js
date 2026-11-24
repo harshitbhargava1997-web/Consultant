@@ -1,6 +1,7 @@
 import { actor, assertSchool } from './server';
 import {hasLessonRecord,LEGACY_MEDIA_BASES} from './live-mapping.js';
 import {readRubricRows,appendRubric} from './lesson-review-store.js';
+import {readNotes,appendNote,feedbackKey} from './feedback-notes.js';
 import {lessonRecordId} from './lesson-reviews.js';
 import { service, checked } from './database';
 import { prepareUsageImport } from './usage-import.js';
@@ -66,8 +67,9 @@ async function rawGateway(req) {
              teacher?{contacts:{}}:storage('school_crm_data.json'),teacher?[]:storage('school_call_logs_store.json'),
              teacher?[]:all('portal_school_plans','school',scope),teacher?[]:all('portal_tickets','created_at.desc',scope)
             ]);
-            const rubricRows=teacher?[]:await readRubricRows(records.filter(hasLessonRecord).map(r=>r.id),scope,all);
-            return json({ records, roster, contacts, calls, visits, reviews:reviews.concat(rubricRows), legacyContacts, legacyCalls, calendars, tickets });
+            const lessonIds=records.filter(hasLessonRecord).map(r=>r.id);
+            const [rubricRows,notes]=teacher?[[],[]]:await Promise.all([readRubricRows(lessonIds,scope,all),readNotes(lessonIds,scope,all)]);
+            return json({ records, roster, contacts, calls, visits, reviews:reviews.concat(rubricRows), notes, legacyContacts, legacyCalls, calendars, tickets });
         }
         if (b.action === 'evidenceStatus') {
             if (!/^[a-f0-9-]{36}$/i.test(b.id) || !b.actor || !b.school || !b.teacher)
@@ -94,16 +96,18 @@ async function rawGateway(req) {
                 throw Error('Invalid lesson summary request');
             const q = new URLSearchParams({ select: 'id,submission_id,Center,FullName,Uploaded_By,planned_lesson_on,lesson_stage,lesson_period_id,Grade,Section,Subject,Book,evidence_submitted_at', Center: 'eq.' + b.school, FullName: 'eq.' + b.teacher, Uploaded_By: 'eq.' + b.actor, and: '(planned_lesson_on.gte.' + b.from + ',planned_lesson_on.lte.' + b.to + ')', lesson_stage: 'not.is.null', order: 'planned_lesson_on.desc,id', limit: '1000' });
             const rows = (await request('/rest/v1/teacher_records?' + q)).filter(r => r.Center === b.school && r.FullName === b.teacher && r.Uploaded_By === b.actor && r.lesson_stage && r.submission_id && r.planned_lesson_on >= b.from && r.planned_lesson_on <= b.to);
-            const ids = rows.map(r => String(r.id)).filter(id => lessonRecordId.safeParse(id).success), scope = { school: 'eq.' + b.school }, reviews = [];
+            const ids = rows.map(r => String(r.id)).filter(id => lessonRecordId.safeParse(id).success), scope = { school: 'eq.' + b.school }, reviews = [], notes = [];
             for (let i = 0; i < ids.length; i += 200) {
                 const batch = ids.slice(i, i + 200);
-                const [legacy, rubrics] = await Promise.all([
+                const [legacy, rubrics, noted] = await Promise.all([
                     request('/rest/v1/portal_evidence_reviews?' + new URLSearchParams({ ...scope, record_id: 'in.(' + batch.join(',') + ')', select: 'record_id,school,feedback,updated_at' })),
-                    readRubricRows(batch, scope, all)
+                    readRubricRows(batch, scope, all),
+                    readNotes(batch, scope, all)
                 ]);
                 reviews.push(...[...legacy, ...rubrics].filter(r => batch.includes(String(r.record_id)) && r.feedback));
+                notes.push(...noted);
             }
-            return json({ rows, reviews });
+            return json({ rows, reviews, notes });
         }
         if (b.action === 'readLesson') {
             if (!/^[a-f0-9-]{36}$/i.test(b.id) || !b.actor || !b.school || !b.teacher)
@@ -119,11 +123,29 @@ async function rawGateway(req) {
             const a=await actor();
             if (a.role!=='admin') throw Error('School Success staff access required');
             const scope=readScope(a);
-            const [legacy,rubrics]=await Promise.all([
+            const [legacy,rubrics,notes]=await Promise.all([
                 request('/rest/v1/portal_evidence_reviews?'+new URLSearchParams({...scope,record_id:'in.('+b.ids.join(',')+')',select:'record_id,school,feedback,updated_at'})),
-                readRubricRows(b.ids,scope,all)
+                readRubricRows(b.ids,scope,all),
+                readNotes(b.ids,scope,all)
             ]);
-            return json({rows:[...legacy,...rubrics]});
+            return json({rows:[...legacy,...rubrics],notes});
+        }
+        if (b.action === 'noteFeedback') {
+            // A teacher marks one piece of feedback on their own lesson as read. The lesson record must be theirs
+            // (school, teacher and submitting account) and the feedback must exist on it.
+            if (!lessonRecordId.safeParse(String(b.recordId)).success || typeof b.key !== 'string' || !b.key || b.key.length > 200 || !b.actor || !b.school || !b.teacher)
+                throw Error('Invalid feedback');
+            const [row] = await request('/rest/v1/teacher_records?' + new URLSearchParams({ id: 'eq.' + b.recordId, select: 'id,Center,FullName,Uploaded_By,lesson_stage' }));
+            if (!row || row.Center !== b.school || row.FullName !== b.teacher || row.Uploaded_By !== b.actor || !row.lesson_stage)
+                return json({ error: '403:Feedback not found' }, 403);
+            const scope = { school: 'eq.' + b.school };
+            const [legacy, rubrics] = await Promise.all([
+                request('/rest/v1/portal_evidence_reviews?' + new URLSearchParams({ ...scope, record_id: 'eq.' + b.recordId, select: 'record_id,school,feedback,updated_at' })),
+                readRubricRows([b.recordId], scope, all)
+            ]);
+            if (![...legacy, ...rubrics].some(r => String(r.record_id) === String(b.recordId) && r.feedback && feedbackKey(r) === b.key))
+                return json({ error: 'This feedback has changed. Refresh to see the latest.' }, 409);
+            return json(await appendNote({ recordId: String(b.recordId), school: b.school, teacher: b.teacher, key: b.key, owner: b.actor }, request));
         }
         if (b.action === 'savePreparation') {
             if (!Array.isArray(b.rows) || !b.rows.length || b.rows.length > 10 || !b.actor)
@@ -263,6 +285,9 @@ export async function gateway(body) {
             assertSchool(a, school);
         if (a.role !== 'admin' && ['importUsage', 'contact', 'call', 'ticket', 'observation', 'review'].includes(body.action))
             throw Error('403:Administrative access required');
+        // Only the teacher can say they have read their feedback.
+        if (body.action === 'noteFeedback' && (a.role !== 'school-teacher' || body.school !== a.school || body.teacher !== a.name || body.actor !== a.email))
+            throw Error('403:Only the teacher can mark their feedback as noted');
         if (body.action === 'importUsage' && a.allowedSchools) {
             for (const row of body.rows) {
                 const source = row.Center || row.Institution || row.school;

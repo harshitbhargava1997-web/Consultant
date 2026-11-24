@@ -14,8 +14,8 @@ export async function POST(req) {
    const row=await reviewerLesson(input.recordId,a);
    const headers={'Cache-Control':'no-store'};
    if(input.action==='save')return Response.json(await saveLessonRubric(row,a,input),{headers});
-   const {rows:reviews}=await gateway({action:'readLessonReviews',ids:[input.recordId]});
-   const {entries}=await mapLive({records:[row],reviews},publicBase());
+   const {rows:reviews,notes}=await gateway({action:'readLessonReviews',ids:[input.recordId]});
+   const {entries}=await mapLive({records:[row],reviews,notes},publicBase());
    const [lesson]=buildLessonRecords(entries,'0001-01-01','9999-12-31',{scope:'all'});
    if(!lesson)throw Error('This lesson has no reviewable record.');
    return Response.json({lesson},{headers});
