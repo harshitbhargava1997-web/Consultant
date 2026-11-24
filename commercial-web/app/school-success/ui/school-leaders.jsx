@@ -34,7 +34,7 @@ export default function SchoolLeaders({schools,initialSchool=''}){
  useEffect(()=>{if(initialSchool)void load(initialSchool);},[]);
  const set=k=>e=>setForm(f=>({...f,[k]:e.target.value}));
  return <section className="card leaders-admin">
-  <div className="card-head"><div><h2><ShieldCheck size={18}/> School leaders</h2><p>Principals, coordinators and school management sign in with their mobile number and see only their school: School 360°, Teacher 360°, lesson reviews and classroom visits.</p></div></div>
+  <div className="card-head"><div><h2><ShieldCheck size={18}/> School leaders</h2><p>Principals, coordinators and school management sign in at schoolsuccess.in/school-success with their mobile number and see only their school’s review dashboard: lesson plans, evidence to review, feedback and teacher PINs.</p></div></div>
   <label className="field"><span>School</span><select value={school} onChange={e=>{setSchool(e.target.value);setNotice('');void load(e.target.value);}}><option value="">Select school</option>{schools.map(s=><option key={s}>{s}</option>)}</select></label>
   {error&&<p className="lp-error" role="alert"><CircleAlert size={16}/>{error}</p>}
   {notice&&<div className="alert success" role="status">{notice}</div>}

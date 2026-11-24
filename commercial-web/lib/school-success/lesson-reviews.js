@@ -16,6 +16,18 @@ export const reviewRequest = z.discriminatedUnion('action',[
  z.object({action:z.literal('save'),recordId:lessonRecordId,requestId:z.string().uuid(),review:rubricReview}).strict()
 ]);
 
+// Who gave a review, for display: "Meera Rao, Principal". Reviews saved before names were recorded only carry the
+// reviewer's sign-in: mobile-number sign-ins are school leaders, others the School Success team.
+export function reviewerLabel(by){
+ if(!by)return '';
+ if(by.name)return by.name+(by.role?', '+by.role:'');
+ return by.role||'';
+}
+export function reviewerFromSignIn(signIn){
+ const s=String(signIn||'');if(!s)return null;
+ return {name:'',role:/@mobile\.schoolsuccess\.in$/i.test(s)?'School leader':'School Success team'};
+}
+export function reviewerRole(a){return a?.isSuperAdmin?'Super Admin':a?.leader?(a.title||'School leader'):'Consultant';}
 export function reviewText(review) {
  return Object.entries(reviewCriteria).filter(([key])=>review[key]).map(([key,criterion])=>{
   const {level,note}=review[key];
@@ -29,4 +41,8 @@ export function feedbackText(history) {
   const stamp=Date.parse(date);
   return (Number.isFinite(stamp)?dateLabel.format(stamp)+'\n':'')+text;
  }).join('\n\n');
+}
+// The same text with "— Name, Role" after each review whose reviewer is known.
+export function feedbackTextWithReviewer(history) {
+ return feedbackText(history.map(h=>{const who=reviewerLabel(h.by);return who?{...h,text:h.text+'\n— '+who}:h;}));
 }

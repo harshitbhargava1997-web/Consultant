@@ -2,7 +2,7 @@ import { actor, assertSchool } from './server';
 import {hasLessonRecord,LEGACY_MEDIA_BASES} from './live-mapping.js';
 import {readRubricRows,appendRubric} from './lesson-review-store.js';
 import {readNotes,appendNote,feedbackKey} from './feedback-notes.js';
-import {lessonRecordId} from './lesson-reviews.js';
+import {lessonRecordId,reviewerRole} from './lesson-reviews.js';
 import { service, checked } from './database';
 import { prepareUsageImport } from './usage-import.js';
 import {readScope,recordQuery,readAllPages} from './read-query.js';
@@ -27,7 +27,7 @@ export async function reviewerLesson(id,a) {
     return row;
 }
 export async function saveLessonRubric(row,a,input) {
-    return appendRubric({recordId:String(row.id),school:row.Center || row.Institution,reviewer:a.email,requestId:input.requestId,review:input.review},request);
+    return appendRubric({recordId:String(row.id),school:row.Center || row.Institution,reviewer:a.email,reviewerName:String(a.name||'').slice(0,160),reviewerRole:reviewerRole(a),requestId:input.requestId,review:input.review},request);
 }
 // Re-read just the selected lessons when issuing file access. Older clients omit the row IDs.
 export async function reportLessonRows({school, from, to}, recordIds) {
@@ -100,7 +100,7 @@ async function rawGateway(req) {
             for (let i = 0; i < ids.length; i += 200) {
                 const batch = ids.slice(i, i + 200);
                 const [legacy, rubrics, noted] = await Promise.all([
-                    request('/rest/v1/portal_evidence_reviews?' + new URLSearchParams({ ...scope, record_id: 'in.(' + batch.join(',') + ')', select: 'record_id,school,feedback,updated_at' })),
+                    request('/rest/v1/portal_evidence_reviews?' + new URLSearchParams({ ...scope, record_id: 'in.(' + batch.join(',') + ')', select: 'record_id,school,feedback,updated_at,reviewer' })),
                     readRubricRows(batch, scope, all),
                     readNotes(batch, scope, all)
                 ]);
@@ -124,7 +124,7 @@ async function rawGateway(req) {
             if (a.role!=='admin') throw Error('School Success staff access required');
             const scope=readScope(a);
             const [legacy,rubrics,notes]=await Promise.all([
-                request('/rest/v1/portal_evidence_reviews?'+new URLSearchParams({...scope,record_id:'in.('+b.ids.join(',')+')',select:'record_id,school,feedback,updated_at'})),
+                request('/rest/v1/portal_evidence_reviews?'+new URLSearchParams({...scope,record_id:'in.('+b.ids.join(',')+')',select:'record_id,school,feedback,updated_at,reviewer'})),
                 readRubricRows(b.ids,scope,all),
                 readNotes(b.ids,scope,all)
             ]);

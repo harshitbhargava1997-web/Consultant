@@ -384,3 +384,8 @@
 .success-app .ss-link{color:var(--muted);font-weight:700;font-size:13px;justify-self:center}
 .success-app .ss-note{margin:0;color:var(--muted);font-size:12.5px;text-align:center}
 .success-app .ss-error{display:flex;gap:8px;align-items:flex-start;background:#fbeceb;color:#a33a2c;border-radius:12px;padding:10px 12px;margin:0;font-size:13px}
+/* User management tabs */
+.success-app .um-tabs{display:flex;gap:6px;background:#e9efeb;border-radius:14px;padding:4px;margin:0 0 16px;width:max-content;max-width:100%;overflow-x:auto}
+.success-app .um-tab{padding:9px 16px;border-radius:11px;font-weight:700;font-size:13.5px;color:var(--muted);white-space:nowrap}
+.success-app .um-tab.on{background:#fff;color:var(--ink);box-shadow:0 2px 8px #1f3a2f14}
+.success-app .ts-by{margin:2px 0 0;font-size:12px;font-weight:700;color:var(--green)}
