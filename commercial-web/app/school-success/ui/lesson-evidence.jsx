@@ -6,6 +6,7 @@ import {parseClosureText,isReflectionTextUrl} from '@/lib/school-success/reflect
 import {isGeneratedPreparationPdf} from '@/lib/school-success/lesson-records';
 import {successFetch} from '@/lib/school-success/client';
 import {mapLimited} from '@/lib/school-success/parallel';
+import {shrinkPhoto} from '@/lib/school-success/shrink-photo';
 import {requestJson} from '@/lib/school-success/request-json';
 import {transferWrittenReflections} from '@/lib/school-success/storage-upload';
 import { useEffect, useRef, useState } from 'react';
@@ -74,6 +75,10 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
     const [lesson, setLesson] = useState(null), [pending, setPending] = useState({}), [category, setCategory] = useState({}), [conductedOn, setConductedOn] = useState(''), [updateId, setUpdateId] = useState(() => crypto.randomUUID()), [busy, setBusy] = useState(''), [error, setError] = useState(''), [receipt, setReceipt] = useState(null), [shared, setShared] = useState(null);
     const [reflections, setReflections] = useState({});
     const uploadedFiles = useRef(new Set());
+    // Large photos are resized as soon as they are chosen (see shrink-photo.js), so the upload is smaller and the
+    // resizing happens while the teacher is still writing. Keyed by the chosen file's ID; a retry reuses the same result.
+    const shrunk = useRef(new Map());
+    const uploadable = item => { if (!shrunk.current.has(item.id)) shrunk.current.set(item.id, shrinkPhoto(item.file)); return shrunk.current.get(item.id); };
     async function request(body) {
         try {
             return await requestJson(() => successFetch('/api/school-success/evidence', {method: 'POST', headers: {'Content-Type': 'application/json', ...headers()}, body: JSON.stringify(body)}));
@@ -123,14 +128,19 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
     }
     function addFiles(periodId, list) {
         const selected = Array.from(list || []);
-        if (selected.length) setPending(prev => ({ ...prev, [periodId]: [...prev[periodId] || [], ...selected.map(file => ({ id: crypto.randomUUID(), category: category[periodId] || 'activity', file }))] }));
+        if (!selected.length) return;
+        const items = selected.map(file => ({ id: crypto.randomUUID(), category: category[periodId] || 'activity', file }));
+        items.forEach(uploadable);
+        setPending(prev => ({ ...prev, [periodId]: [...prev[periodId] || [], ...items] }));
     }
     const dayOption = l => { const first = l.periods?.[0] || {}; return (dayLabel(l.plannedOn, language) || l.plannedOn) + ' · ' + [[first.grade, first.section && first.section !== 'Not Applicable' ? first.section : ''].filter(Boolean).join(' '), first.subject].filter(Boolean).join(' · ') + ((l.periods?.length || 0) > 1 ? ' +' + (l.periods.length - 1) : '') + (l.evidence ? ' · ✓ ' + t('evidence added','प्रमाण जमा') : ''); };
     // On any failure the typed reflections and chosen files stay on screen with the same update ID, so a retry
     // resubmits the same update and cannot create a duplicate.
     async function save(e) { e.preventDefault(); if (!lesson || busy)
         return; setError(''); setBusy('Checking classroom update'); try {
-        const all = Object.entries(pending).flatMap(([periodId,items])=>items.map(f=>({...f,periodId})));
+        const chosen = Object.entries(pending).flatMap(([periodId,items])=>items.map(f=>({...f,periodId})));
+        if (chosen.length) setBusy('Preparing photos');
+        const all = await Promise.all(chosen.map(async f => ({ ...f, file: await uploadable(f) })));
         // Written reflections are sent as text; the server saves them as dated, lesson-linked records.
         const written = lesson.submission.periods.filter(p => reflections[p.id]?.trim()).map(p => ({ periodId: p.id, answers: parseClosureText(reflections[p.id]) })).filter(r => r.answers.achievement || r.answers.nextStep);
         if (Object.values(reflections).some(value=>/_{2,}/.test(value))) throw Error(t('Complete the blanks in your written reflection.','चिंतन के खाली स्थान पूरे करें।'));
@@ -165,7 +175,7 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
         setShared({ receipt: result, byType, reflections: written.length, plannedOn: lesson.submission.date, token, rest: rest >= 0 ? { index: rest, label: periodLabel(periods[rest], rest, language), topic: periods[rest].topic || '' } : null, periods: periods.filter(p => all.some(f => f.periodId === p.id) || written.some(r => r.periodId === p.id)).map(p => periodLabel(p, periods.indexOf(p), language)) });
         // A receipt closes this draft even if refreshing the saved lesson fails. Reopening starts a new update.
         setLesson(null);
-        setPending({}); setReflections({}); uploadedFiles.current.clear();
+        setPending({}); setReflections({}); uploadedFiles.current.clear(); shrunk.current.clear();
         setUpdateId(crypto.randomUUID());
         setBusy('');
         void Promise.resolve().then(onSaved).catch(() => setError('Your evidence was saved. Refresh the workspace to see the updated report.'));

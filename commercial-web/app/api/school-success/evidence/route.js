@@ -13,13 +13,19 @@ import {reflectionUploadTicket, storeReflectionDocuments} from '@/lib/school-suc
 import { submissionSchema } from '@/lib/school-success/teacher-submissions';
 import {presignUpload} from '@/lib/school-success/r2-upload';
 import {mapLimited} from '@/lib/school-success/parallel';
-async function handlerPOST(req) {
+async function handlerPOST(req, timing = {}) {
     try {
         checkOrigin(req);
-        const a = await actor(req);
+        // Sign-in check and storage settings are read at the same time; the sign-in result is always checked first.
+        const [signedIn, storageConfig] = await Promise.allSettled([actor(req), loadR2Config(env, database())]);
+        if (signedIn.status === 'rejected') throw signedIn.reason;
+        const a = signedIn.value;
+        timing.authMs = Math.round(performance.now() - timing.start);
         // Lesson plans and evidence are submitted by teachers (or consultants on their behalf), not by school leaders.
         assertConsultant(a);
-        const config = await loadR2Config(env, database()), body = await req.json();
+        if (storageConfig.status === 'rejected') throw storageConfig.reason;
+        const config = storageConfig.value, body = await req.json();
+        timing.action = typeof body?.action === 'string' ? body.action.slice(0, 40) : '';
         const signer = config.SUPABASE_GATEWAY_TOKEN;
         async function resumeGrant(token) { const grant = await unseal(token, signer); assertResumeAccess(grant, a); return grant; }
         async function resumeReceipt(submission, result) { return { ...result, resumeToken: await seal({ kind: 'lesson-resume', id: submission.id, school: submission.school, teacher: submission.teacher, email: a.email, exp: Date.now() + 365 * 86400000 }, signer) }; }
@@ -220,5 +226,12 @@ async function handlerPOST(req) {
 }
 
 
-export async function POST(req){return withRequest(req,()=>handlerPOST(req));}
+// One timing line per request for speed checks: the action name, status and milliseconds only (no teacher,
+// school, lesson or file details).
+export async function POST(req){
+ const timing={start:performance.now()};
+ const res=await withRequest(req,()=>handlerPOST(req,timing));
+ console.info('school-success timing '+JSON.stringify({route:'evidence',action:timing.action||'',status:res.status,authMs:timing.authMs??null,totalMs:Math.round(performance.now()-timing.start)}));
+ return res;
+}
 
