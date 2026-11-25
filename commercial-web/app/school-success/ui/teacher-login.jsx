@@ -2,9 +2,10 @@
 import {useState,useRef} from 'react';
 import {Search,ArrowLeft,LockKeyhole,KeyRound,ShieldCheck,CircleAlert,ChevronRight} from 'lucide-react';
 import {saveTeacherSession} from '@/lib/school-success/teacher-session';
+import {linkParams} from '@/lib/school-success/link-params';
 
 async function pinRequest(body,headers={}){
- const access=new URLSearchParams(location.search).get('access')||'';
+ const access=linkParams().get('access')||'';
  const res=await fetch('/api/school-success/teacher-pin',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','X-School-Link':access,...headers},body:JSON.stringify(body)});
  let data={};try{data=await res.json();}catch{}
  if(!res.ok)throw Object.assign(Error(data.error||'Please try again.'),{status:res.status});

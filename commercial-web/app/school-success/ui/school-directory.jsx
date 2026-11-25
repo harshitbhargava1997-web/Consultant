@@ -22,7 +22,7 @@ export default function SchoolDirectory({ data, school, query, onChanged, onCRM,
     } }
     async function share(s) { setBusy(s); setError(''); try {
         const result = await post({ action: 'schoolLink', school: s });
-        setLinks(prev => ({ ...prev, [s]: result.url }));
+        setLinks(prev => ({ ...prev, [s]: result.shortUrl || result.url }));
         setNotice('School link ready. Select and copy it below.');
     }
     catch (e) {

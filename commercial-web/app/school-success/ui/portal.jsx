@@ -2,6 +2,7 @@
 import {requestJson} from '@/lib/school-success/request-json';
 import {successFetch} from '@/lib/school-success/client';
 import {teacherSession,clearTeacherSession} from '@/lib/school-success/teacher-session';
+import {linkParams,setShortLink} from '@/lib/school-success/link-params';
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 const SuccessSignIn=dynamic(()=>import('./success-sign-in'),{loading:()=> <main className="ss-auth"><p>Opening sign-in…</p></main>});
@@ -35,7 +36,9 @@ function download(name, data, type = 'text/csv') { const url = URL.createObjectU
 function Field({ label, children }) { return <label className="field"><span>{label}</span>{children}</label>; }
 function Empty({ title, detail }) { return <div className="empty"><div className="empty-icon"><FolderOpen size={25}/></div><h3>{title}</h3><p>{detail}</p></div>; }
 function Pill({ status }) { return <span className={'pill ' + (status === 'Successfully Resolved' ? 'green' : status === 'In Progress' ? 'blue' : 'amber')}>{status}</span>; }
-export default function Portal() {
+export default function Portal({ shortLink = null } = {}) {
+    // A short school link (schoolsuccess.in/sunrise-4821) passes the school link behind it.
+    setShortLink(shortLink);
     const [reviewId,setReviewId]=useState('');
     const openReview=row=>setReviewId(String(row.recordId || row.id));
     const [crmRecord, setCrmRecord] = useState(null), [docLink, setDocLink] = useState(null), [signInHref, setSignInHref] = useState('/');
@@ -46,7 +49,7 @@ export default function Portal() {
     const [school360View,setSchool360View]=useState({level:'portfolio',school:'',teacherKey:'',includeArchived:false,status:'all',sort:'name',tab:'teachers',evidenceTeacher:'',category:'all',review:'all',order:'oldest',evidencePage:1});
     const [data, setData] = useState(null), [page, setPage] = useState('Overview'), [school, setSchool] = useState(''), [query, setQuery] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [modal, setModal] = useState(''), [form, setForm] = useState({}), [mobile, setMobile] = useState(false), [from, setFrom] = useState(today().slice(0, 8) + '01'), [to, setTo] = useState(today()), [statusFilter, setStatusFilter] = useState('Active'), [entity, setEntity] = useState('Principal'), [draft, setDraft] = useState(''), [importType, setImportType] = useState('usage'), [importRows, setImportRows] = useState(null), [importName, setImportName] = useState(''), [files, setFiles] = useState([]), [category, setCategory] = useState('Activity'), [teacherFilter, setTeacherFilter] = useState(''), [targets, setTargets] = useState([10, 30, 10, 10]), [holidays, setHolidays] = useState(''), [schoolLinks, setSchoolLinks] = useState({});
     async function refresh(period) {
-        const params = new URLSearchParams(location.search);
+        const params = linkParams();
         // School links send the teacher only through the PIN session header (see successFetch).
         const query = new URLSearchParams({...period || {from, to}, ...Object.fromEntries([...params].filter(([key]) => key === 'access' || (key === 'teacher' && !params.has('access'))))});
         if (params.has('access')) query.set('view', 'teacher');
@@ -59,7 +62,7 @@ export default function Portal() {
     }
     useEffect(() => {
         // A Teacher 360° "Open lesson documentation" link: load exactly its period through the authorised read.
-        const params = new URLSearchParams(location.search), docView = params.get('view') === LESSON_DOCS_VIEW, link = docView ? parseLessonDocumentationLink(location.search) : null;
+        const params = linkParams(), docView = params.get('view') === LESSON_DOCS_VIEW, link = docView ? parseLessonDocumentationLink(location.search) : null;
         if (docView) { setDocLink({ link }); setSignInHref('/?next=' + encodeURIComponent(location.pathname + location.search)); if (link) { setFrom(link.from); setTo(link.to); } }
         refresh(link ? { from: link.from, to: link.to } : undefined).then(() => { if (docView) setPage('Lesson documentation'); }).catch(e => {
             // Staff (principals, coordinators, school management, consultants) sign in here, in School Success.

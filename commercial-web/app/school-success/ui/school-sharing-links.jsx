@@ -8,7 +8,7 @@ export default function SchoolSharingLinks({ schools }) {
         const d = await r.json();
         if (!r.ok)
             throw Error(d.error || 'Could not prepare this school link');
-        setLinks(current => ({ ...current, [school]: d.url }));
+        setLinks(current => ({ ...current, [school]: d.shortUrl || d.url }));
         setNotice('Link ready for ' + school + '. Copy it below and share it with school management.');
     }
     catch (e) {
