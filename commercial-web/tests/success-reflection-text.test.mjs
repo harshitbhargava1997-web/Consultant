@@ -153,7 +153,7 @@ test('written reflections show as dated text within the period; history and lega
 test('lesson PDFs print written reflections inline (Hindi via canvas) and keep legacy links',async()=>{
  const {entries,legacy}=await lessonEntries(),lesson=buildLessonRecords(entries,'2026-10-20','2026-10-31')[0],r=raster();
  const doc=createLessonDocumentationPdf({kind:'teacher',lessons:[lesson],from:'2026-10-20',to:'2026-10-31',raster:r}),text=pdfText(doc);
- assert.match(text,/TEACHER REFLECTIONS/);assert.match(text,/Written reflection/);
+ assert.match(text,/AFTER-CLASS REFLECTIONS/);assert.match(text,/Written reflection/);
  assert.match(text,/Did students achieve the learning outcome/);
  assert.ok(r.calls.some(t=>t.includes('बच्चों ने मात्रा पहचानी')),'Hindi answer drawn through the canvas');
  assert.ok(r.calls.some(t=>t.includes('Ravi needs support')),'mixed-script answer drawn through the canvas');

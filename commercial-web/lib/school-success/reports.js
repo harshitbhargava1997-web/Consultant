@@ -1,6 +1,7 @@
 import {isClosureFile,isRemedialFile} from '../report-sequence.js';
 import { z } from 'zod';
 import {chronologicalRows} from '../report-sequence.js';
+import {evidenceFiles,evidenceKey} from './lesson-plan-items.js';
 import {formatReportDuration as duration} from './report-units.js';
 export const moduleNames = ['Lesson Plan', 'Content / Book', 'Additional Materials', 'E-book'];
 export const moduleLabels = ['Lesson preparation', 'Book usage', 'Additional Materials', 'E-books'];
@@ -31,14 +32,15 @@ export function buildProfiles(entries, roster, from, to, settings, calendars = {
         const holidays = [...settings.holidays, ...(settings.useSchoolCalendars ? (calendars[t.school] || []) : [])], days = eligibleDays(from, to, holidays, settings.excludeSundays);
         const metrics = moduleNames.map((module, i) => { const logs = usage.filter(r => r.module === module), actual = logs.reduce((s, r) => s + Number(r.minutes || 0), 0), target = settings.quantitative ? settings.daily[i] * days : 0; return { module, label: moduleLabels[i], actual, target, average: days ? actual / days : 0, percent: target > 0 ? actual / target * 100 : null, status: metricStatus(actual, target, settings.quantitative, days), logs }; });
         const byColumn = new Map(), closureMap = new Map(), remedialMap = new Map();
+        // Saved lesson plans count from the lesson records (one per plan), not from files: see lesson-plan-items.js.
         for (const r of submissions)
-            for (const f of r.files || []) {
+            for (const f of evidenceFiles(r)) {
                 const evidenceFile = { ...f, date:r.date, grade:r.grade, section:r.section || '', subject:r.subject, topic:r.topic };
                 if(isRemedialFile(f)){remedialMap.set(f.url,evidenceFile);continue;}
                 if(isClosureFile(f)){closureMap.set(f.url,evidenceFile);continue;}
                 const column = f.column || String(f.key).split(':')[0];
                 if (!byColumn.has(column)) byColumn.set(column, new Map());
-                if (f.url) byColumn.get(column).set(f.url, { ...evidenceFile, column });
+                if (f.url || f.lessonPlan) byColumn.get(column).set(evidenceKey(f), { ...evidenceFile, column });
             }
         const unique = (cols) => [...new Map(cols.flatMap(c => [...(byColumn.get(c) || new Map()).entries()])).values()];
         const groups = [unique(['Lesson_Plan_Picture']), unique(['Video_Evidence_1', 'Video_Evidence_2', 'Video_Evidence_3']), unique(['Writing_Sample_Link']), [...remedialMap.values()], [...closureMap.values()], unique(['Portfolio_Evidence_Link'])];

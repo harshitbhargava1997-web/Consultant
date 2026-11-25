@@ -8,7 +8,8 @@ test('portfolio PDF includes every school and quantitative totals without eviden
 });
 test('school PDF adds ordered evidence links and independent selected observations',()=>{
  const data=school360Fixture(),model=buildSchoolPortfolio(data,from,to),options={schools:[model.schools[0]],settings:model.settings,from,to,detail:true,includeEvidence:true,rawObservations:data.entries};
- const text=extract(options),order=['Lesson preparation PDFs','Audio recordings','Classroom activities','Writing samples','Phonics evidence'];for(let i=1;i<order.length;i++)assert.ok(text.indexOf(order[i-1])<text.indexOf(order[i]),order[i]);
+ const text=extract(options),order=['Lesson plans','Classroom activities','Student written work'];for(let i=1;i<order.length;i++)assert.ok(text.indexOf(order[i-1])<text.indexOf(order[i]),order[i]);
+ assert.ok(!text.includes('Audio recordings')&&!text.includes('Phonics evidence'),'previous-portal items are not listed');
  assert.ok(!text.includes('Observation marker'));assert.ok(extract({...options,includeObservations:true}).includes('Observation marker'));assert.ok(!text.includes('Beta School'));
 });
 test('disabled report sections and benchmarks disappear from school PDF',()=>{
@@ -17,10 +18,10 @@ test('disabled report sections and benchmarks disappear from school PDF',()=>{
 });
 test('School 360 export choices independently exclude modules, counts and file categories without changing defaults',()=>{
  const data=school360Fixture(),model=buildSchoolPortfolio(data,from,to),before=JSON.stringify(model.settings);
- const options={modules:{book:false,additional:false,ebooks:false,lessonPlan:false},targets:false,counts:{preparations:false,classroomLessons:false,files:false,teachersWithFiles:false,pendingReview:false},categories:{preparation:false,audio:false,activity:false,writing:false,phonics:true}};
+ const options={modules:{book:false,additional:false,ebooks:false,lessonPlan:false},targets:false,counts:{preparations:false,classroomLessons:false,files:false,teachersWithFiles:false,pendingReview:false},categories:{preparation:false,activity:false,writing:true}};
  const settings=portfolioPdfSettings(model.settings,options),text=extract({schools:[model.schools[0]],settings,options,from,to,detail:true,includeEvidence:true});
- for(const absent of ['Book usage','Lesson preparation','Additional Materials','E-books','Prepared lessons','Classroom lessons with evidence','Unique files','Unique uploaded files','Audio recordings','Writing samples','Classroom activities','usage targets'])assert.ok(!text.includes(absent),absent);
- assert.ok(text.includes('Phonics evidence'));assert.equal(JSON.stringify(model.settings),before);
+ for(const absent of ['Book usage','Lesson preparation','Additional Materials','E-books','Prepared lessons','Classroom lessons with evidence','Unique files','Unique uploaded files','Audio recordings','Phonics evidence','Lesson plans','Classroom activities','usage targets'])assert.ok(!text.includes(absent),absent);
+ assert.ok(text.includes('Student written work'));assert.equal(JSON.stringify(model.settings),before);
 });
 test('period comparison keeps dates beneath periods, isolates current school scope and handles no previous usage',()=>{
  const model=buildSchoolPortfolio(school360Fixture(),from,to),comparison={schools:[],from:'2026-10-01',to:'2026-10-10'};

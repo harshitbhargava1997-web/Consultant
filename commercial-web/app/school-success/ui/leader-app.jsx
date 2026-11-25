@@ -22,7 +22,7 @@ export function rangeFor(filter,today,custom={}){
  let {from='',to=''}=custom;if(from&&to&&from>to)[from,to]=[to,from];return {from,to};
 }
 export const initials=name=>String(name||'').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase();
-const fileCount=l=>(l.activities?.length||0)+(l.writing?.length||0)+(l.additional?.length||0);
+const fileCount=l=>(l.activities?.length||0)+(l.writing?.length||0)+(l.remedial?.length||0)+(l.portfolio?.length||0);
 // Everything the dashboard shows, for the chosen teacher and subject, from lessons already limited to the dates.
 export function leaderView(lessons,roster,{teacher='',subject=''}={},allLessons=lessons){
  const keep=l=>(!teacher||l.teacher===teacher)&&(!subject||l.subject===subject);
@@ -41,7 +41,7 @@ export function leaderView(lessons,roster,{teacher='',subject=''}={},allLessons=
  };
 }
 function evidenceLine(l){
- const parts=[l.activities?.length?l.activities.length+(l.activities.length===1?' photo / video':' photos / videos'):'',l.writing?.length?l.writing.length+' written work':'',l.additional?.length?l.additional.length+' other':''].filter(Boolean);
+ const parts=[l.activities?.length?l.activities.length+(l.activities.length===1?' photo / video':' photos / videos'):'',l.writing?.length?l.writing.length+' written work':'',l.remedial?.length?l.remedial.length+' remedial':'',l.portfolio?.length?l.portfolio.length+' portfolio':''].filter(Boolean);
  return parts.join(' · ');
 }
 const classOf=l=>[[l.grade,l.section&&l.section!=='Not Applicable'?l.section:''].filter(Boolean).join(' '),l.subject].filter(Boolean).join(' · ');

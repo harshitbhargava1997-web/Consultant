@@ -30,27 +30,27 @@ test('teacher PDF: cover, chronological index and lessons in original submission
 
 test('individual lesson PDF keeps the approved section order and its own evidence only',async()=>{
  const {text,doc}=await make('lesson');
- const order=['Lesson plan','Learning objective','Classroom activities','Student written work','Audio recordings','Teacher reflections','Academic Review'].map(h=>text.indexOf(h.toUpperCase())>=0?text.indexOf(h.toUpperCase()):text.indexOf(h));
+ const order=['Lesson plan','Learning objective','Classroom activities','Student written work','After-class reflections','Academic Review'].map(h=>text.indexOf(h.toUpperCase())>=0?text.indexOf(h.toUpperCase()):text.indexOf(h));
  assert.ok(order.every(i=>i>=0),JSON.stringify(order));
  assert.deepEqual([...order].sort((a,b)=>a-b),order);
  assert.doesNotMatch(text,/CFU|Check for understanding/i);
  const links=uris(doc);
- assert.ok(links.some(u=>u.endsWith('v1.wav'))&&links.some(u=>u.endsWith('v2.wav')),'both recordings are clickable');
- assert.ok(!links.some(u=>u.endsWith('h1.wav')),'another lesson’s recording is not attached');
- assert.match(text,/Lesson preparation recording 1[\s\S]*Lesson preparation recording 2/);
+ // Preparation voice notes are previous-portal items: not shown or linked (owner decision, 25 November 2026).
+ assert.ok(!links.some(u=>/\/voice\//.test(u)),'no previous-portal voice notes');
+ assert.doesNotMatch(text,/Lesson preparation recording|AUDIO RECORDINGS/);
  assert.match(text,/Reviewed 27 Oct 2026/);assert.match(text,/Strong modelling/);
  assert.doesNotMatch(text,/consultant@example\.test/);
 });
 
 test('optional sections can be excluded without affecting the lesson plan core',async()=>{
- const off={...defaultLessonSections,activities:false,writing:false,audio:false,reflections:false,feedback:false};
+ const off={...defaultLessonSections,activities:false,writing:false,reflections:false,feedback:false};
  const {text,doc}=await make('lesson',{sections:off});
  assert.match(text,/LESSON PLAN/);assert.match(text,/Teacher activity/);
- for(const heading of ['CLASSROOM ACTIVITIES','STUDENT WRITTEN WORK','AUDIO RECORDINGS','TEACHER REFLECTIONS','Strong modelling'])assert.ok(!text.includes(heading),heading);
+ for(const heading of ['CLASSROOM ACTIVITIES','STUDENT WRITTEN WORK','AUDIO RECORDINGS','AFTER-CLASS REFLECTIONS','Strong modelling'])assert.ok(!text.includes(heading),heading);
  assert.deepEqual(uris(doc).filter(u=>/\.(wav|jpg|png)$/.test(u)),[]);
  assert.ok(uris(doc).some(u=>u.endsWith('plan.pdf')),'lesson plan document stays');
- const only=await make('lesson',{sections:{...off,audio:true}});
- assert.match(only.text,/AUDIO RECORDINGS/);assert.doesNotMatch(only.text,/CLASSROOM ACTIVITIES/);
+ const only=await make('lesson',{sections:{...off,writing:true}});
+ assert.match(only.text,/STUDENT WRITTEN WORK/);assert.doesNotMatch(only.text,/CLASSROOM ACTIVITIES/);
 });
 
 test('each file appears once, as a thumbnail when embedded or as a link otherwise',async()=>{
@@ -125,7 +125,7 @@ test('shareable copy omits thumbnails, every attachment link, reflection text an
  const withEvidence=list.find(l=>l.activities.length)||list[0];
  withEvidence.writtenReflections=[{label:'After-class reflection',date:'2026-10-22',answers:{achievement:'Riya Sharma read five words aloud.',nextStep:'Aman Verma needs support with blends.'}}];
  withEvidence.feedback={text:'Discuss Riya Sharma’s progress with her parents.',date:'2026-10-24'};
- const evidenceUrls=list.flatMap(l=>[...l.planFiles,...l.activities,...l.writing,...l.audio,...l.reflections,...l.additional].map(f=>f.url));
+ const evidenceUrls=list.flatMap(l=>[...l.planFiles,...l.activities,...l.writing,...(l.remedial||[]),...l.reflections,...(l.portfolio||[])].map(f=>f.url));
  assert.ok(evidenceUrls.length>2,'fixture has attachments');
  const images=new Map(list.flatMap(l=>l.activities).map(f=>[f.url,{data:PNG,width:1,height:1,format:'PNG'}]));
  const sections={...defaultLessonSections,reflections:true,feedback:true};
@@ -155,7 +155,7 @@ test('consolidated report: complete content, and every evidence link routed thro
  const target=list.find(l=>l.activities.length)||list[0];
  target.writtenReflections=[{label:'After-class reflection',date:'2026-10-22',answers:{achievement:'Most children blended CVC words on their own.',nextStep:'Four children need more practice with short vowels.'}}];
  target.feedback={text:'Strong modelling; add one more check for understanding.',date:'2026-10-24'};
- const evidence=list.flatMap(l=>[...l.planFiles,...l.activities,...l.writing,...l.audio,...l.reflections,...l.additional].map(f=>f.url));
+ const evidence=list.flatMap(l=>[...l.planFiles,...l.activities,...l.writing,...(l.remedial||[]),...l.reflections,...(l.portfolio||[])].map(f=>f.url));
  const images=new Map(list.flatMap(l=>l.activities).map(f=>[f.url,{data:PNG,width:1,height:1,format:'PNG'}]));
  const routed=[];const linkFor=url=>{routed.push(url);return 'https://vision.example.test/school-success/shared/0b9e7a39-6c55-4f5e-9d5c-2a1c3d4e5f60/file/'+(routed.indexOf(url))+'#'+'A'.repeat(43);};
  const {doc,text}=await make('teacher',{lessons:list,images,raster:null,sections:{...defaultLessonSections,reflections:true,feedback:true},linkFor});

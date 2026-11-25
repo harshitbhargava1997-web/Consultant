@@ -1,9 +1,10 @@
 import {jsPDF} from 'jspdf';
 import {autoTable} from 'jspdf-autotable';
 import {regularFont,boldFont} from './report-fonts.js';
-import {portfolioModules,portfolioCategories,fileCategory,portfolioTotals,selectedPortfolioCounts,portfolioComparison} from './school-portfolio.js';
+import {portfolioModules,portfolioCategories,fileCategory,portfolioTotals,selectedPortfolioCounts,portfolioComparison,isPortalEvidence} from './school-portfolio.js';
 import {formatReportDuration as duration} from './report-units.js';
 import {chronologicalRows} from '../report-sequence.js';
+import {evidenceFiles,evidenceKey} from './lesson-plan-items.js';
 const labels=['Lesson preparation','Book usage','Additional Materials','E-books'];
 const sessions=count=>`${count} session${count===1?'':'s'}`;
 export function createSchoolPortfolioPdf({schools,from,to,settings,detail=false,includeEvidence=false,includeObservations=false,rawObservations=[],options={},comparison}){
@@ -57,19 +58,19 @@ export function createSchoolPortfolioPdf({schools,from,to,settings,detail=false,
  }
  if(schoolDetail){
   const school=schools[0];text('Teacher breakdown',13,true);
-  table(['Teacher',...modules.map(i=>labels[i]),...(settings.sections.evidence&&options.counts?.files!==false?['Unique uploaded files']:[])],school.profiles.map(p=>[p.name,...modules.map(i=>`${duration(p.metrics[i].actual)}\n${sessions(p.metrics[i].logs.length)}`),...(settings.sections.evidence&&options.counts?.files!==false?[new Set(school.submissions.filter(r=>r.teacher===p.name).flatMap(r=>(r.files||[]).map(f=>f.url).filter(Boolean))).size]:[])]));
+  table(['Teacher',...modules.map(i=>labels[i]),...(settings.sections.evidence&&options.counts?.files!==false?['Unique uploaded files']:[])],school.profiles.map(p=>[p.name,...modules.map(i=>`${duration(p.metrics[i].actual)}\n${sessions(p.metrics[i].logs.length)}`),...(settings.sections.evidence&&options.counts?.files!==false?[new Set(school.submissions.filter(r=>r.teacher===p.name).flatMap(r=>(r.files||[]).filter(isPortalEvidence).map(f=>f.url).filter(Boolean))).size]:[])]));
   if(includeEvidence&&settings.sections.evidence){
-   for(const category of ['preparation','audio','closure','activity','writing','phonics','portfolio','events','other']){
+   for(const category of portfolioCategories.map(([key])=>key).filter(key=>key!=='all')){
     if(options.categories?.[category]===false)continue;
     const seen=new Set(),rows=[];
-    for(const row of chronologicalRows(school.submissions))for(const file of row.files||[]){
-     const key=JSON.stringify([row.teacher,file.url]);
-     if(fileCategory(file)!==category||!file.url||seen.has(key))continue;
+    for(const row of chronologicalRows(school.submissions))for(const file of evidenceFiles(row)){
+     const key=JSON.stringify([row.teacher,evidenceKey(file)]);
+     if(fileCategory(file)!==category||!file.url&&!file.lessonPlan||seen.has(key))continue;
      seen.add(key);rows.push({row,file});
     }
     if(!rows.length)continue;
     text(portfolioCategories.find(([key])=>key===category)[1],13,true);
-    table(['Open submitted file','Teacher','Submitted date','Planned date','Class / subject','Lesson / activity'],rows.map(({row})=>['Open file',row.teacher,row.date,row.plannedDate||'',`${row.grade||''} ${row.section||''} / ${row.subject||''}`,row.topic||'']),rows.map(({file})=>file.url));
+    table(['Open submitted file','Teacher','Submitted date','Planned date','Class / subject','Lesson / activity'],rows.map(({row,file})=>[file.url?'Open file':'Saved plan (text)',row.teacher,row.date,row.plannedDate||'',`${row.grade||''} ${row.section||''} / ${row.subject||''}`,row.topic||'']),rows.map(({file})=>file.url));
    }
   }
   if(includeObservations){

@@ -4,14 +4,14 @@
 // Evidence URLs are the existing stored links; nothing here creates or widens access.
 import {jsPDF} from 'jspdf';
 import {regularFont,boldFont} from './report-fonts.js';
-import {visibleLessonSections,lessonSummary,groupLessons,classSubjectBreakdown,formatDay,formatStamp,classLine,defaultLessonSections,MAX_LESSONS_PER_PDF,isImageUrl} from './lesson-records.js';
+import {visibleLessonSections,lessonSummary,groupLessons,classSubjectBreakdown,formatDay,formatStamp,classLine,defaultLessonSections,sectionOn,MAX_LESSONS_PER_PDF,isImageUrl} from './lesson-records.js';
 
 export const palette={navy:'#16323c',teal:'#127369',tealSoft:'#8fd3c8',ink:'#2b3d45',muted:'#66777e',faint:'#93a3a8',hair:'#dbe5e4',tint:'#f2f7f6',tealTint:'#e4f2ef',blue:'#2f5f8f',blueTint:'#e8eff7',plum:'#5d4a86',plumTint:'#eeebf6',amber:'#8a5a12',amberTint:'#f8f1e3'};
 export const hasDevanagari=s=>/[ऀ-ॿ꣠-ꣿ]/.test(String(s||''));
 const PT=0.3528,PAGE_W=210,PAGE_H=297,M=18,W=PAGE_W-2*M,TOP=24,BOTTOM=276;
 const lineHeight=size=>size*PT*1.45;
 const kindTag={Photo:'PHOTO',Video:'VIDEO',PDF:'PDF',Audio:'AUDIO',File:'FILE'};
-const sectionStyle={activities:[palette.teal,palette.tealTint],writing:[palette.blue,palette.blueTint],audio:[palette.plum,palette.plumTint],reflections:[palette.teal,palette.tealTint],additional:[palette.amber,palette.amberTint],plan:[palette.navy,palette.tint]};
+const sectionStyle={activities:[palette.teal,palette.tealTint],writing:[palette.blue,palette.blueTint],audio:[palette.plum,palette.plumTint],remedial:[palette.plum,palette.plumTint],portfolio:[palette.amber,palette.amberTint],reflections:[palette.teal,palette.tealTint],additional:[palette.amber,palette.amberTint],plan:[palette.navy,palette.tint]};
 const plural=(n,one,many=one+'s')=>n+' '+(n===1?one:many);
 const reflectionQuestions={achievement:'Did students achieve the learning outcome, and what went well in your class?',nextStep:'Which students need support, what learning gaps do they have, and what will you do next to support them?'};
 const periodText=(from,to)=>from===to?formatDay(from):formatDay(from)+' – '+formatDay(to);
@@ -32,7 +32,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  // Consolidated reports are period snapshots; complete history is offered per lesson only.
  if(lessons.some(l=>(l.scope||'period')!==scope))throw Error('Lessons must share one reporting scope.');
  if(kind!=='lesson'&&scope!=='period')throw Error('Consolidated lesson reports cover the selected period only.');
- const on=key=>sections[key]!==false;
+ const on=key=>sectionOn(sections,key);
  const doc=new jsPDF({unit:'mm',format:'a4',compress:true});
  doc.addFileToVFS('Report-Regular.ttf',regularFont);doc.addFont('Report-Regular.ttf','Report','normal');
  doc.addFileToVFS('Report-Bold.ttf',boldFont);doc.addFont('Report-Bold.ttf','Report','bold');
@@ -199,8 +199,8 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  // Written after-class reflections (text) inline; earlier PDF-only reflections and recordings as links.
  function reflectionSection(lesson){
   const written=lesson.writtenReflections||[],files=lesson.reflections;
-  if(shareable){const days=[...new Set([...written,...files].map(r=>r.date||r.addedOn).filter(Boolean))].sort().map(formatDay);sectionHeading('Teacher reflections',written.length+files.length,sectionStyle.reflections,18);paragraph(`${plural(written.length+files.length,'reflection')} recorded${days.length?' ('+days.join(', ')+')':''}. Reflection text and recordings are left out of this shareable copy because they can identify students. ${FULL_VERSION}`,{size:8.6,color:palette.muted,after:2});state.y+=2;return;}
-  sectionHeading('Teacher reflections',written.length+files.length,sectionStyle.reflections,written.length?30:11);
+  if(shareable){const days=[...new Set([...written,...files].map(r=>r.date||r.addedOn).filter(Boolean))].sort().map(formatDay);sectionHeading('After-class reflections',written.length+files.length,sectionStyle.reflections,18);paragraph(`${plural(written.length+files.length,'reflection')} recorded${days.length?' ('+days.join(', ')+')':''}. Reflection text and recordings are left out of this shareable copy because they can identify students. ${FULL_VERSION}`,{size:8.6,color:palette.muted,after:2});state.y+=2;return;}
+  sectionHeading('After-class reflections',written.length+files.length,sectionStyle.reflections,written.length?30:11);
   for(const r of written){
    ensure(24);
    const title=[r.label,r.date?formatDay(r.date):'',r.conductedOn?'taught '+formatDay(r.conductedOn):''].filter(Boolean).join('  ·  ');
@@ -247,14 +247,14 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   }
   if(visible.activities)evidenceSection('Classroom activities',lesson.activities,sectionStyle.activities);
   if(visible.writing)evidenceSection('Student written work',lesson.writing,sectionStyle.writing);
-  if(visible.audio)evidenceSection('Audio recordings',lesson.audio,sectionStyle.audio,{action:'Listen',note:'Recordings saved with this lesson. Tap to listen; an internet connection is required.'});
+  if(visible.remedial)evidenceSection('Remedial support',lesson.remedial,sectionStyle.remedial);
   if(visible.reflections)reflectionSection(lesson);
+  if(visible.portfolio)evidenceSection('Student portfolio / assessment',lesson.portfolio,sectionStyle.portfolio);
   if(visible.feedback)reviewPanel(lesson.feedback);
-  if(visible.additional)evidenceSection('Further classroom evidence',lesson.additional,sectionStyle.additional);
   if(!Object.values(visible).some(Boolean))paragraph('No lesson plan details or selected evidence were recorded for this lesson.',{size:9,color:palette.muted});
  }
  // ---------- index ----------
- const counts=l=>[on('activities')&&['Activity',l.activities.length],on('writing')&&['Writing',l.writing.length],on('audio')&&['Audio',l.audio.length],on('feedback')&&['Review',l.feedback?'✓':'—']].filter(Boolean);
+ const counts=l=>[on('activities')&&['Activity',l.activities.length],on('writing')&&['Writing',l.writing.length],on('reflections')&&['Reflection',l.reflections.length+(l.writtenReflections||[]).length],on('feedback')&&['Review',l.feedback?'✓':'—']].filter(Boolean);
  function indexTable(groups,pages){
   const cols=[{label:'#',w:7},{label:'Submitted',w:22},{label:'Lesson',w:0},...counts(lessons[0]).map(([label])=>({label,w:label==='Activity'?15:13,align:'center'})),{label:'Page',w:10,align:'right'}];
   cols[2].w=W-cols.reduce((sum,c)=>sum+c.w,0)-(cols.length-1)*1.5;
@@ -309,9 +309,11 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   const classes=[...new Set(lessons.map(l=>l.grade).filter(Boolean))],subjects=[...new Set(lessons.map(l=>l.subject).filter(Boolean))];
   metaGrid([['School',first.school],[kind==='teacher'?'Teacher':'Teachers',kind==='teacher'?first.teacher:plural(summary.teachers,'teacher')],['Reporting period',periodText(from,to)],['Generated',formatStamp(generatedAt.toISOString())],['Classes',classes.join(', ')||'—'],['Subjects',subjects.join(', ')||'—']]);
   state.y+=4;kicker('Summary');state.y+=1;
-  tiles([['Lessons documented',summary.lessons],['Lesson plans submitted in period',summary.plansSubmitted],...(kind==='school'?[['Teachers with lessons',summary.teachers]]:[]),...(on('activities')?[['Classroom activity files',summary.activities]]:[]),...(on('writing')?[['Student written work',summary.writing]]:[]),...(on('audio')?[['Audio recordings',summary.audio]]:[]),...(on('reflections')?[['Teacher reflections',summary.reflections]]:[]),...(on('feedback')?[['Lessons with Academic Review',summary.reviewed]]:[])]);
+  tiles([['Lessons documented',summary.lessons],['Lesson plans submitted in period',summary.plansSubmitted],...(kind==='school'?[['Teachers with lessons',summary.teachers]]:[]),
+   ...[['activities','Classroom activities'],['writing','Student written work'],['remedial','Remedial support'],['reflections','After-class reflections'],['portfolio','Student portfolio / assessment']].filter(([k])=>on(k)).map(([k,l])=>[l,summary[k]]),
+   ...(on('feedback')?[['Lessons with Academic Review',summary.reviewed]]:[])]);
   state.y+=3;kicker('About this report');
-  const included=['Lesson plan',...[['activities','classroom activities'],['writing','student written work'],['audio','audio recordings'],['reflections','teacher reflections'],['feedback','Academic Review'],['additional','further evidence']].filter(([k])=>on(k)).map(([,l])=>l)];
+  const included=['Lesson plan',...[['activities','classroom activities'],['writing','student written work'],['remedial','remedial support'],['reflections','after-class reflections'],['portfolio','student portfolio / assessment'],['feedback','Academic Review']].filter(([k])=>on(k)).map(([,l])=>l)];
   for(const note of [
    `Reporting period ${periodText(from,to)}: evidence files, recordings, reflections and Academic Review appear only when they were submitted or recorded in this period, matching School 360° and Teacher 360° counts. Lesson plan details are shown in full for every lesson with activity in the period.`,
    'Lessons appear in the order they were first submitted. Evidence added later stays with its original lesson and does not change that order. Lessons with items outside the period say so; the complete history is available as an individual lesson PDF.',
@@ -330,10 +332,10 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
    newPage();
    kicker('Teacher overview');state.y+=1;
    const groups=groupLessons(lessons)[0].teachers;
-   const optional=[['activities','Activity','activities'],['writing','Writing','writing'],['audio','Audio','audio'],['reflections','Reflections','reflections']].filter(([k])=>on(k));
+   const optional=[['activities','Activity','activities'],['writing','Writing','writing'],['remedial','Remedial','remedial'],['reflections','Reflection','reflections'],['portfolio','Portfolio','portfolio']].filter(([k])=>on(k));
    overviewTable(['Teacher','Lessons','Plans',...optional.map(([,l])=>l),...(on('feedback')?['Reviewed']:[])],groups.map(t=>{const s=lessonSummary(t.lessons);return [t.teacher,s.lessons,s.plansSubmitted,...optional.map(([,,k])=>s[k]),...(on('feedback')?[s.reviewed]:[])];}),(()=>{const n=2+optional.length+(on('feedback')?1:0),w=15.5;return [W-n*w-n*1.5,...Array(n).fill(w)];})());
    kicker('Class and subject breakdown');state.y+=1;
-   const cs=[['activities','Activity'],['writing','Writing'],['audio','Audio']].filter(([k])=>on(k));
+   const cs=[['activities','Activity'],['writing','Writing'],['reflections','Reflection']].filter(([k])=>on(k));
    overviewTable(['Class','Subject','Lessons','Teachers',...cs.map(([,l])=>l)],classSubjectBreakdown(lessons).map(r=>[r.grade||'—',r.subject||'—',r.lessons,r.teachers,...cs.map(([k])=>r[k])]),(()=>{const n=2+cs.length,w=17;const rest=W-n*w-(n+1)*1.5;return [rest*0.42,rest*0.58,...Array(n).fill(w)];})(),2);
   }
   // Number lessons in hierarchy order for school reports, chronological order for teachers.
