@@ -65,3 +65,28 @@ Measurements used Chromium on this machine, with the CPU slowed 4× and 6× to s
 - New plans without a PDF: they count once each. Before this change they would have been missed.
 
 **Existing PDFs** are not deleted or changed.
+
+## Lesson records and lesson documentation use the Teacher evidence categories (owner request, 25 November 2026)
+**Before:** Lesson records (Teacher 360° and School 360°) and the lesson documentation PDF used older headings:
+- "Audio recordings" (preparation voice notes from the previous portal) was shown as a main category.
+- Remedial support and student portfolio were hidden inside "Further classroom evidence".
+- After-class reflections were called "Teacher reflections".
+
+**Now:** the summary tiles, section list, lesson sections, school overview and lesson index all follow Teacher 360° "Teacher evidence", in the same order:
+1. Lesson plans submitted.
+2. Classroom activities.
+3. Student written work.
+4. Remedial support.
+5. After-class reflections.
+6. Student portfolio / assessment.
+7. Then the Academic Review.
+
+**Previous-portal items come last:**
+- **"Audio recordings (previous portal)":** its summary tile shows only when there are any.
+- **"Other evidence (previous portal)":** phonics evidence, event pictures and other files.
+
+**Counts:** each category in Lesson records is checked against Teacher 360° on test data (`tests/success-lesson-categories.test.mjs`).
+
+**Report access:** every file is still included once.
+
+**Saved settings:** a saved choice to hide "Further classroom evidence" still hides remedial support and portfolio, unless they have their own choice.

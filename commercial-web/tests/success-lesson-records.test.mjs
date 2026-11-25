@@ -88,7 +88,7 @@ test('hierarchy and breakdown keep same-name teachers apart',async()=>{
  assert.deepEqual(groups.map(g=>[g.school,g.teachers.map(t=>t.teacher+':'+t.lessons.length)]),[['Alpha School',['Asha:3','Bina:1']],['Beta School',['Asha:1']]]);
  assert.deepEqual(groups[0].teachers[0].classes.map(c=>[c.grade,c.subject,c.lessons.map(l=>l.recordId)]),[['Grade 2','English',['101']],['Grade 2','Mathematics',['150']],['Grade 3','Hindi',['102']]]);
  const breakdown=classSubjectBreakdown(lessons.filter(l=>l.school==='Alpha School'));
- assert.deepEqual(breakdown.find(r=>r.grade==='Grade 2'&&r.subject==='English'),{grade:'Grade 2',subject:'English',lessons:1,teachers:1,activities:2,writing:1,audio:2});
+ assert.deepEqual(breakdown.find(r=>r.grade==='Grade 2'&&r.subject==='English'),{grade:'Grade 2',subject:'English',lessons:1,teachers:1,activities:2,writing:1,reflections:2,audio:2});
 });
 
 test('lesson plan uses the stored prompt structure and never invents fields',()=>{
@@ -103,11 +103,11 @@ test('lesson plan uses the stored prompt structure and never invents fields',()=
 
 test('optional sections can be hidden without changing the lesson record',async()=>{
  const lessons=buildLessonRecords(await load(),from,to),asha=byId(lessons,'101'),before=JSON.stringify(asha);
- assert.deepEqual(visibleLessonSections(asha),{plan:true,activities:true,writing:true,audio:true,reflections:true,feedback:true,additional:false});
- assert.deepEqual(visibleLessonSections(asha,{activities:false,writing:false,audio:false,reflections:false,feedback:false}),{plan:true,activities:false,writing:false,audio:false,reflections:false,feedback:false,additional:false});
+ assert.deepEqual(visibleLessonSections(asha),{plan:true,activities:true,writing:true,remedial:false,portfolio:false,audio:true,reflections:true,feedback:true,additional:false});
+ assert.deepEqual(visibleLessonSections(asha,{activities:false,writing:false,audio:false,reflections:false,feedback:false}),{plan:true,activities:false,writing:false,remedial:false,portfolio:false,audio:false,reflections:false,feedback:false,additional:false});
  assert.equal(JSON.stringify(asha),before);
  // Missing evidence is omitted rather than shown as empty placeholders.
- assert.deepEqual(visibleLessonSections(byId(lessons,'150')),{plan:true,activities:false,writing:false,audio:false,reflections:false,feedback:false,additional:false});
+ assert.deepEqual(visibleLessonSections(byId(lessons,'150')),{plan:true,activities:false,writing:false,remedial:false,portfolio:false,audio:false,reflections:false,feedback:false,additional:false});
 });
 
 test('the existing School 360° evidence flow is unchanged by the lesson view',async()=>{

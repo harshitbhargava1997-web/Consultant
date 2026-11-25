@@ -2,7 +2,7 @@
 import {useMemo,useState} from 'react';
 import {ArrowUpRight,BookOpen,Download,FileText,Headphones} from 'lucide-react';
 import {reportDirectorySource} from '@/lib/school-success/directory';
-import {buildLessonRecords,filterLessons,lessonFilterOptions,lessonSummary,visibleLessonSections,optionalLessonSections,defaultLessonSections,formatDay,formatStamp,classLine,isImageUrl,MAX_LESSONS_PER_PDF} from '@/lib/school-success/lesson-records';
+import {buildLessonRecords,filterLessons,lessonFilterOptions,lessonSummary,visibleLessonSections,optionalLessonSections,defaultLessonSections,sectionOn,formatDay,formatStamp,classLine,isImageUrl,MAX_LESSONS_PER_PDF} from '@/lib/school-success/lesson-records';
 import './lesson-records.css';
 
 const PAGE=20;
@@ -12,8 +12,8 @@ const safeUrl=url=>typeof url==='string'&&/^https?:\/\//i.test(url)?url:'';
 function save(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 // Only the thumbnails the PDF will place: first six images per evidence section and lesson.
 function thumbnailUrls(lessons,sections){
- const keys=['activities','writing','additional'].filter(k=>sections[k]!==false);
- return lessons.flatMap(l=>keys.flatMap(k=>l[k].filter(f=>isImageUrl(f.url)).slice(0,6).map(f=>f.url)));
+ const keys=['activities','writing','remedial','portfolio','additional'].filter(k=>sectionOn(sections,k));
+ return lessons.flatMap(l=>keys.flatMap(k=>(l[k]||[]).filter(f=>isImageUrl(f.url)).slice(0,6).map(f=>f.url)));
 }
 
 // Lesson-wise documentation: one card per lesson record, in original submission order.
@@ -71,7 +71,7 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
    </div>
    <details><summary className="text-button">PDF sections</summary>
     <p className="hint">The lesson plan is always included. Unchecked sections are left out of the PDF only; no records change.</p>
-    <div className="lr-options">{optionalLessonSections.map(([key,label])=><label className="check-line" key={key}><input type="checkbox" checked={sections[key]!==false} onChange={e=>setSections(s=>({...s,[key]:e.target.checked}))}/>{label}</label>)}<label className="check-line"><input type="checkbox" checked={embed} onChange={e=>setEmbed(e.target.checked)}/>Embed photo thumbnails</label></div>
+    <div className="lr-options">{optionalLessonSections.map(([key,label])=><label className="check-line" key={key}><input type="checkbox" checked={sectionOn(sections,key)} onChange={e=>setSections(s=>({...s,[key]:e.target.checked}))}/>{label}</label>)}<label className="check-line"><input type="checkbox" checked={embed} onChange={e=>setEmbed(e.target.checked)}/>Embed photo thumbnails</label></div>
    </details>
    <div className="lr-downloads"><p>{lessons.length} lesson{lessons.length===1?'':'s'} · {formatDay(from)} to {formatDay(to)}</p><button className="button primary" disabled={!!busy||!lessons.length||(consolidatedKind==='teacher'&&new Set(lessons.map(l=>l.teacherKey)).size!==1)} onClick={()=>download(consolidatedKind,lessons)}><Download size={16}/>{consolidatedKind==='school'?'School lesson PDF':'Teacher lesson PDF'}</button></div>
   </section>
@@ -79,11 +79,13 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
   <div className="lr-stats" aria-label="Lesson summary">
    <div><strong>{summary.lessons}</strong><span>Lessons in view</span></div>
    <div><strong>{summary.plansSubmitted}</strong><span>Lesson plans submitted in period</span></div>
-   <div><strong>{summary.activities}</strong><span>Classroom activity files</span></div>
+   <div><strong>{summary.activities}</strong><span>Classroom activities</span></div>
    <div><strong>{summary.writing}</strong><span>Student written work</span></div>
-   <div><strong>{summary.audio}</strong><span>Audio recordings</span></div>
-   <div><strong>{summary.reflections}</strong><span>Teacher reflections</span></div>
+   <div><strong>{summary.remedial}</strong><span>Remedial support</span></div>
+   <div><strong>{summary.reflections}</strong><span>After-class reflections</span></div>
+   <div><strong>{summary.portfolio}</strong><span>Student portfolio / assessment</span></div>
    <div><strong>{summary.reviewed}</strong><span>With Academic Review</span></div>
+   {summary.audio>0&&<div><strong>{summary.audio}</strong><span>Audio recordings (previous portal)</span></div>}
   </div>
   {!lessons.length?<section className="card empty"><h3>No lessons in this view</h3><p>No lesson records were submitted for the selected period and filters.</p></section>:<>
    <div className="lr-list">{lessons.slice((current-1)*PAGE,current*PAGE).map((lesson,i)=><LessonCard key={lesson.key} lesson={lesson} number={(current-1)*PAGE+i+1} showTeacher={mode==='school'} busy={!!busy} onReview={onReview} onDownload={()=>download('lesson',[lesson])} onDownloadHistory={history.has(lesson.key)?()=>download('lesson',[history.get(lesson.key)]):null}/>)}</div>
@@ -125,14 +127,16 @@ export function LessonCard({lesson,number,showTeacher,busy,onDownload,onReview,o
    </section>}
    {visible.activities&&<Evidence title="Classroom activities" files={lesson.activities} tone="activities" open={open}/>}
    {visible.writing&&<Evidence title="Student written work" files={lesson.writing} tone="writing" open={open}/>}
-   {visible.audio&&<section className="lr-section audio"><h4>Audio recordings<em>{lesson.audio.length}</em></h4><div className="lr-files">{lesson.audio.map(f=>safeUrl(f.url)&&<div className="lr-audio" key={f.url}><span><b>{f.label}</b><small>{f.addedOn?'Added '+formatDay(f.addedOn):''} · <a className="text-button" href={f.url} target="_blank" rel="noopener noreferrer">Open<ArrowUpRight size={12}/></a></small></span><audio controls preload="none" src={f.url}/></div>)}</div></section>}
-   {visible.reflections&&<section className="lr-section"><h4>Teacher reflections<em>{(lesson.writtenReflections||[]).length+lesson.reflections.length}</em></h4>
+   {visible.remedial&&<Evidence title="Remedial support" files={lesson.remedial} tone="audio" open={open}/>}
+   {visible.reflections&&<section className="lr-section"><h4>After-class reflections<em>{(lesson.writtenReflections||[]).length+lesson.reflections.length}</em></h4>
     {(lesson.writtenReflections||[]).map(r=><WrittenReflection key={r.url} reflection={r}/>)}
     {lesson.reflections.some(f=>f.legacy)&&<p className="hint">Earlier reflections were saved as PDFs; their written text is available by opening the saved file.</p>}
     {lesson.reflections.length>0&&<div className="lr-files">{lesson.reflections.map(f=><FileLink key={f.url} file={f} action={f.kind==='Audio'?'Listen':'Open'}/>)}</div>}
    </section>}
+   {visible.portfolio&&<Evidence title="Student portfolio / assessment" files={lesson.portfolio} tone="additional" open={open}/>}
    {visible.feedback&&<section className="lr-section"><h4>Academic Review</h4><div className="lr-review"><b>{lesson.feedback.date?'Reviewed '+formatStamp(lesson.feedback.date).split(',')[0]:'Review recorded'}</b><p>{lesson.feedback.text}</p></div></section>}
-   {visible.additional&&<Evidence title="Further classroom evidence" files={lesson.additional} tone="additional" open={open}/>}
+   {visible.audio&&<section className="lr-section audio"><h4>Audio recordings (previous portal)<em>{lesson.audio.length}</em></h4><div className="lr-files">{lesson.audio.map(f=>safeUrl(f.url)&&<div className="lr-audio" key={f.url}><span><b>{f.label}</b><small>{f.addedOn?'Added '+formatDay(f.addedOn):''} · <a className="text-button" href={f.url} target="_blank" rel="noopener noreferrer">Open<ArrowUpRight size={12}/></a></small></span><audio controls preload="none" src={f.url}/></div>)}</div></section>}
+   {visible.additional&&<Evidence title="Other evidence (previous portal)" files={lesson.additional} tone="additional" open={open}/>}
    {!Object.values(visible).some(Boolean)&&<p className="hint">No lesson plan details or evidence were recorded for this lesson.</p>}
    <div className="lr-lesson-actions">{onReview&&<button className="button primary" disabled={busy} onClick={()=>onReview(lesson)}>Review lesson</button>}<button className="button" disabled={busy} onClick={onDownload}><FileText size={15}/>Lesson PDF · this period</button>{onDownloadHistory&&<button className="button" disabled={busy} onClick={onDownloadHistory}><FileText size={15}/>Complete history PDF</button>}</div>
   </div>}

@@ -30,7 +30,7 @@ test('teacher PDF: cover, chronological index and lessons in original submission
 
 test('individual lesson PDF keeps the approved section order and its own evidence only',async()=>{
  const {text,doc}=await make('lesson');
- const order=['Lesson plan','Learning objective','Classroom activities','Student written work','Audio recordings','Teacher reflections','Academic Review'].map(h=>text.indexOf(h.toUpperCase())>=0?text.indexOf(h.toUpperCase()):text.indexOf(h));
+ const order=['Lesson plan','Learning objective','Classroom activities','Student written work','After-class reflections','Academic Review','Audio recordings (previous portal)'].map(h=>text.indexOf(h.toUpperCase())>=0?text.indexOf(h.toUpperCase()):text.indexOf(h));
  assert.ok(order.every(i=>i>=0),JSON.stringify(order));
  assert.deepEqual([...order].sort((a,b)=>a-b),order);
  assert.doesNotMatch(text,/CFU|Check for understanding/i);

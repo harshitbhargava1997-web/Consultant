@@ -53,7 +53,7 @@ export default function ReportWorkspace({ data, school, from, to, setFrom, setTo
         checkReportEvidence(selectedLessons, data.mediaPublicBase);
         const [{ createLessonDocumentationPdf }, { canvasRaster, loadLessonFont, loadEvidenceImages }] = await Promise.all([import('@/lib/school-success/lesson-report-pdf'), import('@/lib/school-success/lesson-pdf-assets')]);
         try { await loadLessonFont(); } catch { /* device fonts still shape Hindi */ }
-        const wanted = [...new Set(selectedLessons.flatMap(l => ['activities', 'writing', 'additional'].flatMap(k => l[k].filter(f => isImageUrl(f.url)).slice(0, 6).map(f => f.url))))];
+        const wanted = [...new Set(selectedLessons.flatMap(l => ['activities', 'writing', 'remedial', 'portfolio', 'additional'].flatMap(k => (l[k] || []).filter(f => isImageUrl(f.url)).slice(0, 6).map(f => f.url))))];
         const images = wanted.length ? await loadEvidenceImages(wanted, { limit: 150, onProgress: (done, total) => setBusy(`Adding photos to lesson documentation ${done} of ${total}`) }) : new Map(), raster = canvasRaster();
         return async (subset, { thumbnailsPerSection, session }) => { await new Promise(resolve => setTimeout(resolve, 0)); return new Uint8Array(createLessonDocumentationPdf({ kind: 'teacher', lessons: subset, from, to, raster, generatedAt: new Date(generatedAt), images: thumbnailsPerSection ? images : new Map(), thumbnailsPerSection: thumbnailsPerSection || 6, linkFor: session.linkFor }).output('arraybuffer')); };
     }

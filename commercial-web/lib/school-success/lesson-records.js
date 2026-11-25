@@ -25,20 +25,27 @@ export const lessonPlanFields=[
  ['practice','Practice & apply','Practice / classwork'],
  ['review','Review / next step','Review / homework']
 ];
+// Same evidence categories, in the same order, as Teacher 360° "Teacher evidence" (owner request, 25 November
+// 2026), then the Academic Review, then items from the previous portal. Remedial support and student portfolio
+// were earlier shown inside "Further classroom evidence": a saved choice for that section still applies to them
+// unless they have their own (see sectionOn).
 export const optionalLessonSections=[
  ['activities','Classroom activities'],
  ['writing','Student written work'],
- ['audio','Audio recordings'],
- ['reflections','Teacher reflections'],
+ ['remedial','Remedial support'],
+ ['reflections','After-class reflections'],
+ ['portfolio','Student portfolio / assessment'],
  ['feedback','Academic Review'],
- ['additional','Further classroom evidence']
+ ['audio','Audio recordings (previous portal)'],
+ ['additional','Other evidence (previous portal)']
 ];
 export const defaultLessonSections=Object.fromEntries(optionalLessonSections.map(([key])=>[key,true]));
+export const sectionOn=(sections,key)=>{const own=sections?.[key];return own===undefined&&['remedial','portfolio'].includes(key)?sections?.additional!==false:own!==false;};
 export const MAX_LESSONS_PER_PDF=400;
 
 // These sections contain clickable files. Written reflections and academic feedback render as text.
 export function lessonEvidenceFiles(lesson) {
- return [...lesson.planFiles, ...lesson.activities, ...lesson.writing, ...lesson.audio, ...lesson.reflections, ...lesson.additional];
+ return [...lesson.planFiles, ...lesson.activities, ...lesson.writing, ...(lesson.remedial||[]), ...lesson.reflections, ...(lesson.portfolio||[]), ...lesson.audio, ...lesson.additional];
 }
 
 const clean=value=>value==null?'':String(value).trim();
@@ -78,9 +85,11 @@ function fileSection(file){
  if(category==='audio')return 'audio';
  if(category==='activity')return 'activities';
  if(category==='writing')return 'writing';
+ if(category==='remedial')return 'remedial';
+ if(category==='portfolio')return 'portfolio';
  return 'additional';
 }
-const additionalLabels={remedial:'Remedial plan / support',phonics:'Phonics / literacy evidence',portfolio:'Student portfolio',events:'Event picture',other:'Other file'};
+const additionalLabels={phonics:'Phonics / literacy evidence',events:'Event picture',other:'Other file'};
 
 // Reporting scope:
 //  'period' (default) — evidence files and the Academic Review appear only when they were
@@ -114,6 +123,8 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
   planFiles:label(pick('plan').filter(f=>!(f.generatedPreparation&&planText)),(f,i,l)=>{const type=x=>x.generatedPreparation?'Saved lesson plan (PDF)':isImageUrl(x.url)?'Lesson plan photo':'Lesson plan document',same=l.filter(x=>type(x)===type(f));return type(f)+(same.length>1?' '+(same.indexOf(f)+1):'');}),
   activities:label(pick('activities'),(f,i)=>'Classroom activity '+(i+1)),
   writing:label(pick('writing'),(f,i)=>'Written work sample '+(i+1)),
+  remedial:label(pick('remedial'),(f,i)=>'Remedial support '+(i+1)),
+  portfolio:label(pick('portfolio'),(f,i)=>'Portfolio / assessment '+(i+1)),
   audio:label(pick('audio'),(f,i,l)=>'Lesson preparation recording'+(l.length>1?' '+(i+1):'')),
   writtenReflections:written.map((f,i)=>({url:f.url,date:f.addedOn,dates:f.dates,savedAt:f.reflection.savedAt||'',conductedOn:f.reflection.conductedOn||'',answers:f.reflection.answers,prompts:f.reflection.prompts||[],label:'Written reflection'+(written.length>1?' '+(i+1):'')})),
   reflections:[...label(reflectionDocs,(f,i,l)=>'Earlier after-class reflection (saved PDF)'+(l.length>1?' '+(i+1):'')).map(f=>({...f,legacy:true})),...label(unreadable,(f,i,l)=>'Written reflection (open saved text)'+(l.length>1?' '+(i+1):'')),...label(reflectionAudio,(f,i,l)=>'After-class reflection recording'+(l.length>1?' '+(i+1):''))],
@@ -178,11 +189,13 @@ export const lessonFilterOptions=lessons=>({
 });
 
 export function visibleLessonSections(lesson,sections=defaultLessonSections){
- const on=key=>sections[key]!==false;
+ const on=key=>sectionOn(sections,key);
  return {
   plan:lesson.plan.fields.length>0||Boolean(lesson.plan.notes)||lesson.planFiles.length>0,
   activities:on('activities')&&lesson.activities.length>0,
   writing:on('writing')&&lesson.writing.length>0,
+  remedial:on('remedial')&&(lesson.remedial||[]).length>0,
+  portfolio:on('portfolio')&&(lesson.portfolio||[]).length>0,
   audio:on('audio')&&lesson.audio.length>0,
   reflections:on('reflections')&&(lesson.reflections.length>0||(lesson.writtenReflections||[]).length>0),
   feedback:on('feedback')&&Boolean(lesson.feedback),
@@ -191,9 +204,9 @@ export function visibleLessonSections(lesson,sections=defaultLessonSections){
 }
 
 export function lessonSummary(lessons){
- const sum=key=>lessons.reduce((n,l)=>n+l[key].length,0);
+ const sum=key=>lessons.reduce((n,l)=>n+(l[key]||[]).length,0);
  return {lessons:lessons.length,plansSubmitted:lessons.filter(l=>l.planSubmittedInPeriod).length,teachers:new Set(lessons.map(l=>l.teacherKey)).size,
-  activities:sum('activities'),writing:sum('writing'),audio:sum('audio'),reflections:sum('reflections')+lessons.reduce((n,l)=>n+(l.writtenReflections||[]).length,0),additional:sum('additional'),
+  activities:sum('activities'),writing:sum('writing'),remedial:sum('remedial'),portfolio:sum('portfolio'),audio:sum('audio'),reflections:sum('reflections')+lessons.reduce((n,l)=>n+(l.writtenReflections||[]).length,0),additional:sum('additional'),
   reviewed:lessons.filter(l=>l.feedback).length};
 }
 
@@ -226,8 +239,8 @@ export function classSubjectBreakdown(lessons){
  const rows=new Map();
  for(const l of lessons){
   const key=JSON.stringify([l.grade,l.subject]);
-  const row=rows.get(key)||{grade:l.grade,subject:l.subject,lessons:0,teachers:new Set(),activities:0,writing:0,audio:0};
-  row.lessons++;row.teachers.add(l.teacherKey);row.activities+=l.activities.length;row.writing+=l.writing.length;row.audio+=l.audio.length;rows.set(key,row);
+  const row=rows.get(key)||{grade:l.grade,subject:l.subject,lessons:0,teachers:new Set(),activities:0,writing:0,reflections:0,audio:0};
+  row.lessons++;row.teachers.add(l.teacherKey);row.activities+=l.activities.length;row.writing+=l.writing.length;row.reflections+=l.reflections.length+(l.writtenReflections||[]).length;row.audio+=l.audio.length;rows.set(key,row);
  }
  return [...rows.values()].map(r=>({...r,teachers:r.teachers.size})).sort((a,b)=>a.grade.localeCompare(b.grade,undefined,{numeric:true})||a.subject.localeCompare(b.subject));
 }
