@@ -251,8 +251,6 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   if(visible.reflections)reflectionSection(lesson);
   if(visible.portfolio)evidenceSection('Student portfolio / assessment',lesson.portfolio,sectionStyle.portfolio);
   if(visible.feedback)reviewPanel(lesson.feedback);
-  if(visible.audio)evidenceSection('Audio recordings (previous portal)',lesson.audio,sectionStyle.audio,{action:'Listen',note:'Preparation recordings saved with this lesson in the previous portal. Tap to listen; an internet connection is required.'});
-  if(visible.additional)evidenceSection('Other evidence (previous portal)',lesson.additional,sectionStyle.additional);
   if(!Object.values(visible).some(Boolean))paragraph('No lesson plan details or selected evidence were recorded for this lesson.',{size:9,color:palette.muted});
  }
  // ---------- index ----------
@@ -313,9 +311,9 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   state.y+=4;kicker('Summary');state.y+=1;
   tiles([['Lessons documented',summary.lessons],['Lesson plans submitted in period',summary.plansSubmitted],...(kind==='school'?[['Teachers with lessons',summary.teachers]]:[]),
    ...[['activities','Classroom activities'],['writing','Student written work'],['remedial','Remedial support'],['reflections','After-class reflections'],['portfolio','Student portfolio / assessment']].filter(([k])=>on(k)).map(([k,l])=>[l,summary[k]]),
-   ...(on('feedback')?[['Lessons with Academic Review',summary.reviewed]]:[]),...(on('audio')&&summary.audio?[['Audio recordings (previous portal)',summary.audio]]:[])]);
+   ...(on('feedback')?[['Lessons with Academic Review',summary.reviewed]]:[])]);
   state.y+=3;kicker('About this report');
-  const included=['Lesson plan',...[['activities','classroom activities'],['writing','student written work'],['remedial','remedial support'],['reflections','after-class reflections'],['portfolio','student portfolio / assessment'],['feedback','Academic Review'],['audio','audio recordings (previous portal)'],['additional','other evidence (previous portal)']].filter(([k])=>on(k)).map(([,l])=>l)];
+  const included=['Lesson plan',...[['activities','classroom activities'],['writing','student written work'],['remedial','remedial support'],['reflections','after-class reflections'],['portfolio','student portfolio / assessment'],['feedback','Academic Review']].filter(([k])=>on(k)).map(([,l])=>l)];
   for(const note of [
    `Reporting period ${periodText(from,to)}: evidence files, recordings, reflections and Academic Review appear only when they were submitted or recorded in this period, matching School 360° and Teacher 360° counts. Lesson plan details are shown in full for every lesson with activity in the period.`,
    'Lessons appear in the order they were first submitted. Evidence added later stays with its original lesson and does not change that order. Lessons with items outside the period say so; the complete history is available as an individual lesson PDF.',

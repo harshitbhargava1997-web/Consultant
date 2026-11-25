@@ -11,7 +11,8 @@ test('portfolio renders quantitative school comparisons without actual evidence 
 });
 test('selected school shows actual qualitative flow and excludes other schools and outside-period files',()=>{
  const html=render({level:'school',school:'Alpha School',tab:'evidence',category:'all',review:'all'});
- for(const value of ['Lesson preparation','Classroom evidence','Children will blend','Picture cards','plan.pdf','voice.wav','phonics.mp4','Review this lesson'])assert.ok(html.includes(value),value);
+ for(const value of ['Lesson preparation','Classroom evidence','Children will blend','Picture cards','plan.pdf','Review this lesson'])assert.ok(html.includes(value),value);
+ for(const value of ['voice.wav','phonics.mp4'])assert.ok(!html.includes(value),'previous-portal item not shown: '+value);
  assert.ok(!html.includes('outside.jpg'));assert.ok(!html.includes('Observation marker'));assert.ok(!html.includes('Beta School'));
 });
 test('stale periods hide results and consultant observations are opt-in',()=>{
@@ -26,5 +27,5 @@ test('Teacher 360 opens the exact selected school-teacher profile and preserves 
 test('School 360 exposes independent PDF controls and reload guidance for stale comparison ranges',()=>{
  const html=render({compareEnabled:true,previousFrom:'2026-10-01',previousTo:'2026-10-10'});
  for(const label of ['PDF modules and inclusions','Compare two review periods','Load comparison','Load the selected previous period','Include preparation and evidence sections'])assert.ok(html.includes(label),label);
- const school=render({level:'school',school:'Alpha School'});for(const label of ['School PDF file links','Audio recordings','Phonics evidence','Writing samples'])assert.ok(school.includes(label),label);
+ const school=render({level:'school',school:'Alpha School'});for(const label of ['School PDF file links','Lesson plans','Student written work','Remedial support','Student portfolio / assessment'])assert.ok(school.includes(label),label);for(const label of ['Audio recordings','Phonics evidence'])assert.ok(!school.includes(label),label);
 });

@@ -25,12 +25,12 @@ test('school view offers a teacher filter keyed by school and never shows anothe
  assert.match(html,/value="\[&quot;Alpha School&quot;,&quot;Asha&quot;\]"/);
 });
 
-test('an opened lesson shows plan fields, labelled recordings, reflections and Academic Review',async()=>{
+test('an opened lesson shows plan fields, reflections (with their recording) and Academic Review, and no previous-portal voice notes',async()=>{
  const {data,from,to}=await fixture(),{buildLessonRecords}=await import('../lib/school-success/lesson-records.js');
  const lesson=buildLessonRecords(data.entries,from,to).find(l=>l.recordId==='101');
  const html=renderToStaticMarkup(React.createElement(ui.LessonCard,{lesson,number:2,showTeacher:false,busy:false,onDownload(){},defaultOpen:true}));
- for(const text of ['Learning objective','Teacher activity','Review / homework','Classroom activities','Student written work','Lesson preparation recording 1','Lesson preparation recording 2','After-class reflection recording','Academic Review','Reviewed 27 Oct 2026','Strong modelling','Lesson PDF'])assert.ok(html.includes(text),text);
- assert.equal((html.match(/<audio /g)||[]).length,2);assert.match(html,/preload="none"/);
+ for(const text of ['Learning objective','Teacher activity','Review / homework','Classroom activities','Student written work','After-class reflection recording','Academic Review','Reviewed 27 Oct 2026','Strong modelling','Lesson PDF'])assert.ok(html.includes(text),text);
+ assert.ok(!/Lesson preparation recording|Audio recordings|previous portal/.test(html),'previous-portal voice notes are not shown');assert.equal((html.match(/<audio /g)||[]).length,0);
  assert.equal((html.match(/<img /g)||[]).length,3,'activity and writing photos only after opening');
  assert.match(html,/loading="lazy"/);assert.ok(!/CFU|Check for understanding/i.test(html));
 });

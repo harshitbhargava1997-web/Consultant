@@ -40,7 +40,7 @@ const uris=doc=>[...doc.output().matchAll(/\/URI \(([^)]*)\)/g)].map(m=>m[1].spl
 test('evidence and reviews submitted after the period are excluded from the period view and disclosed',async()=>{
  const lessons=filterLessons(buildLessonRecords(await entriesP,from,to),{teacher:chitra}),l=lessons.find(x=>x.recordId==='301');
  assert.deepEqual(names(l.activities),['oct.jpg']);assert.deepEqual(l.writing,[]);
- assert.deepEqual(names(l.audio),['v301.wav']);
+ assert.equal(l.audio,undefined,'previous-portal voice notes are not part of lesson records');
  assert.equal(l.feedback,null);assert.equal(l.reviewOutsidePeriod,true);
  assert.equal(l.outsidePeriodFiles,3,'boundary-late.jpg (1 Nov IST), nov.jpg and nov-w.jpg');
  assert.equal(l.activities[0].label,'Classroom activity 1');
@@ -61,9 +61,9 @@ test('a lesson prepared before the period appears for its in-period evidence wit
  assert.ok(l,'included because evidence was submitted in the period');
  assert.equal(l.planSubmittedInPeriod,false);
  assert.deepEqual(l.plan.fields.map(x=>x.text),['Objective for 302'],'lesson plan text is always shown');
- assert.deepEqual(l.planFiles,[]);assert.deepEqual(l.audio,[]);
+ assert.deepEqual(l.planFiles,[]);assert.equal(l.audio,undefined);
  assert.deepEqual(names(l.activities),['boundary-early.jpg','act-oct.jpg'],'20 Oct 00:30 IST is inside the period');
- assert.equal(l.feedback.text,'Reviewed in October.\n— School Success team');assert.equal(l.outsidePeriodFiles,2);
+ assert.equal(l.feedback.text,'Reviewed in October.\n— School Success team');assert.equal(l.outsidePeriodFiles,1,'sep-plan.pdf (the September voice note is a previous-portal item and is not counted)');
 });
 
 test('lessons with no activity in the period are excluded; re-sent files count once with their original date',async()=>{
@@ -78,7 +78,7 @@ test('period counts agree with the existing School 360° and Teacher 360° calcu
  const entries=await entriesP,lessons=buildLessonRecords(entries,from,to);
  const model=buildSchoolPortfolio({entries,roster:input().roster,directory:{archives:[]}},from,to),alpha=model.schools.find(s=>s.name===A);
  const alphaLessons=filterLessons(lessons,{school:A});
- const files=new Set(alphaLessons.flatMap(l=>[l.planFiles,l.activities,l.writing,l.audio,l.reflections,l.additional].flat().map(x=>x.url)));
+ const files=new Set(alphaLessons.flatMap(l=>[l.planFiles,l.activities,l.writing,l.remedial,l.reflections,l.portfolio].flat().map(x=>x.url)));
  assert.equal(files.size,alpha.files,'unique files match School 360°');
  assert.equal(lessonSummary(alphaLessons).plansSubmitted,alpha.preparations,'lesson plans match School 360° prepared lessons');
  const profile=buildProfiles(entries,input().roster,from,to,defaultReportSettings).find(p=>p.school===A&&p.name===T);
@@ -92,8 +92,8 @@ test('consolidated PDFs state the period rule and exclude out-of-period files; c
  const doc=createLessonDocumentationPdf({kind:'teacher',lessons:period,from,to}),text=pdfText(doc),links=uris(doc);
  assert.match(text,/appear only when they were submitted or recorded in this period/);
  assert.match(text,/Outside this reporting period: 3 files and the Academic Review/);
- for(const name of ['nov.jpg','nov-w.jpg','boundary-late.jpg','sep.wav','sep-plan.pdf','later.jpg'])assert.ok(!links.includes(name),name);
- for(const name of ['oct.jpg','boundary-early.jpg','act-oct.jpg','resend.jpg','v301.wav'])assert.ok(links.includes(name),name);
+ for(const name of ['nov.jpg','nov-w.jpg','boundary-late.jpg','sep.wav','sep-plan.pdf','later.jpg','v301.wav'])assert.ok(!links.includes(name),name);
+ for(const name of ['oct.jpg','boundary-early.jpg','act-oct.jpg','resend.jpg'])assert.ok(links.includes(name),name);
  assert.doesNotMatch(text,/Reviewed in November/);assert.match(text,/Reviewed in October/);
  const full=filterLessons(buildLessonRecords(entries,from,to,{scope:'all'}),{teacher:chitra});
  assert.throws(()=>createLessonDocumentationPdf({kind:'teacher',lessons:full,from,to}),/selected period only/);

@@ -25,14 +25,14 @@ test('usage PDF keeps activity lists chronological; preparation PDFs and audio m
  assert.match(text,/Open file 1\s+2026-10-12[\s\S]*?Open file 2\s+2026-10-13/);assert.match(text,/Activity\s+Sessions\s+Preparation time/);
 });
 
-test('individual teacher PDF shows preparation and library data before activities, writing and phonics',()=>{
+test('individual teacher PDF shows preparation and library data before activities, writing and portfolio; nothing from the previous portal',()=>{
  const s=structuredClone(defaultReportSettings);s.quantitative=false;s.qualitative=false;
  const base={school:'School',teacher:'Teacher One',date:'2026-10-12',grade:'LKG',subject:'English',topic:'Blending'};
  const files=['Video_Evidence_1','Writing_Sample_Link','Phonics_Evidence_Link','Portfolio_Evidence_Link','Voice_Note_Link','Lesson_Plan_Picture','Event_Pictures_Link'].map((column,i)=>({column,url:'https://example.com/file'+i}));
  const text=render(s,false,[{...base,kind:'usage',module:'Lesson Plan',minutes:10},{...base,kind:'usage',module:'Content / Book',minutes:25},{...base,kind:'submission',files}]);
  const teacher=text.slice(text.indexOf('TEACHER PROFILE'));
- const headings=['Lesson preparation - consolidated report','Book / chapter breakdown','Classroom activities','Student written work','Student portfolio / assessment','Phonics evidence (previous portal)','Event pictures (previous portal)'];
- assert.doesNotMatch(teacher,/Lesson preparation PDFs|Audio recordings/);
+ const headings=['Lesson preparation - consolidated report','Book / chapter breakdown','Classroom activities','Student written work','Student portfolio / assessment'];
+ assert.doesNotMatch(teacher,/Lesson preparation PDFs|Audio recordings|Phonics evidence|Event pictures|previous portal/,'nothing from the previous portal');
  let previous=-1;for(const heading of headings){const index=teacher.indexOf(heading);assert(index>previous,'Missing or out-of-order section: '+heading);previous=index;}
  assert.doesNotMatch(teacher,/Grade:|Subject:/);
 });

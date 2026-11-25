@@ -5,11 +5,11 @@ test('portfolio includes zero-usage teachers and empty schools without merging s
  const model=buildSchoolPortfolio(school360Fixture(),from,to),alpha=model.schools.find(s=>s.name==='Alpha School'),beta=model.schools.find(s=>s.name==='Beta School'),empty=model.schools.find(s=>s.name==='Empty School');
  assert.equal(model.schools.length,3);assert.equal(alpha.teachers,2);assert.equal(beta.teachers,2);assert.equal(alpha.withUsage,1);assert.equal(alpha.participation,50);assert.equal(empty.teachers,0);assert.equal(empty.participation,null);
  assert.notEqual(alpha.profiles[0].key,beta.profiles[0].key);assert.equal(alpha.metrics[1].actual,90);assert.equal(beta.metrics[1].actual,12);
- assert.deepEqual(portfolioTotals(model.schools),{schools:3,teachers:4,withUsage:2,files:5,preparations:1,pendingReview:1});
+ assert.deepEqual(portfolioTotals(model.schools),{schools:3,teachers:4,withUsage:2,files:3,preparations:1,pendingReview:1}); // voice.wav and phonics.mp4 are previous-portal items, not counted
 });
 test('school targets reuse Teacher 360 calendars and repeated evidence updates count one lesson',()=>{
  const {schools}=buildSchoolPortfolio(school360Fixture(),from,to),alpha=schools[0];
- assert.equal(alpha.days,2);assert.equal(alpha.metrics[0].target,40);assert.equal(alpha.preparations,1);assert.equal(alpha.classroomLessons,1);assert.equal(alpha.files,5);assert.equal(alpha.pendingReview,1);
+ assert.equal(alpha.days,2);assert.equal(alpha.metrics[0].target,40);assert.equal(alpha.preparations,1);assert.equal(alpha.classroomLessons,1);assert.equal(alpha.files,3);assert.equal(alpha.pendingReview,1);
  const data=school360Fixture();data.entries=data.entries.map(r=>r.recordId==='lesson-1'?{...r,review:'Reviewed carefully'}:r);
  assert.equal(buildSchoolPortfolio(data,from,to).schools[0].pendingReview,0);
 });

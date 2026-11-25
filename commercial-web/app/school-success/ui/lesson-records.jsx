@@ -12,7 +12,7 @@ const safeUrl=url=>typeof url==='string'&&/^https?:\/\//i.test(url)?url:'';
 function save(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 // Only the thumbnails the PDF will place: first six images per evidence section and lesson.
 function thumbnailUrls(lessons,sections){
- const keys=['activities','writing','remedial','portfolio','additional'].filter(k=>sectionOn(sections,k));
+ const keys=['activities','writing','remedial','portfolio'].filter(k=>sectionOn(sections,k));
  return lessons.flatMap(l=>keys.flatMap(k=>(l[k]||[]).filter(f=>isImageUrl(f.url)).slice(0,6).map(f=>f.url)));
 }
 
@@ -85,7 +85,6 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
    <div><strong>{summary.reflections}</strong><span>After-class reflections</span></div>
    <div><strong>{summary.portfolio}</strong><span>Student portfolio / assessment</span></div>
    <div><strong>{summary.reviewed}</strong><span>With Academic Review</span></div>
-   {summary.audio>0&&<div><strong>{summary.audio}</strong><span>Audio recordings (previous portal)</span></div>}
   </div>
   {!lessons.length?<section className="card empty"><h3>No lessons in this view</h3><p>No lesson records were submitted for the selected period and filters.</p></section>:<>
    <div className="lr-list">{lessons.slice((current-1)*PAGE,current*PAGE).map((lesson,i)=><LessonCard key={lesson.key} lesson={lesson} number={(current-1)*PAGE+i+1} showTeacher={mode==='school'} busy={!!busy} onReview={onReview} onDownload={()=>download('lesson',[lesson])} onDownloadHistory={history.has(lesson.key)?()=>download('lesson',[history.get(lesson.key)]):null}/>)}</div>
@@ -117,7 +116,7 @@ export function LessonCard({lesson,number,showTeacher,busy,onDownload,onReview,o
  // Body (and any thumbnails) render only once opened, so files are not preloaded.
  return <details className="lr-lesson" open={defaultOpen||undefined} onToggle={e=>setOpen(e.currentTarget.open)}>
   <summary><span className="lr-no">{number}</span><span className="lr-title"><b>{lesson.topic}</b><small>{[showTeacher&&lesson.teacher,classLine(lesson),lesson.submittedAt?'Submitted '+formatStamp(lesson.submittedAt):lesson.firstDate&&formatDay(lesson.firstDate)].filter(Boolean).join(' · ')}</small></span>
-   <span className="lr-badges">{lesson.activities.length>0&&<span className="lr-badge">{lesson.activities.length} activity</span>}{lesson.writing.length>0&&<span className="lr-badge">{lesson.writing.length} writing</span>}{lesson.audio.length>0&&<span className="lr-badge"><Headphones size={11}/> {lesson.audio.length}</span>}{lesson.reflections.length>0&&<span className="lr-badge">Reflection</span>}{lesson.feedback&&<span className="lr-badge review">Academic Review</span>}{(lesson.outsidePeriodFiles>0||lesson.reviewOutsidePeriod)&&<span className="lr-badge outside">More outside period</span>}</span></summary>
+   <span className="lr-badges">{lesson.activities.length>0&&<span className="lr-badge">{lesson.activities.length} activity</span>}{lesson.writing.length>0&&<span className="lr-badge">{lesson.writing.length} writing</span>}{(lesson.remedial||[]).length>0&&<span className="lr-badge">{lesson.remedial.length} remedial</span>}{(lesson.reflections.length>0||(lesson.writtenReflections||[]).length>0)&&<span className="lr-badge">Reflection</span>}{(lesson.portfolio||[]).length>0&&<span className="lr-badge">{lesson.portfolio.length} portfolio</span>}{lesson.feedback&&<span className="lr-badge review">Academic Review</span>}{(lesson.outsidePeriodFiles>0||lesson.reviewOutsidePeriod)&&<span className="lr-badge outside">More outside period</span>}</span></summary>
   {open&&<div className="lr-body">
    <div className="lr-meta"><div><span>School</span><b>{lesson.school}</b></div><div><span>Teacher</span><b>{lesson.teacher}</b></div><div><span>Class</span><b>{[lesson.grade,lesson.section&&lesson.section!=='Not Applicable'?'Section '+lesson.section:''].filter(Boolean).join(' · ')||'—'}</b></div><div><span>Subject</span><b>{lesson.subject||'—'}</b></div><div><span>Lesson date</span><b>{[lesson.plannedDate&&'Planned '+formatDay(lesson.plannedDate),lesson.conductedOn&&'Taught '+formatDay(lesson.conductedOn)].filter(Boolean).join(' · ')||formatDay(lesson.firstDate)||'—'}</b></div><div><span>Submitted</span><b>{formatStamp(lesson.submittedAt)||'—'}</b></div></div>
    {(lesson.outsidePeriodFiles>0||lesson.reviewOutsidePeriod)&&<p className="lr-outside" role="note">Outside this reporting period: {[lesson.outsidePeriodFiles?lesson.outsidePeriodFiles+' file'+(lesson.outsidePeriodFiles===1?'':'s'):'',lesson.reviewOutsidePeriod?(lesson.feedback?'additional review feedback':'the Academic Review'):''].filter(Boolean).join(' and ')} for this lesson {lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'is':'are'} not shown here. Use Complete history PDF to include {lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'it':'them'}.</p>}
@@ -135,8 +134,6 @@ export function LessonCard({lesson,number,showTeacher,busy,onDownload,onReview,o
    </section>}
    {visible.portfolio&&<Evidence title="Student portfolio / assessment" files={lesson.portfolio} tone="additional" open={open}/>}
    {visible.feedback&&<section className="lr-section"><h4>Academic Review</h4><div className="lr-review"><b>{lesson.feedback.date?'Reviewed '+formatStamp(lesson.feedback.date).split(',')[0]:'Review recorded'}</b><p>{lesson.feedback.text}</p></div></section>}
-   {visible.audio&&<section className="lr-section audio"><h4>Audio recordings (previous portal)<em>{lesson.audio.length}</em></h4><div className="lr-files">{lesson.audio.map(f=>safeUrl(f.url)&&<div className="lr-audio" key={f.url}><span><b>{f.label}</b><small>{f.addedOn?'Added '+formatDay(f.addedOn):''} · <a className="text-button" href={f.url} target="_blank" rel="noopener noreferrer">Open<ArrowUpRight size={12}/></a></small></span><audio controls preload="none" src={f.url}/></div>)}</div></section>}
-   {visible.additional&&<Evidence title="Other evidence (previous portal)" files={lesson.additional} tone="additional" open={open}/>}
    {!Object.values(visible).some(Boolean)&&<p className="hint">No lesson plan details or evidence were recorded for this lesson.</p>}
    <div className="lr-lesson-actions">{onReview&&<button className="button primary" disabled={busy} onClick={()=>onReview(lesson)}>Review lesson</button>}<button className="button" disabled={busy} onClick={onDownload}><FileText size={15}/>Lesson PDF · this period</button>{onDownloadHistory&&<button className="button" disabled={busy} onClick={onDownloadHistory}><FileText size={15}/>Complete history PDF</button>}</div>
   </div>}

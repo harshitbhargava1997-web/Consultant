@@ -8,7 +8,7 @@ const CONFIG={SUPABASE_GATEWAY_TOKEN:SECRET,R2_ACCESS_KEY_ID:'k',R2_SECRET_ACCES
 const ADMIN={role:'admin',email:'consultant@example.test',allowedSchools:['Alpha School']},OTHER={role:'admin',email:'other@example.test',allowedSchools:['Beta School']},TEACHER={role:'school-teacher',email:'t@school.invalid',allowedSchools:['Alpha School']};
 
 function harness(config = CONFIG){
- const r2=new Map(),writes=[],state={actor:ADMIN,fail:null,rows:[{id:201,Type:'Classroom Reflection',Center:'Alpha School',FullName:'AKANSHA PAL',Grade:'Grade 1',Section:'A',Subject:'Mathematics',implementation_date:'2026-11-05',Video_Evidence_1:KEYS[0],Writing_Sample_Link:KEYS[1],Voice_Note_Link:KEYS[2]}]},logs=[];
+ const r2=new Map(),writes=[],state={actor:ADMIN,fail:null,rows:[{id:201,Type:'Classroom Reflection',Center:'Alpha School',FullName:'AKANSHA PAL',Grade:'Grade 1',Section:'A',Subject:'Mathematics',implementation_date:'2026-11-05',Video_Evidence_1:KEYS[0],Writing_Sample_Link:KEYS[1],Portfolio_Evidence_Link:KEYS[2]}]},logs=[];
  const res=(code,body,extra={})=>({ok:code>=200&&code<300,status:code,headers:new Headers({...(body?{'content-length':String(body.length)}:{}),...extra}),body:null,arrayBuffer:async()=>body.buffer.slice(body.byteOffset,body.byteOffset+body.length),text:async()=>Buffer.from(body||'').toString()});
  async function r2Request(config,key,method,body,headers={}){
   const f=state.fail&&state.fail(method,key);if(f)return f;
@@ -196,9 +196,9 @@ test('export → revoke (another admin, another session) → re-export without r
  const {mapLive}=await import(path.join(root,'lib/school-success/live-mapping.js'));
  const fx=await import(path.join(root,'tests/fixtures/lesson-records.mjs')),mapped=await mapLive(fx.raw(),fx.base),entries=mapped.entries;
  h.state.rows=fx.raw().records;
- const teacherKeys=[JSON.stringify(['Alpha School','Asha'])],pick=list=>list.filter(l=>l.grade==='Grade 3'&&l.section==='B'&&l.subject==='Hindi');
+ const teacherKeys=[JSON.stringify(['Alpha School','Asha'])],pick=list=>list.filter(l=>l.grade==='Grade 2'&&l.section==='A'&&l.subject==='English');  // a lesson with School Success evidence files (the Hindi lesson has only a previous-portal voice note)
  // Fake browser render: lists the PDF's evidence links (through session.linkFor) as text.
- const render=async(lessons,{session})=>h.pdf('complete · '+lessons.flatMap(l=>[...l.activities,...l.writing,...l.audio,...l.planFiles,...l.additional,...l.reflections]).map(f=>session.linkFor(f.url)).join(' '));
+ const render=async(lessons,{session})=>h.pdf('complete · '+lessons.flatMap(l=>[...l.activities,...l.writing,...(l.remedial||[]),...(l.portfolio||[]),...l.planFiles,...l.reflections]).map(f=>session.linkFor(f.url)).join(' '));
  const fetcher=async(url,init)=>{const route=url==='/api/school-success/report-snapshots'?null:url;if(!route){const scope=JSON.parse(Buffer.from(init.headers['X-Snapshot-Scope'],'base64url').toString());const r=await h.storeSnapshot(init.body,scope);return Response.json(r.body,{status:r.status});}const r=await h.createShare(JSON.parse(init.body));return Response.json(r.body,{status:r.status});};
  const exportOnce=async()=>pick([...(await buildDocumentationLinks({entries,from:fx.from,to:fx.to,teacherKeys,generatedAt:'2026-11-17T06:00:00.000Z',render,wait:async()=>{},
   begin:()=>reportAccessSession({mode:'link',origin:'https://app.test',mediaBase:fx.base,newSecret:shares.newShareSecret}),
@@ -214,7 +214,7 @@ test('export → revoke (another admin, another session) → re-export without r
  h.state.actor=null;
  assert.equal((await h.open(id1,{secret:secret1})).status,410,'old link stays revoked');assert.equal((await h.file(id1,0,{secret:secret1})).status,410);
  const o=await h.open(id2,{secret:secret2});assert.equal(o.status,200);
- assert.equal(o.body.filename,'Lesson_Documentation_Asha_Grade_3_B_Hindi_'+fx.from+'_'+fx.to+'.pdf','same exact selection, complete report');
+ assert.equal(o.body.filename,'Lesson_Documentation_Asha_Grade_2_A_English_'+fx.from+'_'+fx.to+'.pdf','same exact selection, complete report');
  const text=Buffer.from(await (await h.get(id2,query(o.body.url))).arrayBuffer()).toString();
  assert.ok(text.includes(`/school-success/shared/${id2}/file/0#${secret2}`),'the new report\'s file links belong to the new link');assert.ok(!text.includes(id1));
  const f=await h.file(id2,0,{secret:secret2});assert.equal(f.status,200);assert.ok(signedUrl(f.body.url).signed);
@@ -253,7 +253,7 @@ test('real R2 serves the signed photo, writing sample and ranged recording in bo
   assert.ok(res.ok,'synthetic upload HTTP '+res.status);created.push(keys[index]);
  }
  const h=harness({...config,SUPABASE_GATEWAY_TOKEN:SECRET}),editor={...ADMIN,allowedSchools:[school]};
- h.state.rows=[{...h.state.rows[0],Center:school,FullName:teacher,Video_Evidence_1:keys[0],Writing_Sample_Link:keys[1],Voice_Note_Link:keys[2]}];
+ h.state.rows=[{...h.state.rows[0],Center:school,FullName:teacher,Video_Evidence_1:keys[0],Writing_Sample_Link:keys[1],Portfolio_Evidence_Link:keys[2]}];
  for(const mode of ['link','signin']){
   h.state.actor=editor;
   const record=await publish(h,{mode,over:{school,teacher},evidence:keys});

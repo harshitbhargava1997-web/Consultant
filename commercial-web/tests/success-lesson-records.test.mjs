@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mapLive} from '../lib/school-success/live-mapping.js';
-import {buildLessonRecords,filterLessons,lessonSummary,groupLessons,classSubjectBreakdown,parseLessonPlan,visibleLessonSections,lessonFilterOptions,formatStamp,compareLessons} from '../lib/school-success/lesson-records.js';
+import {buildLessonRecords,filterLessons,lessonSummary,groupLessons,classSubjectBreakdown,parseLessonPlan,visibleLessonSections,lessonFilterOptions,formatStamp,compareLessons,lessonEvidenceFiles} from '../lib/school-success/lesson-records.js';
 import {buildSchoolPortfolio,submissionStats,filterSchoolEvidence} from '../lib/school-success/school-portfolio.js';
 import {chronologicalRows} from '../lib/report-sequence.js';
 import {raw,rawRecords,base,from,to} from './fixtures/lesson-records.mjs';
@@ -37,23 +37,22 @@ test('evidence stays with its own lesson row; no matching by name, date or topic
  assert.equal(beta.writing.length,1);assert.match(beta.writing[0].url,/beta\.jpg$/);assert.equal(beta.feedback,null);
  assert.notEqual(asha.teacherKey,beta.teacherKey);
  // Consultant observations have no lesson identity and are never attached.
- for(const l of lessons)assert.ok(![...l.activities,...l.additional,...l.reflections].some(f=>/Observation/.test(f.label)));
+ for(const l of lessons)assert.ok(![...l.activities,...l.remedial,...l.portfolio,...l.reflections].some(f=>/Observation/.test(f.label)));
  assert.equal(lessons.some(l=>l.recordId==='7'),false);
 });
 
-test('multiple audio recordings stay labelled under the correct lesson',async()=>{
+test('previous-portal voice notes are left out; after-class reflection recordings stay with reflections',async()=>{
  const lessons=buildLessonRecords(await load(),from,to),asha=byId(lessons,'101'),hindi=byId(lessons,'102');
- assert.deepEqual(asha.audio.map(f=>[f.label,f.url.split('/').pop()]),[['Lesson preparation recording 1','v1.wav'],['Lesson preparation recording 2','v2.wav']]);
- assert.deepEqual(hindi.audio.map(f=>[f.label,f.url.split('/').pop()]),[['Lesson preparation recording','h1.wav']]);
+ assert.equal(asha.audio,undefined);assert.equal(hindi.audio,undefined);
+ assert.ok(!lessonEvidenceFiles(asha).some(f=>/\/voice\//.test(f.url))&&!lessonEvidenceFiles(hindi).length,'no voice notes in lesson evidence');
  assert.deepEqual(asha.reflections.map(f=>[f.label,f.kind,Boolean(f.legacy)]),[['Earlier after-class reflection (saved PDF)','PDF',true],['After-class reflection recording','Audio',false]]);
- assert.ok(!asha.audio.some(f=>/closure/.test(f.url)),'reflection audio stays with reflections');
 });
 
 test('repeated evidence submissions do not duplicate files or inflate counts',async()=>{
  const entries=await load(),lessons=buildLessonRecords(entries,from,to),asha=byId(lessons,'101');
- const urls=[asha.planFiles,asha.activities,asha.writing,asha.audio,asha.reflections,asha.additional].flat().map(f=>f.url);
+ const urls=[asha.planFiles,asha.activities,asha.writing,asha.remedial,asha.reflections,asha.portfolio].flat().map(f=>f.url);
  assert.equal(new Set(urls).size,urls.length);
- assert.equal(urls.length,8); // plan, 2 activities, 1 writing, 2 recordings, reflection PDF and recording
+ assert.equal(urls.length,6); // plan, 2 activities, 1 writing, reflection PDF and recording (previous-portal voice notes are left out)
  // a1.jpg was sent in two updates; it is one file.
  assert.equal(asha.activities.filter(f=>f.url.endsWith('a1.jpg')).length,1);
  // Lesson plan count matches the established School 360° preparation count.
@@ -88,7 +87,7 @@ test('hierarchy and breakdown keep same-name teachers apart',async()=>{
  assert.deepEqual(groups.map(g=>[g.school,g.teachers.map(t=>t.teacher+':'+t.lessons.length)]),[['Alpha School',['Asha:3','Bina:1']],['Beta School',['Asha:1']]]);
  assert.deepEqual(groups[0].teachers[0].classes.map(c=>[c.grade,c.subject,c.lessons.map(l=>l.recordId)]),[['Grade 2','English',['101']],['Grade 2','Mathematics',['150']],['Grade 3','Hindi',['102']]]);
  const breakdown=classSubjectBreakdown(lessons.filter(l=>l.school==='Alpha School'));
- assert.deepEqual(breakdown.find(r=>r.grade==='Grade 2'&&r.subject==='English'),{grade:'Grade 2',subject:'English',lessons:1,teachers:1,activities:2,writing:1,reflections:2,audio:2});
+ assert.deepEqual(breakdown.find(r=>r.grade==='Grade 2'&&r.subject==='English'),{grade:'Grade 2',subject:'English',lessons:1,teachers:1,activities:2,writing:1,reflections:2});
 });
 
 test('lesson plan uses the stored prompt structure and never invents fields',()=>{
@@ -103,11 +102,11 @@ test('lesson plan uses the stored prompt structure and never invents fields',()=
 
 test('optional sections can be hidden without changing the lesson record',async()=>{
  const lessons=buildLessonRecords(await load(),from,to),asha=byId(lessons,'101'),before=JSON.stringify(asha);
- assert.deepEqual(visibleLessonSections(asha),{plan:true,activities:true,writing:true,remedial:false,portfolio:false,audio:true,reflections:true,feedback:true,additional:false});
- assert.deepEqual(visibleLessonSections(asha,{activities:false,writing:false,audio:false,reflections:false,feedback:false}),{plan:true,activities:false,writing:false,remedial:false,portfolio:false,audio:false,reflections:false,feedback:false,additional:false});
+ assert.deepEqual(visibleLessonSections(asha),{plan:true,activities:true,writing:true,remedial:false,portfolio:false,reflections:true,feedback:true});
+ assert.deepEqual(visibleLessonSections(asha,{activities:false,writing:false,reflections:false,feedback:false}),{plan:true,activities:false,writing:false,remedial:false,portfolio:false,reflections:false,feedback:false});
  assert.equal(JSON.stringify(asha),before);
  // Missing evidence is omitted rather than shown as empty placeholders.
- assert.deepEqual(visibleLessonSections(byId(lessons,'150')),{plan:true,activities:false,writing:false,remedial:false,portfolio:false,audio:false,reflections:false,feedback:false,additional:false});
+ assert.deepEqual(visibleLessonSections(byId(lessons,'150')),{plan:true,activities:false,writing:false,remedial:false,portfolio:false,reflections:false,feedback:false});
 });
 
 test('the existing School 360° evidence flow is unchanged by the lesson view',async()=>{

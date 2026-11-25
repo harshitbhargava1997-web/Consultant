@@ -16,6 +16,9 @@ export function splitStoredFiles(files=[]){return [
  {label:'Audio recordings',files:chronologicalRows(files.filter(f=>f.category==='voice'||column(f)==='Voice_Note_Link'))},
  {label:'',files:chronologicalRows(files.filter(f=>!isClosureFile(f)&&!isRemedialFile(f)&&!['lesson_plan','voice'].includes(f.category)&&!['Lesson_Plan_Picture','Voice_Note_Link'].includes(column(f))))}
  ].filter(g=>g.files.length);}
+// Teacher 360° evidence: the School Success portal categories only. Previous-portal items (phonics evidence,
+// audio notes, event pictures) are not shown (owner decision, 25 November 2026).
 export function reportEvidenceGroups(profile){
- return [...profile.evidence.map(e=>({label:e.label,files:chronologicalRows(e.files)})),...(profile.legacyEvidence||[]).map(g=>({label:g.label,files:chronologicalRows(g.files)})),{label:'Event pictures (previous portal)',files:chronologicalRows(profile.events||[])}];
+ return profile.evidence.map(e=>({label:e.label,files:chronologicalRows(e.files)}));
 }
+

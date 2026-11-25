@@ -1,5 +1,5 @@
-// Lesson records and the lesson documentation PDF use the same evidence categories, in the same order, as
-// Teacher 360° "Teacher evidence"; previous-portal items come last and are labelled as such.
+// Lesson records, the lesson review and the lesson documentation PDF use the same evidence categories, in the
+// same order, as Teacher 360° "Teacher evidence". Nothing from the previous portal is shown or counted.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {execFileSync} from 'node:child_process';
@@ -15,8 +15,8 @@ const entries=[
 ];
 const pdfText=doc=>{const dir=mkdtempSync(join(tmpdir(),'cat-'));try{const file=join(dir,'r.pdf');writeFileSync(file,Buffer.from(doc.output('arraybuffer')));return execFileSync('pdftotext',['-layout',file,'-'],{encoding:'utf8'});}finally{rmSync(dir,{recursive:true,force:true});}};
 
-test('the section list follows the Teacher evidence categories, then the review, then the previous portal',()=>{
- assert.deepEqual(optionalLessonSections.map(([,l])=>l),['Classroom activities','Student written work','Remedial support','After-class reflections','Student portfolio / assessment','Academic Review','Audio recordings (previous portal)','Other evidence (previous portal)']);
+test('the section list is the Teacher evidence categories, then the Academic Review; nothing from the previous portal',()=>{
+ assert.deepEqual(optionalLessonSections.map(([,l])=>l),['Classroom activities','Student written work','Remedial support','After-class reflections','Student portfolio / assessment','Academic Review']);
  assert.deepEqual(evidenceNames.slice(1),['Classroom activities','Student written work','Remedial support','After-class reflections','Student portfolio / assessment']);
 });
 
@@ -26,27 +26,30 @@ test('lesson records count each category exactly as Teacher 360° does',()=>{
  const teacher360=Object.fromEntries(p.evidence.map(e=>[e.label,e.actual]));
  assert.deepEqual({activities:s.activities,writing:s.writing,remedial:s.remedial,reflections:s.reflections,portfolio:s.portfolio},
   {activities:teacher360['Classroom activities'],writing:teacher360['Student written work'],remedial:teacher360['Remedial support'],reflections:teacher360['After-class reflections'],portfolio:teacher360['Student portfolio / assessment']});
- assert.deepEqual([s.activities,s.writing,s.remedial,s.reflections,s.portfolio,s.audio],[2,1,1,1,1,1]);
- assert.equal(lesson.additional.length,1,'phonics evidence from the previous portal');
- assert.equal(lessonEvidenceFiles(lesson).length,8,'every file is still included once for report access');
+ assert.deepEqual([s.activities,s.writing,s.remedial,s.reflections,s.portfolio],[2,1,1,1,1]);
+ assert.equal(lesson.audio,undefined);assert.equal(lesson.additional,undefined);
+ const files=lessonEvidenceFiles(lesson).map(f=>f.url);
+ assert.equal(files.length,6,'report access covers the six School Success files only');
+ assert.ok(!files.some(u=>/voice|phonics/.test(u)),'previous-portal voice note and phonics evidence are left out');
 });
 
 test('a saved "Further classroom evidence" choice still applies to remedial support and portfolio',()=>{
  const [lesson]=buildLessonRecords(entries,'2026-11-01','2026-11-30');
  const v=visibleLessonSections(lesson,{additional:false});
- assert.equal(v.remedial,false);assert.equal(v.portfolio,false);assert.equal(v.additional,false);
+ assert.equal(v.remedial,false);assert.equal(v.portfolio,false);assert.ok(!('additional' in v)&&!('audio' in v));
  const own=visibleLessonSections(lesson,{additional:false,remedial:true,portfolio:true});
  assert.equal(own.remedial,true);assert.equal(own.portfolio,true);
 });
 
-test('the lesson documentation PDF shows the same summary and sections, previous-portal items last',()=>{
+test('the lesson documentation PDF shows the same summary and sections, and nothing from the previous portal',()=>{
  const [lesson]=buildLessonRecords(entries,'2026-11-01','2026-11-30');
  const text=pdfText(createLessonDocumentationPdf({kind:'teacher',lessons:[lesson],from:'2026-11-01',to:'2026-11-30'}));
  const summary=text.slice(0,text.indexOf('About this report'.toUpperCase())>0?text.indexOf('ABOUT THIS REPORT'):text.indexOf('About this report'));
  for(const label of ['Classroom activities','Student written work','Remedial support','After-class reflections','Student portfolio /','Lessons with Academic'])assert.ok(summary.includes(label),label);
  assert.ok(!/Teacher reflections|Classroom activity files/.test(text));
  const heading=h=>text.indexOf(h.toUpperCase());
- const order=['Classroom activities','Student written work','Remedial support','After-class reflections','Student portfolio / assessment','Audio recordings (previous portal)','Other evidence (previous portal)'].map(heading);
+ assert.ok(!/previous portal|Audio recordings|Phonics|voice\/v1|phonics\/ph1/i.test(text),'nothing from the previous portal');
+ const order=['Classroom activities','Student written work','Remedial support','After-class reflections','Student portfolio / assessment'].map(heading);
  assert.ok(order.every(i=>i>0),JSON.stringify(order));
  assert.deepEqual([...order].sort((a,b)=>a-b),order);
 });

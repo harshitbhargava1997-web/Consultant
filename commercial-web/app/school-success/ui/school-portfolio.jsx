@@ -4,7 +4,7 @@ import {successFetch} from '@/lib/school-success/client';
 import {portfolioCountColumns,portfolioPdfSettings,selectedPortfolioCounts,portfolioComparison} from '@/lib/school-success/school-portfolio';
 import dynamic from 'next/dynamic';
 import {ArrowLeft,ArrowUpRight,BookOpen,Download,FileText,School,Users} from 'lucide-react';
-import {buildSchoolPortfolio,filterPortfolioSchools,filterSchoolEvidence,portfolioTotals,portfolioModules,portfolioExportRows,portfolioCategories,fileCategory,submissionStats} from '@/lib/school-success/school-portfolio';
+import {buildSchoolPortfolio,filterPortfolioSchools,filterSchoolEvidence,portfolioTotals,portfolioModules,portfolioExportRows,portfolioCategories,fileCategory,isPortalEvidence,submissionStats} from '@/lib/school-success/school-portfolio';
 import {formatReportDuration as duration} from '@/lib/school-success/report-units';
 import {csv} from '@/lib/school-success/domain';
 import './school-portfolio.css';
@@ -99,7 +99,7 @@ export default function SchoolPortfolio({data,schoolFilter='',query='',from,to,s
  </div>;
 }
 function SchoolEvidence({row,category,onReview,onTeacher}){
- const files=(row.files||[]).filter(f=>category==='all'||fileCategory(f)===category);
+ const files=(row.files||[]).filter(f=>isPortalEvidence(f)&&(category==='all'||fileCategory(f)===category));
  return <article className="conversation school360-evidence"><div className="flex-between"><div><button className="text-button" onClick={onTeacher}>{row.teacher}<ArrowUpRight size={14}/></button><small>{row.date} · {row.grade} {row.section} · {row.subject}</small></div><span className={'pill '+(row.review?'green':'amber')}>{row.review?'Feedback recorded':'Awaiting review'}</span></div>
   <p><b>{row.feedStage||(row.stage==='preparation_saved'?'Lesson preparation':'Classroom submission')}</b>{row.plannedDate?' · Planned: '+row.plannedDate:''}{row.conductedOn?' · Taught: '+row.conductedOn:''}</p><h3>{row.topic}</h3>{row.reflection&&<p className="school360-reflection">{row.reflection}</p>}{row.materials&&<p><b>Teaching-learning materials: </b>{row.materials}</p>}
   {files.filter(f=>f.reflection).map(f=><div className="feedback" key={'r:'+f.url}><b>Written after-class reflection</b>{['achievement','nextStep'].filter(k=>f.reflection.answers?.[k]).map(k=><p key={k} style={{whiteSpace:'pre-wrap'}}>{f.reflection.answers[k]}</p>)}</div>)}<div className="evidence-files">{files.filter(f=>!f.reflection).map((file,i)=>{const url=safeMediaUrl(file.url);return url?<a key={file.key||i} className="file" href={url} target="_blank" rel="noopener noreferrer"><FileText size={18}/><span>{portfolioCategories.find(([key])=>key===fileCategory(file))?.[1]||file.name}<small>Open submitted file</small></span><ArrowUpRight size={15}/></a>:null;})}</div>

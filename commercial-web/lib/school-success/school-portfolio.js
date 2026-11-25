@@ -30,7 +30,12 @@ export const fileCategory=file=>{
  if(column==='Event_Pictures_Link'||file.category==='event_pictures')return 'events';
  return 'other';
 };
-export const portfolioCategories=[['all','All evidence'],['preparation','Lesson plans'],['audio','Audio recordings'],['closure','After-class reflections'],['remedial','Remedial plans / support shared with students'],['activity','Classroom activities'],['writing','Writing samples'],['phonics','Phonics evidence'],['portfolio','Portfolio artifacts'],['events','Event pictures'],['other','Other files']];
+// The evidence categories of the School Success portal, in the Teacher 360° "Teacher evidence" order (owner
+// decision, 25 November 2026). Items that exist only in the previous portal (audio notes, phonics evidence,
+// event pictures, other files) are not shown or counted in reports; their stored records are unchanged.
+export const portfolioCategories=[['all','All evidence'],['preparation','Lesson plans'],['activity','Classroom activities'],['writing','Student written work'],['remedial','Remedial support'],['closure','After-class reflections'],['portfolio','Student portfolio / assessment']];
+export const PREVIOUS_PORTAL_CATEGORIES=new Set(['audio','phonics','events','other']);
+export const isPortalEvidence=file=>!PREVIOUS_PORTAL_CATEGORIES.has(fileCategory(file));
 export const lessonIdentity=row=>JSON.stringify([row.school,row.teacher,row.recordId||row.id||[row.plannedDate||row.date,row.grade,row.section,row.subject,row.topic]]);
 export function submissionStats(rows){
  const lessons=new Map(),preparations=new Set(),classroomLessons=new Set(),files=new Map(),teachers=new Set(),savedPlans=new Set();
@@ -42,10 +47,10 @@ export function submissionStats(rows){
   // uploaded file, so it is not in the file totals.
   for(const file of evidenceFiles(row)){
    if(file.lessonPlan){savedPlans.add(JSON.stringify([row.school,row.teacher,evidenceKey(file)]));continue;}
-   if(!file.url)continue;
+   if(!file.url||!isPortalEvidence(file))continue;
    const key=JSON.stringify([row.school,row.teacher,file.url]),category=fileCategory(file);
    files.set(key,{...file,category,teacher:row.teacher,date:row.date});teachers.add(teacherKey(row.school,row.teacher));
-   if(!['preparation','audio'].includes(category))classroomLessons.add(lesson);
+   if(category!=='preparation')classroomLessons.add(lesson);
   }
  }
  const categories=Object.fromEntries(portfolioCategories.filter(([key])=>key!=='all').map(([key])=>[key,[...files.values()].filter(f=>f.category===key).length+(key==='preparation'?savedPlans.size:0)]));
@@ -86,7 +91,8 @@ export function filterPortfolioSchools(schools,{school='',query='',status='all',
  });
 }
 export function filterSchoolEvidence(rows,{teacher='',category='all',review='all',query='',order='oldest'}={}){
- const filtered=rows.filter(r=>(!teacher||r.teacher===teacher)&&(category==='all'||category==='preparation'&&isLessonPlanRecord(r)||(r.files||[]).some(f=>fileCategory(f)===category))&&
+ // Rows with nothing from the School Success portal (previous-portal items only) are left out.
+ const filtered=rows.filter(r=>(r.stage||(r.files||[]).some(isPortalEvidence))&&(!teacher||r.teacher===teacher)&&(category==='all'||category==='preparation'&&isLessonPlanRecord(r)||(r.files||[]).some(f=>fileCategory(f)===category))&&
   (review==='all'||review==='pending'&&!r.review?.trim()||review==='reviewed'&&Boolean(r.review?.trim()))&&
   [r.school,r.teacher,r.grade,r.section,r.subject,r.topic,r.reflection,r.materials,r.date].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
  const ordered=chronologicalRows(filtered);
