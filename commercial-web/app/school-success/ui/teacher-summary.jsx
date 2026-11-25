@@ -1,6 +1,8 @@
 'use client';
 import {useEffect,useState} from 'react';
-import {ClipboardList,Camera,MessageSquareText,ArrowRight,RefreshCw,CircleCheck,ThumbsUp} from 'lucide-react';
+import {ClipboardList,Camera,MessageSquareText,ArrowRight,RefreshCw,CircleCheck,ThumbsUp,CalendarDays} from 'lucide-react';
+import {feedbackFilterOptions,filterFeedback} from '@/lib/school-success/feedback-filters';
+import {classOf} from '@/lib/school-success/day-periods';
 import {dayLabel,hindiOptions} from './lesson-plan-form';
 
 const monthNames={en:['January','February','March','April','May','June','July','August','September','October','November','December'],hi:['जनवरी','फ़रवरी','मार्च','अप्रैल','मई','जून','जुलाई','अगस्त','सितंबर','अक्टूबर','नवंबर','दिसंबर']};
@@ -53,8 +55,21 @@ export function RecentLessons({summary,language,onOpen,limit,onShowAll,loading,e
  </section>;
 }
 
-export function FeedbackCard({summary,language,who,onOpen,onNote}){
- const t=(en,hi)=>language==='hi'?hi:en,items=summary?.feedback||[];
+const FEEDBACK_FILTER_KEY='school-success:feedback-filters';
+function savedFeedbackFilters(){try{const v=JSON.parse(localStorage.getItem(FEEDBACK_FILTER_KEY)||'{}');return {when:['all','week','month','range'].includes(v.when)?v.when:'all',cls:String(v.cls||''),subject:String(v.subject||''),by:String(v.by||''),status:['all','new','noted'].includes(v.status)?v.status:'all'};}catch{return {when:'all',cls:'',subject:'',by:'',status:'all'};}}
+
+// filters: the Feedback tab shows filters by date given, class, subject, reviewer and "Noted" (owner request,
+// 25 November 2026); the choice is remembered on this phone.
+export function FeedbackCard({summary,language,who,onOpen,onNote,filters=false}){
+ const t=(en,hi)=>language==='hi'?hi:en,all=summary?.feedback||[];
+ const [prefs,setPrefs]=useState(()=>filters?savedFeedbackFilters():{when:'all',cls:'',subject:'',by:'',status:'all'}),[range,setRange]=useState({from:'',to:''});
+ function choose(change){setPrefs(p=>{const next={...p,...change};try{localStorage.setItem(FEEDBACK_FILTER_KEY,JSON.stringify(next));}catch{}return next;});}
+ const options=feedbackFilterOptions(all),o=v=>language==='hi'?(hindiOptions[v]||String(v).replace('Grade ','कक्षा ')):v;
+ const classNames=new Map(all.map(f=>[classOf(f),[f.grade&&o(f.grade),f.section&&f.section!=='Not Applicable'?f.section:''].filter(Boolean).join(' ')]));
+ // A remembered choice that is no longer in the list is ignored.
+ const pick=(v,list)=>list.includes(v)?v:'';
+ const active={when:prefs.when,today:summary?.today,range,cls:pick(prefs.cls,options.classes),subject:pick(prefs.subject,options.subjects),by:pick(prefs.by,options.reviewers),status:prefs.status};
+ const items=filters?filterFeedback(all,active):all,narrowed=filters&&(active.when!=='all'||active.cls||active.subject||active.by||active.status!=='all');
  const [seen,setSeen]=useState(null),[expanded,setExpanded]=useState(false),[noting,setNoting]=useState(''),[noteError,setNoteError]=useState('');
  // "Noted" tells the reviewer the teacher has read this feedback. It is saved once and cannot be undone.
  async function note(f){const id=f.recordId+'|'+f.key;setNoting(id);setNoteError('');try{await onNote(f);}catch(e){setNoteError(e.message||t('Could not save. Please try again.','सहेजा नहीं जा सका। फिर कोशिश करें।'));}finally{setNoting('');}}
@@ -62,10 +77,22 @@ export function FeedbackCard({summary,language,who,onOpen,onNote}){
   // Items stay marked "New" during this visit; the next visit treats them as read.
   const newest=items[0]?.date;if(newest)try{localStorage.setItem(seenKey(who),newest);}catch{}},[summary,who]);
  const isNew=f=>seen!==null&&String(f.date)>seen;
- const shown=expanded?items:items.slice(0,3);
+ const shown=expanded?items:items.slice(0,filters?5:3);
  return <section className="ts-card ts-feedback">
-  <div className="ts-card-head"><div><h3>{t('Feedback received','मिली प्रतिक्रिया')}</h3><p>{t('Comments from your academic reviewer on your lessons.','आपके पाठों पर शैक्षणिक समीक्षक की टिप्पणियाँ।')}</p></div>{items.filter(isNew).length>0&&<span className="ts-new">{items.filter(isNew).length} {t('new','नई')}</span>}</div>
-  {!items.length?<div className="ts-empty"><MessageSquareText size={26}/><p>{t('No feedback yet. When your lessons are reviewed, comments appear here.','अभी कोई प्रतिक्रिया नहीं है। समीक्षा होने पर टिप्पणियाँ यहाँ दिखेंगी।')}</p></div>
+  <div className="ts-card-head"><div><h3>{t('Feedback received','मिली प्रतिक्रिया')}</h3><p>{t('Comments from your academic reviewer on your lessons.','आपके पाठों पर शैक्षणिक समीक्षक की टिप्पणियाँ।')}</p></div>{all.filter(isNew).length>0&&<span className="ts-new">{all.filter(isNew).length} {t('new','नई')}</span>}</div>
+  {filters&&all.length>0&&<>
+   <div className="ta-filters" role="group" aria-label={t('Feedback given','प्रतिक्रिया कब मिली')}>{[['all',t('All','सभी')],['week',t('This week','इस सप्ताह')],['month',t('This month','इस महीने')],['range',t('Date','तिथि')]].map(([k,l])=><button type="button" key={k} aria-pressed={prefs.when===k} className={'ta-chip'+(prefs.when===k?' on':'')} onClick={()=>choose({when:k})}>{k==='range'&&<CalendarDays size={13}/>}{l}</button>)}</div>
+   {prefs.when==='range'&&<div className="ta-range"><label><span>{t('From','से')}</span><input type="date" value={range.from} onChange={e=>setRange(r=>({...r,from:e.target.value}))}/></label><label><span>{t('To','तक')}</span><input type="date" value={range.to} onChange={e=>setRange(r=>({...r,to:e.target.value}))}/></label></div>}
+   <div className="ta-selects">
+    <label><span>{t('Class','कक्षा')}</span><select aria-label={t('Class','कक्षा')} value={active.cls} onChange={e=>choose({cls:e.target.value})}><option value="">{t('All classes','सभी कक्षाएँ')}</option>{options.classes.map(c=><option key={c} value={c}>{classNames.get(c)||c}</option>)}</select></label>
+    <label><span>{t('Subject','विषय')}</span><select aria-label={t('Subject','विषय')} value={active.subject} onChange={e=>choose({subject:e.target.value})}><option value="">{t('All subjects','सभी विषय')}</option>{options.subjects.map(v=><option key={v} value={v}>{o(v)}</option>)}</select></label>
+    <label><span>{t('From','द्वारा')}</span><select aria-label={t('Feedback from','प्रतिक्रिया देने वाले')} value={active.by} onChange={e=>choose({by:e.target.value})}><option value="">{t('Everyone','सभी')}</option>{options.reviewers.map(v=><option key={v} value={v}>{v}</option>)}</select></label>
+    <label><span>{t('Status','स्थिति')}</span><select aria-label={t('Status','स्थिति')} value={prefs.status} onChange={e=>choose({status:e.target.value})}><option value="all">{t('All feedback','सभी प्रतिक्रिया')}</option><option value="new">{t('Not yet noted','अभी नोट नहीं किया')}</option><option value="noted">{t('Noted','नोट किया')}</option></select></label>
+   </div>
+   {narrowed&&<p className="hint ts-filter-count">{t('Showing '+items.length+' of '+all.length,all.length+' में से '+items.length+' दिखाए गए')} · <button type="button" className="text-button" onClick={()=>{choose({when:'all',cls:'',subject:'',by:'',status:'all'});setRange({from:'',to:''});}}>{t('Clear filters','फ़िल्टर हटाएँ')}</button></p>}
+  </>}
+  {!all.length?<div className="ts-empty"><MessageSquareText size={26}/><p>{t('No feedback yet. When your lessons are reviewed, comments appear here.','अभी कोई प्रतिक्रिया नहीं है। समीक्षा होने पर टिप्पणियाँ यहाँ दिखेंगी।')}</p></div>
+  :!items.length?<div className="ts-empty"><MessageSquareText size={26}/><p>{prefs.when==='range'&&!range.from&&!range.to?t('Choose a date or a range.','कोई तिथि या अवधि चुनें।'):t('No feedback matches these filters.','इन फ़िल्टर से कोई प्रतिक्रिया नहीं मिली।')}</p></div>
   :<ul className="ts-feed">{shown.map((f,i)=><li key={f.lessonId+':'+i} className={isNew(f)?'new':''}>
     <div className="ts-feed-head"><b>{lessonTitle(f,language)}</b>{isNew(f)&&<span className="ts-new small">{t('New','नई')}</span>}<small>{f.date?dayLabel(String(f.date).slice(0,10),language):''}</small></div>
     <p className="ts-topic">{f.topic}</p>
@@ -75,6 +102,6 @@ export function FeedbackCard({summary,language,who,onOpen,onNote}){
    </li>)}</ul>}
   {noteError&&<p className="alert error" role="alert">{noteError}</p>}
   {onNote&&items.length>0&&<p className="hint">{t('Tap “Noted” to let your reviewer know you have read their feedback.','समीक्षक को बताने के लिए कि आपने प्रतिक्रिया पढ़ ली है, “नोट किया” दबाएँ।')}</p>}
-  {items.length>3&&<button type="button" className="text-button" onClick={()=>setExpanded(v=>!v)}>{expanded?t('Show less','कम दिखाएँ'):t('Show all feedback','सभी प्रतिक्रिया देखें')+' ('+items.length+')'}</button>}
+  {items.length>(filters?5:3)&&<button type="button" className="text-button" onClick={()=>setExpanded(v=>!v)}>{expanded?t('Show less','कम दिखाएँ'):t('Show all feedback','सभी प्रतिक्रिया देखें')+' ('+items.length+')'}</button>}
  </section>;
 }

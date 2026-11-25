@@ -416,3 +416,27 @@
 .success-app .ov-btn small{position:absolute;font-size:8px;font-weight:800;top:15px}.success-app .ov-btn:disabled{opacity:.4}
 .success-app .ov-track{flex:1;height:4px;border-radius:9px;background:rgba(255,255,255,.3);overflow:hidden}.success-app .ov-track span{display:block;height:100%;background:#7fd1a8}
 .success-app .ov-time{color:#fff;font-size:12px;font-variant-numeric:tabular-nums;flex:none}
+/* Home: recent lessons day by day, every period numbered (owner request, 25 November 2026) */
+.success-app .ta-selects{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:4px 0 8px}
+.success-app .ta-selects label{display:flex;flex-direction:column;gap:3px;min-width:0}
+.success-app .ta-selects span{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.success-app .ta-selects select{width:100%;min-width:0;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13.5px;background:#fff;color:var(--ink)}
+.success-app .ta-days{list-style:none;margin:0;padding:0}
+.success-app .ta-dayrow{display:block;border-top:1px solid var(--line);padding:10px 0 4px}.success-app .ta-dayrow:first-child{border-top:0}
+.success-app .ta-day-head{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+.success-app .ta-day-title{flex:1;min-width:0}.success-app .ta-day-title b{display:block;font-size:14px}.success-app .ta-day-title small{color:var(--muted);font-size:12px}
+.success-app .ta-periods{list-style:none;margin:0 0 0 58px;padding:0}
+.success-app .ta-periods li{display:flex;align-items:center;gap:8px;border-top:1px dashed var(--line)}.success-app .ta-periods li:first-child{border-top:0}
+.success-app .ta-period{flex:1;min-width:0;display:flex;align-items:flex-start;gap:10px;padding:9px 0;text-align:left;background:none;border:0;color:inherit}
+.success-app .ta-pnum{flex:none;font-size:11px;font-weight:800;color:var(--green);background:var(--mint);border-radius:999px;padding:3px 8px;margin-top:1px;white-space:nowrap}
+@media (max-width:380px){.success-app .ta-periods{margin-left:0}}
+/* Plan screen: periods already saved for the chosen day (green ticks) */
+.success-app .lp-saved h3{margin:0 0 8px;font-size:15px}
+.success-app .lp-saved ul{list-style:none;margin:0;padding:0}
+.success-app .lp-saved li{border-top:1px solid var(--line)}.success-app .lp-saved li:first-child{border-top:0}
+.success-app .lp-saved-row{width:100%;display:flex;align-items:center;gap:10px;padding:10px 0;background:none;border:0;text-align:left;color:inherit}
+.success-app .lp-saved-row:disabled{cursor:default;opacity:1}
+.success-app .lp-saved-row span:not(.pill){flex:1;min-width:0}.success-app .lp-saved-row b{display:block;font-size:13.5px}.success-app .lp-saved-row small{display:block;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.success-app .lp-saved-tick{color:#1f9d55;flex:none}
+.success-app .lp-saved .hint{margin:8px 0 0}
+.success-app .lp-already{color:#9a6a00 !important;font-weight:600}

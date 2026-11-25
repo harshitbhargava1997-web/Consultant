@@ -8,6 +8,7 @@ import {House,ClipboardList,Camera,MessageSquareText,ChevronRight,ArrowLeft,Circ
 import {dayLabel,hindiOptions} from './lesson-plan-form';
 import {monthStats} from './teacher-summary';
 import {parsePlanText,planSectionTitles} from '@/lib/school-success/plan-text';
+import {planDays,periodsOn,planFilterOptions,filterPlanDays,chipRange,classOf} from '@/lib/school-success/day-periods';
 
 const addDays=(day,n)=>new Date(Date.parse(day+'T00:00:00Z')+n*86400000).toISOString().slice(0,10);
 // Monday of the week containing `day` (school weeks run Monday to Saturday).
@@ -18,27 +19,34 @@ export function greeting(hour,language='en'){
  return hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
 }
 export function todaysLessons(summary){return (summary?.lessons||[]).filter(l=>l.plannedOn===summary.today);}
-// Recent lessons for a filter: today, this week (Monday to today), this month, or a chosen date range. The chips show
-// lessons up to today; a chosen range may include upcoming days, so a teacher can read tomorrow's plan.
-export function filterLessons(summary,filter,range={}){
- if(!summary)return [];
- const today=summary.today;let from,to=today;
- if(filter==='today')from=today;
- else if(filter==='week')from=weekStart(today);
- else if(filter==='month')from=today.slice(0,8)+'01';
- else{from=range.from||'0000-01-01';to=range.to||'9999-12-31';if(from>to)[from,to]=[to,from];}
- return summary.lessons.filter(l=>l.plannedOn>=from&&l.plannedOn<=to).sort((a,b)=>b.plannedOn.localeCompare(a.plannedOn)||String(a.id).localeCompare(String(b.id)));
-}
 const classLabel=(p,o=v=>v)=>[[p.grade&&o(p.grade),p.section&&p.section!=='Not Applicable'?p.section:''].filter(Boolean).join(' '),p.subject&&o(p.subject)].filter(Boolean).join(' · ');
 
+const FILTER_KEY='school-success:home-filters';
+function savedFilters(){try{const v=JSON.parse(localStorage.getItem(FILTER_KEY)||'{}');return {filter:['tomorrow','week','month','range'].includes(v.filter)?v.filter:'week',cls:typeof v.cls==='string'?v.cls:'',subject:typeof v.subject==='string'?v.subject:''};}catch{return {filter:'week',cls:'',subject:''};}}
+
+// Home (owner request, 25 November 2026): today's periods and recent lessons are shown day by day, every class
+// period with its number (Period 1, 2, 3, 4) in the order it was saved, whatever save it came from. Recent lessons
+// can be narrowed by Tomorrow / This week (Monday–Sunday) / This month / a date, and by class and subject; each
+// period opens its own plan. The choice is remembered on this phone.
 export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,onEvidence,onPlan,loading,error,onRetry,notice}){
  const t=(en,hi)=>language==='hi'?hi:en,o=v=>language==='hi'?(hindiOptions[v]||String(v).replace('Grade ','कक्षा ')):v;
- const [filter,setFilter]=useState('week'),[range,setRange]=useState({from:'',to:''}),[all,setAll]=useState(false);
- const today=todaysLessons(summary),periodsToday=today.flatMap(l=>l.periods.map((p,i)=>({lesson:l,p,i})));
- const s=monthStats(summary),month=summary?new Date(summary.today+'T00:00:00Z').toLocaleDateString(language==='hi'?'hi-IN':'en-IN',{month:'long',timeZone:'UTC'}):'';
- const list=filterLessons(summary,filter,range),shown=all?list:list.slice(0,5);
+ const [prefs,setPrefs]=useState(savedFilters),[range,setRange]=useState({from:'',to:''}),[all,setAll]=useState(false);
+ const {filter,cls,subject}=prefs;
+ function choose(change){setPrefs(p=>{const next={...p,...change};try{localStorage.setItem(FILTER_KEY,JSON.stringify(next));}catch{}return next;});setAll(false);}
+ const lessons=summary?.lessons||[],todayDate=summary?.today||'';
+ const periodsToday=summary?periodsOn(lessons,todayDate):[];
+ const options=planFilterOptions(lessons);
+ const classNames=new Map(lessons.flatMap(l=>l.periods||[]).map(p=>[classOf(p),[p.grade&&o(p.grade),p.section&&p.section!=='Not Applicable'?p.section:''].filter(Boolean).join(' ')]));
+ // A remembered class or subject that is no longer in the list is ignored.
+ const useCls=options.classes.includes(cls)?cls:'',useSubject=options.subjects.includes(subject)?subject:'';
+ const days=summary?filterPlanDays(lessons,{...chipRange(filter,todayDate,range),cls:useCls,subject:useSubject}):[];
+ const shown=all?days:days.slice(0,5);
+ // Month numbers follow the class and subject filter.
+ const narrowed=summary&&(useCls||useSubject)?{...summary,lessons:lessons.map(l=>({...l,periods:l.periods.filter(p=>(!useCls||classOf(p)===useCls)&&(!useSubject||p.subject===useSubject))}))}:summary;
+ const s=monthStats(narrowed),month=summary?new Date(summary.today+'T00:00:00Z').toLocaleDateString(language==='hi'?'hi-IN':'en-IN',{month:'long',timeZone:'UTC'}):'';
  const first=String(teacher||'').split(' ')[0];
  const dateLine=summary?new Date(summary.today+'T00:00:00Z').toLocaleDateString(language==='hi'?'hi-IN':'en-IN',{weekday:'long',day:'numeric',month:'long',timeZone:'UTC'}):'';
+ const periodName=n=>t('Period','कालांश')+' '+n;
  return <div className="ta-home">
   <div className="ta-hello"><small>{dateLine}</small><h1>{greeting(istHour(),language)}, {first}</h1><p>{school}</p></div>
   {notice}
@@ -49,8 +57,8 @@ export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,
    :<>
     <h3>{t('Today','आज')} · {summary?periodsToday.length:'–'} {t(periodsToday.length===1?'lesson planned':'lessons planned','पाठ नियोजित')}</h3>
     <p>{t('Tap a lesson to read your plan. After class, add a photo or a quick reflection.','योजना पढ़ने के लिए पाठ छुएँ। कक्षा के बाद फोटो या छोटा चिंतन जोड़ें।')}</p>
-    <div className="ta-today-chips">{periodsToday.map(({lesson,p,i},n)=><button type="button" key={lesson.id+':'+i} className="ta-today-chip" onClick={()=>onRead(lesson.resumeToken,i,p)}><BookOpen size={14}/><span>P{n+1} · {classLabel(p,o)}</span></button>)}</div>
-    {today[0]&&<button type="button" className="ta-cta" onClick={()=>onEvidence(today[0].resumeToken,0)}><Camera size={18}/>{t('Add evidence for today','आज के प्रमाण जोड़ें')}</button>}
+    <div className="ta-today-chips">{periodsToday.map(x=><button type="button" key={x.key} className="ta-today-chip" onClick={()=>onRead(x.lesson.resumeToken,x.index,x.period)}><BookOpen size={14}/><span>{periodName(x.number)} · {classLabel(x.period,o)}</span></button>)}</div>
+    {periodsToday[0]&&<button type="button" className="ta-cta" onClick={()=>onEvidence(periodsToday[0].lesson.resumeToken,0)}><Camera size={18}/>{t('Add evidence for today','आज के प्रमाण जोड़ें')}</button>}
    </>}
   </section>
   <div className="ta-stats">
@@ -60,18 +68,25 @@ export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,
   </div>
   <section className="ta-card">
    <div className="ta-card-head"><h3>{t('Recent lessons','हाल के पाठ')}</h3></div>
-   <p className="ta-sub">{t('Tap a lesson to read the plan, or the camera to add evidence.','योजना पढ़ने के लिए पाठ छुएँ, प्रमाण के लिए कैमरा।')}</p>
-   <div className="ta-filters" role="group" aria-label={t('Show lessons from','पाठ दिखाएँ')}>{[['today',t('Today','आज')],['week',t('This week','इस सप्ताह')],['month',t('This month','इस महीने')],['range',t('Date','तिथि')]].map(([k,l])=><button type="button" key={k} aria-pressed={filter===k} className={'ta-chip'+(filter===k?' on':'')} onClick={()=>{setFilter(k);setAll(false);}}>{k==='range'&&<CalendarDays size={13}/>}{l}</button>)}</div>
+   <p className="ta-sub">{t('Tap a period to read its plan, or the camera to add evidence.','योजना पढ़ने के लिए कालांश छुएँ, प्रमाण के लिए कैमरा।')}</p>
+   <div className="ta-filters" role="group" aria-label={t('Show lessons from','पाठ दिखाएँ')}>{[['tomorrow',t('Tomorrow','कल')],['week',t('This week','इस सप्ताह')],['month',t('This month','इस महीने')],['range',t('Date','तिथि')]].map(([k,l])=><button type="button" key={k} aria-pressed={filter===k} className={'ta-chip'+(filter===k?' on':'')} onClick={()=>choose({filter:k})}>{k==='range'&&<CalendarDays size={13}/>}{l}</button>)}</div>
    {filter==='range'&&<div className="ta-range"><label><span>{t('From','से')}</span><input type="date" value={range.from} onChange={e=>setRange(r=>({...r,from:e.target.value}))}/></label><label><span>{t('To','तक')}</span><input type="date" value={range.to} onChange={e=>setRange(r=>({...r,to:e.target.value}))}/></label></div>}
+   {(options.classes.length>0||options.subjects.length>0)&&<div className="ta-selects">
+    <label><span>{t('Class','कक्षा')}</span><select aria-label={t('Class','कक्षा')} value={useCls} onChange={e=>choose({cls:e.target.value})}><option value="">{t('All classes','सभी कक्षाएँ')}</option>{options.classes.map(c=><option key={c} value={c}>{classNames.get(c)||c}</option>)}</select></label>
+    <label><span>{t('Subject','विषय')}</span><select aria-label={t('Subject','विषय')} value={useSubject} onChange={e=>choose({subject:e.target.value})}><option value="">{t('All subjects','सभी विषय')}</option>{options.subjects.map(v=><option key={v} value={v}>{o(v)}</option>)}</select></label>
+   </div>}
    {error?<div className="ta-empty"><p>{error}</p><button type="button" className="button" onClick={onRetry}><RefreshCw size={15}/>{t('Try again','फिर कोशिश करें')}</button></div>
    :loading&&!summary?<div className="ts-skeleton" aria-busy="true"><span/><span/></div>
-   :!list.length?<div className="ta-empty"><p>{filter==='range'&&!range.from&&!range.to?t('Choose a date or a range.','कोई तिथि या अवधि चुनें।'):t('No lessons in this period.','इस अवधि में कोई पाठ नहीं।')}</p></div>
-   :<ul className="ta-list">{shown.map(l=>{const m=/^\d{4}-(\d{2})-(\d{2})$/.exec(l.plannedOn),f=l.periods[0]||{};
-    return <li key={l.id}><button type="button" className="ta-lesson" onClick={()=>onRead(l.resumeToken,0,f)}>
-     <span className="ta-date"><b>{m?Number(m[2]):''}</b><small>{dayLabel(l.plannedOn,language).split(',')[0]}</small></span>
-     <span className="ta-lesson-text"><b>{classLabel(f,o)}{l.periods.length>1?' +'+(l.periods.length-1):''}</b><small>{f.topic}</small>{l.evidence&&<em><CircleCheck size={11}/>{t('Evidence added','प्रमाण जोड़ा गया')}</em>}</span>
-    </button>{l.plannedOn<=summary.today&&<button type="button" className="ta-cam" aria-label={t('Add evidence','प्रमाण जोड़ें')+' · '+classLabel(f)} onClick={()=>onEvidence(l.resumeToken,0)}><Camera size={19}/></button>}</li>;})}</ul>}
-   {list.length>5&&!all&&<button type="button" className="text-button" onClick={()=>setAll(true)}>{t('Show all','सभी देखें')} ({list.length})<ChevronRight size={14}/></button>}
+   :!days.length?<div className="ta-empty"><p>{filter==='range'&&!range.from&&!range.to?t('Choose a date or a range.','कोई तिथि या अवधि चुनें।'):filter==='tomorrow'&&!useCls&&!useSubject?t('Nothing planned for tomorrow yet.','कल के लिए अभी कोई योजना नहीं।'):t('No lessons in this period.','इस अवधि में कोई पाठ नहीं।')}</p>{filter==='tomorrow'&&<button type="button" className="button" onClick={onPlan}><ClipboardList size={15}/>{t('Plan tomorrow','कल की योजना बनाएँ')}</button>}</div>
+   :<ul className="ta-days">{shown.map(d=>{const m=/^\d{4}-(\d{2})-(\d{2})$/.exec(d.date),past=d.date<=todayDate;
+    return <li key={d.date} className="ta-dayrow">
+     <div className="ta-day-head"><span className="ta-date"><b>{m?Number(m[2]):''}</b><small>{dayLabel(d.date,language).split(',')[0]}</small></span><span className="ta-day-title"><b>{d.date===todayDate?t('Today','आज'):dayLabel(d.date,language)}</b><small>{d.periods.length} {t(d.periods.length===1?'period':'periods','कालांश')}</small></span></div>
+     <ul className="ta-periods">{d.periods.map(x=><li key={x.key}>
+      <button type="button" className="ta-period" onClick={()=>onRead(x.lesson.resumeToken,x.index,x.period)}><span className="ta-pnum">{periodName(x.number)}</span><span className="ta-lesson-text"><b>{classLabel(x.period,o)}</b><small>{x.period.topic}</small>{x.period.evidence&&<em><CircleCheck size={11}/>{t('Evidence added','प्रमाण जोड़ा गया')}</em>}</span></button>
+      {past&&<button type="button" className="ta-cam" aria-label={t('Add evidence','प्रमाण जोड़ें')+' · '+periodName(x.number)+' · '+classLabel(x.period)} onClick={()=>onEvidence(x.lesson.resumeToken,x.index)}><Camera size={19}/></button>}
+     </li>)}</ul>
+    </li>;})}</ul>}
+   {days.length>5&&!all&&<button type="button" className="text-button" onClick={()=>setAll(true)}>{t('Show all','सभी देखें')} ({days.length} {t('days','दिन')})<ChevronRight size={14}/></button>}
    {summary&&<p className="ta-note">{t('Lessons from the last 60 days and the next 30 days.','पिछले 60 और अगले 30 दिनों के पाठ।')}</p>}
   </section>
  </div>;

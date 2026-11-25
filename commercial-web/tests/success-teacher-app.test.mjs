@@ -8,7 +8,7 @@ import {formatReflection} from '../lib/school-success/teacher-flow.js';
 import {withPlanning} from '../lib/school-success/planning-guide.js';
 const load=(file,from,to,names)=>{const src=readFileSync(new URL(file,import.meta.url),'utf8');const part=src.slice(src.indexOf(from),src.indexOf(to));
  const code=transformSync(part+'\nmodule.exports={'+names.join(',')+'};',{jsc:{parser:{syntax:'ecmascript',jsx:true}},module:{type:'commonjs'}}).code;const m={exports:{}};new Function('module','exports',code)(m,m.exports);return m.exports;};
-const app=load('../app/school-success/ui/teacher-app.jsx','const addDays','const classLabel',['weekStart','greeting','todaysLessons','filterLessons']);
+const app=load('../app/school-success/ui/teacher-app.jsx','const addDays','const classLabel',['weekStart','greeting','todaysLessons']);
 const ev=load('../app/school-success/ui/lesson-evidence.jsx','export function submitSummary','// One chosen file',['submitSummary']);
 
 test('a plan saved by the lesson plan form reads back as its sections, with classwork and homework separate',()=>{
@@ -20,15 +20,10 @@ test('empty sections are skipped and free-form notes are kept unchanged',()=>{
  assert.deepEqual(parsePlanText('Old notes\nsecond line'),[{key:'notes',text:'Old notes\nsecond line'}]);
  assert.deepEqual(parsePlanText(''),[]);
 });
-test('date filter: today, this week from Monday, this month, and a chosen range that can include tomorrow',()=>{
+test('week start and today\'s lessons (the Home date filters are tested in success-day-periods.test.mjs)',()=>{
  const L=(id,d)=>({id,plannedOn:d,periods:[{}]});
  const summary={today:'2026-11-24',lessons:[L('a','2026-11-24'),L('b','2026-11-23'),L('c','2026-11-21'),L('d','2026-11-02'),L('e','2026-10-30'),L('f','2026-11-25')]};
  assert.equal(app.weekStart('2026-11-24'),'2026-11-23');assert.equal(app.weekStart('2026-11-29'),'2026-11-23');assert.equal(app.weekStart('2026-11-23'),'2026-11-23');
- assert.deepEqual(app.filterLessons(summary,'today').map(l=>l.id),['a']);
- assert.deepEqual(app.filterLessons(summary,'week').map(l=>l.id),['a','b']);
- assert.deepEqual(app.filterLessons(summary,'month').map(l=>l.id),['a','b','c','d']);
- assert.deepEqual(app.filterLessons(summary,'range',{from:'2026-11-25',to:'2026-11-25'}).map(l=>l.id),['f'],'tomorrow’s plan can be found');
- assert.deepEqual(app.filterLessons(summary,'range',{from:'2026-11-23',to:'2026-10-30'}).map(l=>l.id),['b','c','d','e'],'reversed dates still work');
  assert.deepEqual(app.todaysLessons(summary).map(l=>l.id),['a']);
 });
 test('greeting follows the time of day in English and Hindi',()=>{
