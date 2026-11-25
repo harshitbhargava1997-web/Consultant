@@ -42,3 +42,14 @@
   - replay from the profile menu;
   - the "cannot load" path continues;
   - the Super Admin tab with the report.
+
+## 25 November 2026: locked player (owner decision)
+- **Hidden:** YouTube's controls (`controls=0`), keyboard (`disablekb`), fullscreen (`fs=0`), annotations and related videos from other channels.
+- **Blocked by a transparent layer:**
+  - the top strip (title, channel, Share) always;
+  - after playback starts, the whole video, so taps reach only our controls and never YouTube's links;
+  - the long-press menu.
+- **Our controls:** **Play/Pause** (also by tapping the video) and **back 10 seconds**. There is no skipping ahead, and a progress bar shows elapsed / total time.
+- **First play:** phones only allow it from a tap on the video itself. Until then, the middle of the video is left open, with a "Tap the video to start" hint.
+- **Watermark:** the teacher's name and school appear faintly on the video.
+- **Limit:** the video ID is still in the page code, and a screen recording is always possible.
