@@ -10,6 +10,7 @@ import {clearTeacherSession} from '@/lib/school-success/teacher-session';
 import LessonPlanForm, {newBlock, dayLabel, hindiOptions} from './lesson-plan-form';
 import {SummaryStrip, RecentLessons, FeedbackCard, newFeedbackCount} from './teacher-summary';
 import {TeacherHome, TabBar, ProfileSheet, PlanReader, todaysLessons} from './teacher-app';
+import OnboardingVideo, {videoApi} from './onboarding-video';
 import SchoolSharingLinks from './school-sharing-links';
 import LessonEvidence from './lesson-evidence';
 import { submissionSchema } from '@/lib/school-success/teacher-submissions';
@@ -35,6 +36,8 @@ export default function TeacherPortal({ data, school, refresh }) {
     const top = useRef(null), [pinPanel, setPinPanel] = useState(false), [pinNotice, setPinNotice] = useState('');
     // Teacher app (school-link teachers): the plan being read, the period Add evidence opens on, and the profile menu.
     const [readTarget, setReadTarget] = useState(null), [evPeriod, setEvPeriod] = useState(null), [sheet, setSheet] = useState(false);
+    // "How to use" video: shown after PIN sign-in until watched; replay from the profile menu.
+    const [video, setVideo] = useState({ id: '', watched: true, replay: false });
     useEffect(() => { if (admin && school) setSchool(school); }, [admin, school]);
     useEffect(() => { const token = new URLSearchParams(location.search).get('resume'); if (token) { setResumeToken(token); setMode('evidence'); } try {
         const stored = JSON.parse(localStorage.getItem('school-success:teacher-lesson-links-v1') || '[]');
@@ -68,6 +71,7 @@ export default function TeacherPortal({ data, school, refresh }) {
         finally { setSummaryLoading(false); }
     }
     useEffect(() => { setSummary(null); if (language) void loadSummary(); }, [selectedSchool, teacherValue, language]);
+    useEffect(() => { if (!schoolLink || !teacherValue) return; videoApi({ action: 'get' }, contextHeaders).then(r => setVideo({ id: r.videoId || '', watched: !r.videoId || !!r.watched, replay: false })).catch(() => {}); }, [schoolLink, teacherValue]);
     async function signOut() { clearTeacherSession(); setMode(''); setResumeToken(''); setReceipt(null); setPinPanel(false); const url = new URL(location.href); url.searchParams.delete('teacher'); url.searchParams.delete('resume'); historyReplace(url); try { await refresh(); } catch (e) { setError(e.message); } }
     function historyReplace(url) { window.history.replaceState(null, '', url.href); }
     function go(next) { const url = new URL(location.href); url.searchParams.delete('resume'); historyReplace(url); if (next !== 'evidence') setResumeToken(''); setMode(next); setError(''); requestAnimationFrame(() => top.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }
@@ -144,6 +148,10 @@ export default function TeacherPortal({ data, school, refresh }) {
         const label = p => [[option(p.grade), p.section && p.section !== 'Not Applicable' ? p.section : ''].filter(Boolean).join(' '), option(p.subject)].filter(Boolean).join(' · ');
         const next = todaysLessons(summary).find(l => l.resumeToken !== resumeToken && !l.evidence);
         const tab = next => { setSheet(false); if (next === 'read') return; go(next); };
+        if (video.id && (!video.watched || video.replay)) return <div className="teacher-workspace tp ta-app" lang={language} ref={top}>
+         <div className="ta-top"><div className="ta-brand"><i>S</i>School Success</div></div>
+         <OnboardingVideo key={video.id + (video.replay ? ':r' : '')} videoId={video.id} language={language} headers={contextHeaders} firstTime={!video.watched} onDone={() => setVideo(v => ({ ...v, watched: true, replay: false }))}/>
+        </div>;
         return <div className="teacher-workspace tp ta-app" lang={language} ref={top}>
          <div className="ta-top"><div className="ta-brand"><i>S</i>School Success</div><button type="button" className="ta-avatar" aria-label={t('Your profile','आपकी प्रोफ़ाइल')} onClick={() => setSheet(true)}>{initials}</button></div>
          {pinPanel && <ChangePin language={language} teacher={teacherValue} onCancel={() => setPinPanel(false)} onDone={() => { setPinPanel(false); setPinNotice(t('Your new PIN is saved. Other phones were signed out.','आपका नया PIN सहेजा गया। दूसरे फ़ोन से साइन आउट हो गया।')); }}/>}
@@ -156,7 +164,7 @@ export default function TeacherPortal({ data, school, refresh }) {
          {mode === 'preparation' && <LessonPlanForm key={draftKey} language={language} plan={plan} setPlan={setPlan} identity={identity} submit={submit} busy={busy} error={error} canSave={!!selectedSchool && !!teacherValue} draftStatus={draftStatus} today={day()}/>}
          {mode !== 'preparation' && error && <div className="alert error" role="alert">{error}</div>}
          <TabBar mode={mode} onGo={tab} badge={mode === 'feedback' ? 0 : newFeedbackCount(summary, who)} language={language} disabled={!!busy}/>
-         <ProfileSheet open={sheet} onClose={() => setSheet(false)} name={teacherValue} school={selectedSchool} language={language} onLanguage={chooseLanguage} onChangePin={() => { setSheet(false); setPinNotice(''); setPinPanel(true); requestAnimationFrame(() => top.current?.scrollIntoView({ block: 'start' })); }} onLogout={() => { setSheet(false); void signOut(); }}/>
+         <ProfileSheet open={sheet} onClose={() => setSheet(false)} name={teacherValue} school={selectedSchool} language={language} onLanguage={chooseLanguage} onChangePin={() => { setSheet(false); setPinNotice(''); setPinPanel(true); requestAnimationFrame(() => top.current?.scrollIntoView({ block: 'start' })); }} onLogout={() => { setSheet(false); void signOut(); }} onVideo={video.id ? () => { setSheet(false); setVideo(v => ({ ...v, replay: true })); } : undefined}/>
         </div>;
     }
     return <div className="teacher-workspace tp" lang={language} ref={top}>

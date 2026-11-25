@@ -4,7 +4,7 @@
 // tab bar; and a profile menu for language, PIN and log out. Data comes from the existing myLessons summary and the
 // existing lesson "resume" read; nothing new is stored.
 import {useEffect,useState} from 'react';
-import {House,ClipboardList,Camera,MessageSquareText,ChevronRight,ArrowLeft,CircleCheck,BookOpen,CalendarDays,KeyRound,LogOut,Languages,Target,Package,Presentation,Users,PencilLine,ListChecks,NotebookPen,StickyNote,X,RefreshCw,Type} from 'lucide-react';
+import {House,ClipboardList,Camera,MessageSquareText,ChevronRight,ArrowLeft,CircleCheck,BookOpen,CalendarDays,KeyRound,LogOut,Languages,Target,Package,Presentation,Users,PencilLine,ListChecks,NotebookPen,StickyNote,X,RefreshCw,Type,PlayCircle} from 'lucide-react';
 import {dayLabel,hindiOptions} from './lesson-plan-form';
 import {monthStats} from './teacher-summary';
 import {parsePlanText,planSectionTitles} from '@/lib/school-success/plan-text';
@@ -84,7 +84,7 @@ export function TabBar({mode,onGo,badge,language,disabled}){
  return <nav className="ta-tabs" aria-label={t('Teacher menu','शिक्षक मेनू')}>{tabs.map(([k,Icon,l])=><button type="button" key={k||'home'} disabled={disabled} aria-current={active===k?'page':undefined} className={'ta-tab'+(active===k?' on':'')} onClick={()=>onGo(k)}><span className="ta-tab-icon"><Icon size={20}/></span>{l}{k==='feedback'&&badge>0&&<span className="ta-badge">{badge}</span>}</button>)}</nav>;
 }
 
-export function ProfileSheet({open,onClose,name,school,language,onLanguage,onChangePin,onLogout}){
+export function ProfileSheet({open,onClose,name,school,language,onLanguage,onChangePin,onLogout,onVideo}){
  const t=(en,hi)=>language==='hi'?hi:en;
  useEffect(()=>{if(!open)return;const k=e=>{if(e.key==='Escape')onClose();};addEventListener('keydown',k);return()=>removeEventListener('keydown',k);},[open]);
  if(!open)return null;
@@ -93,6 +93,7 @@ export function ProfileSheet({open,onClose,name,school,language,onLanguage,onCha
   <div className="ta-grab"/><button type="button" className="ta-sheet-x icon" aria-label={t('Close','बंद करें')} onClick={onClose}><X size={18}/></button>
   <div className="ta-me"><span className="ta-avatar big">{initials}</span><div><b>{name}</b><small>{school} · {t('Teacher','शिक्षक')}</small></div></div>
   <div className="ta-opt"><span className="ta-opt-icon"><Languages size={18}/></span><span className="ta-opt-label">{t('Language','भाषा')}</span><span className="ta-lang" role="group">{[['en','English'],['hi','हिन्दी']].map(([v,l])=><button type="button" key={v} aria-pressed={language===v} className={language===v?'on':''} onClick={()=>onLanguage(v)}>{l}</button>)}</span></div>
+  {onVideo&&<button type="button" className="ta-opt" onClick={onVideo}><span className="ta-opt-icon"><PlayCircle size={18}/></span><span className="ta-opt-label">{t('How to use (video)','कैसे इस्तेमाल करें (वीडियो)')}</span><ChevronRight size={18}/></button>}
   <button type="button" className="ta-opt" onClick={onChangePin}><span className="ta-opt-icon"><KeyRound size={18}/></span><span className="ta-opt-label">{t('Change PIN','PIN बदलें')}</span><ChevronRight size={18}/></button>
   <button type="button" className="ta-opt danger" onClick={onLogout}><span className="ta-opt-icon"><LogOut size={18}/></span><span className="ta-opt-label">{t('Log out','लॉग आउट')}</span></button>
  </div></>;
