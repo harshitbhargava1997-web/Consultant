@@ -34,9 +34,11 @@ export function filterPlanDays(lessons,{from='0000-01-01',to='9999-12-31',cls=''
   .map(d=>({...d,periods:d.periods.filter(x=>(!cls||classOf(x.period)===cls)&&(!subject||x.period.subject===subject))}))
   .filter(d=>d.periods.length).reverse();
 }
-// Ranges for the Home chips: Today, This week (Monday–Sunday, upcoming days included), This month (whole month).
+// Ranges for the date chips: Tomorrow, This week (Monday–Sunday, upcoming days included), This month (whole
+// month), or a chosen range. Today has its own box on Home ("today" is still accepted here).
 export function chipRange(filter,today,range={}){
  if(filter==='today')return {from:today,to:today};
+ if(filter==='tomorrow'){const d=addDays(today,1);return {from:d,to:d};}
  if(filter==='week')return weekRange(today);
  if(filter==='month')return monthRange(today);
  return {from:range.from||'0000-01-01',to:range.to||'9999-12-31'};

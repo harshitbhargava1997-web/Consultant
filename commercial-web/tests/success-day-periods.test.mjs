@@ -53,3 +53,11 @@ test('class and subject filters keep each period’s number for the day',()=>{
  const hindi=filterPlanDays(lessons,{subject:'Hindi'})[0].periods[0];
  assert.deepEqual([hindi.lesson.resumeToken,hindi.index,hindi.number],['t-first',1,2]);
 });
+
+test('Tomorrow shows only the next day’s periods, numbered as on that day',()=>{
+ assert.deepEqual(chipRange('tomorrow','2026-11-25'),{from:'2026-11-26',to:'2026-11-26'});
+ assert.deepEqual(chipRange('tomorrow','2026-11-30'),{from:'2026-12-01',to:'2026-12-01'},'month end');
+ const tomorrow=filterPlanDays(lessons,chipRange('tomorrow','2026-11-30'));
+ assert.deepEqual(tomorrow.map(d=>[d.date,d.periods.map(x=>x.number+':'+x.period.topic)]),[['2026-12-01',['1:Next month']]]);
+ assert.deepEqual(filterPlanDays(lessons,chipRange('tomorrow','2026-11-25')),[],'nothing planned for 26 Nov');
+});

@@ -25,7 +25,7 @@
   - Tapping a period opens its plan.
   - The camera adds evidence, for today and earlier days only.
 - **Date chips:**
-  - **Today.**
+  - **Tomorrow:** shows tomorrow's planned periods, with a "Plan tomorrow" button when nothing is planned yet. Today has its own box at the top of Home, so there is no "Today" chip (owner decision).
   - **This week:** Monday to Sunday, upcoming days included.
   - **This month:** the whole month.
   - **Date:** a chosen range.
@@ -35,6 +35,13 @@
   - A filtered list keeps the day's period numbers ("Period 4").
   - The month numbers follow the class and subject.
   - The choice is remembered on the phone.
+
+**Feedback tab filters** (`lib/school-success/feedback-filters.js`):
+- **When it was given:** All, This week, This month, or a chosen Date range.
+- **Class and Subject:** of the lesson.
+- **From:** the reviewer, for example "Meera Rao, Principal" or "School Success team".
+- **Status:** All feedback, Not yet noted, or Noted.
+- When a filter is on, the screen says "Showing 2 of 4 · Clear filters". The choices are remembered on the phone.
 
 **Add evidence:**
 - The "Lesson day" list reads "Wed, 25 Nov · Periods 1–3 · …" and "Wed, 25 Nov · Period 4 · …".
