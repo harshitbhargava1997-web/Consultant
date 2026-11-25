@@ -11,6 +11,9 @@ import { actor, database, checkOrigin, failure, assertSchool, assertConsultant, 
 import { schemas } from '@/lib/school-success/domain';
 import { attachReflectionText, reflectionFetcher } from '@/lib/school-success/reflection-text';
 import { r2Request } from '@/lib/school-success/r2-evidence';
+import { service } from '@/lib/school-success/database';
+import { configStore } from '@/lib/school-success/teacher-pin';
+import { ensureShortLink, shortUrl } from '@/lib/school-success/short-link';
 async function hash(s) { return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))).map(x => x.toString(16).padStart(2, '0')).join(''); }
 async function handlerGET(req) {
     try {
@@ -88,7 +91,9 @@ async function handlerPOST(req) {
             const saved = await db.prepare('SELECT value FROM portal_config WHERE key=?').bind('schoolLinkToken:' + school).first();
             const token = saved?.value || crypto.randomUUID();
             await db.batch([db.prepare('INSERT INTO portal_config(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('schoolLink:' + token, JSON.stringify({ school, teachers,scope:'school-success' })), db.prepare('INSERT INTO portal_config(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('schoolLinkToken:' + school, token)]);
-            return Response.json({ url: new URL('/school-success?' + new URLSearchParams({ school, access: token, view: 'teacher' }), req.url).href }, { headers: { 'Cache-Control': 'no-store' } });
+            // The short link (schoolsuccess.in/<school-name>-<code>) is created once per school; the full link keeps working.
+            const shortId = await ensureShortLink(configStore(service()), { access: token, school });
+            return Response.json({ url: new URL('/school-success?' + new URLSearchParams({ school, access: token, view: 'teacher' }), req.url).href, shortUrl: shortUrl(req.url, shortId) }, { headers: { 'Cache-Control': 'no-store' } });
         }
         if (b.action === 'reportSettings') {
             if (a.role !== 'admin')

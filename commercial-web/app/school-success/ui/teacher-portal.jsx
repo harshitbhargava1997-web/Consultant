@@ -7,6 +7,8 @@ import { CheckCircle, ClipboardList, Camera, ArrowLeft, Languages, BookOpenCheck
 import TeacherLogin, {ChangePin} from './teacher-login';
 import TeacherPinAdmin from './teacher-pin-admin';
 import {clearTeacherSession} from '@/lib/school-success/teacher-session';
+import {linkParams} from '@/lib/school-success/link-params';
+import {savedLessonUrl} from '@/lib/school-success/saved-lesson-url';
 import LessonPlanForm, {newBlock, dayLabel, hindiOptions} from './lesson-plan-form';
 import {SummaryStrip, RecentLessons, FeedbackCard, newFeedbackCount} from './teacher-summary';
 import {TeacherHome, TabBar, ProfileSheet, PlanReader, todaysLessons} from './teacher-app';
@@ -41,12 +43,12 @@ export default function TeacherPortal({ data, school, refresh }) {
     useEffect(() => { if (admin && school) setSchool(school); }, [admin, school]);
     useEffect(() => { const token = new URLSearchParams(location.search).get('resume'); if (token) { setResumeToken(token); setMode('evidence'); } try {
         const stored = JSON.parse(localStorage.getItem('school-success:teacher-lesson-links-v1') || '[]');
-        if (Array.isArray(stored)) setSavedLinks(stored.filter(l => typeof l?.url === 'string' && l.url.startsWith(location.origin + '/school-success?') && typeof l.submissionId === 'string'));
+        if (Array.isArray(stored)) setSavedLinks(stored.filter(l => typeof l?.url === 'string' && savedLessonUrl(l.url, location.origin) && typeof l.submissionId === 'string'));
     } catch { } }, []);
     useEffect(() => { const open = () => { const url = new URL(location.href); url.searchParams.delete('resume'); window.history.replaceState(null, '', url.href); setMode('preparation'); setResumeToken(''); requestAnimationFrame(() => document.getElementById('teacher-submission-form')?.scrollIntoView({ behavior: 'smooth' })); }; window.addEventListener('teacher-new-preparation', open); return () => window.removeEventListener('teacher-new-preparation', open); }, []);
     const teachers = [...new Set(roster.filter(r => r.school === selectedSchool).map(r => r.name))].sort();
     const teacherValue = admin ? teacher : data.actor.name;
-    const contextHeaders = () => { const access = new URLSearchParams(location.search).get('access'); return access ? { 'X-School-Link': access, 'X-Teacher': encodeURIComponent(teacherValue) } : {}; };
+    const contextHeaders = () => { const access = linkParams().get('access'); return access ? { 'X-School-Link': access, 'X-Teacher': encodeURIComponent(teacherValue) } : {}; };
 
     const [language,setLanguage]=useState(''),[draftReady,setDraftReady]=useState(''),[draftStatus,setDraftStatus]=useState('');
     const t=(en,hi)=>language==='hi'?hi:en;
