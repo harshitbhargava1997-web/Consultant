@@ -61,7 +61,8 @@ async function handlerPOST(req, timing = {}) {
                     continue;
                 let lesson = grouped.get(row.submission_id);
                 if (!lesson) {
-                    lesson = { id: row.submission_id, plannedOn: row.planned_lesson_on, periods: [], resumeToken: await seal({ kind: 'lesson-resume', id: row.submission_id, school, teacher, email: a.email, exp: Date.now() + 365 * 86400000 }, signer) };
+                    // order: the first saved record of this lesson, so a day's saves are numbered Period 1, 2, 3… in save order.
+                    lesson = { id: row.submission_id, plannedOn: row.planned_lesson_on, order: Number(row.id) || 0, periods: [], resumeToken: await seal({ kind: 'lesson-resume', id: row.submission_id, school, teacher, email: a.email, exp: Date.now() + 365 * 86400000 }, signer) };
                     grouped.set(row.submission_id, lesson);
                 }
                 const period = { grade: row.Grade || '', section: row.Section || '', subject: row.Subject || '', topic: row.Book || '', evidence: row.lesson_stage === 'evidence_submitted' };

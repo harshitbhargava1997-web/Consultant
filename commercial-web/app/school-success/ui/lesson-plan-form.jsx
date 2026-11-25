@@ -1,6 +1,7 @@
 'use client';
 import {useState,useRef,useEffect} from 'react';
-import {CalendarDays,CalendarRange,ChevronDown,Check,Plus,Trash2,Target,Package,Presentation,Users,PencilLine,ListChecks,House,CircleAlert} from 'lucide-react';
+import {CalendarDays,CalendarRange,ChevronDown,Check,CircleCheck,Plus,Trash2,Target,Package,Presentation,Users,PencilLine,ListChecks,House,CircleAlert} from 'lucide-react';
+import {periodsOn,classOf} from '@/lib/school-success/day-periods';
 import {guide,withPlanning,planningIssue,planProblem,MAX_DAILY_PERIODS,MAX_WEEKLY_DAYS,nextSchoolDay} from '@/lib/school-success/planning-guide';
 import {teacherGrades,teacherSections,teacherSubjects} from '@/lib/school-success/teacher-flow';
 
@@ -13,7 +14,10 @@ export const newBlock=(extra={})=>({id:crypto.randomUUID(),submissionId:crypto.r
 
 // One-page lesson plan: the plan type and its shared details at the top, then one block per class period (daily
 // plan) or per day (weekly subject plan). Every planning field is visible; guidance sits inside the boxes.
-export default function LessonPlanForm({language,plan,setPlan,identity,submit,busy,error,canSave,draftStatus,today}){
+// savedLessons: the teacher's saved lessons (summary). On a daily plan, the periods already saved for the chosen
+// date are listed with a green tick and the new periods continue from the next number (owner request, 25 November
+// 2026); on a weekly plan, a day that already has a saved plan for the same class and subject is marked.
+export default function LessonPlanForm({language,plan,setPlan,identity,submit,busy,error,canSave,draftStatus,today,savedLessons=[],onReadSaved}){
  const hi=language==='hi',t=(en,hn)=>hi?hn:en;
  const [open,setOpen]=useState(()=>new Set(plan.blocks.slice(0,1).map(b=>b.id))),[warning,setWarning]=useState(null);
  const refs=useRef({});
@@ -23,6 +27,8 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
  const issue=b=>planningIssue(merged(b),{needsDate:weekly});
  const savedFor=b=>!!(weekly?plan.saved?.[b.submissionId]:plan.saved?.[plan.shared.submissionId]);
  const done=plan.blocks.filter(b=>!issue(b)).length;
+ const savedToday=!weekly&&plan.date?periodsOn(savedLessons,plan.date):[],maxNew=weekly?MAX_WEEKLY_DAYS:Math.max(0,MAX_DAILY_PERIODS-savedToday.length);
+ const alreadyPlanned=b=>weekly&&b.date&&periodsOn(savedLessons,b.date).some(x=>classOf(x.period)===classOf(plan.shared)&&x.period.subject===plan.shared.subject);
  function update(changes){setPlan(p=>({...p,...changes}));setWarning(null);}
  function updateBlock(id,changes){setPlan(p=>({...p,blocks:p.blocks.map(b=>b.id===id?withPlanning(b,{...changes,answerLanguage:language}):b)}));setWarning(null);}
  function answer(b,key,value){updateBlock(b.id,{answers:{...b.answers,[key]:value}});}
@@ -47,18 +53,18 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
  function removeBlock(id){setPlan(p=>({...p,blocks:p.blocks.filter(b=>b.id!==id)}));}
  function save(e){
   e.preventDefault();
-  const problem=planProblem(plan);
+  const problem=planProblem(plan)||(!weekly&&plan.blocks.length>maxNew?'count':'');
   if(problem){setWarning({block:null,key:problem});refs.current.top?.scrollIntoView({behavior:'smooth',block:'start'});return;}
   const bad=plan.blocks.find(b=>issue(b));
   if(bad){const key=issue(bad);toggle(bad.id,true);setWarning({block:bad.id,key});
    requestAnimationFrame(()=>{const el=document.getElementById('plan-'+bad.id+'-'+key)||refs.current[bad.id];el?.scrollIntoView({behavior:'smooth',block:'center'});el?.focus?.({preventScroll:true});});return;}
   submit(e);
  }
- const topMessages={empty:t('Add at least one period.','कम से कम एक कालांश जोड़ें।'),date:weekly?t('Choose a date for every day.','हर दिन की तिथि चुनें।'):t('Choose the lesson date.','पाठ की तिथि चुनें।'),subject:t('Choose the class and subject for this weekly plan.','इस साप्ताहिक योजना के लिए कक्षा और विषय चुनें।'),count:t('Too many blocks for one plan.','एक योजना में बहुत अधिक भाग हैं।'),'duplicate-date':t('Two days have the same date. Give each day its own date.','दो दिनों की तिथि एक ही है। हर दिन की अलग तिथि चुनें।')};
+ const topMessages={empty:t('Add at least one period.','कम से कम एक कालांश जोड़ें।'),date:weekly?t('Choose a date for every day.','हर दिन की तिथि चुनें।'):t('Choose the lesson date.','पाठ की तिथि चुनें।'),subject:t('Choose the class and subject for this weekly plan.','इस साप्ताहिक योजना के लिए कक्षा और विषय चुनें।'),count:weekly||!savedToday.length?t('Too many blocks for one plan.','एक योजना में बहुत अधिक भाग हैं।'):t('A day can have up to '+MAX_DAILY_PERIODS+' periods. '+savedToday.length+' are already saved for this date.','एक दिन में अधिकतम '+MAX_DAILY_PERIODS+' कालांश हो सकते हैं। इस तिथि के '+savedToday.length+' पहले से सहेजे गए हैं।'),'duplicate-date':t('Two days have the same date. Give each day its own date.','दो दिनों की तिथि एक ही है। हर दिन की अलग तिथि चुनें।')};
  const fieldMessage=t('Please complete this part.','कृपया यह भाग पूरा करें।');
  const missing=(b,key)=>warning?.block===b.id&&warning.key===key;
  const select=(label,value,options,onChange,id,invalid)=><label className={'field'+(invalid?' invalid':'')}><span>{label}</span><select id={id} value={value} onChange={e=>onChange(e.target.value)}><option value="">{t('Select','चुनें')}</option>{options.map(v=><option key={v} value={v}>{option(v)}</option>)}</select></label>;
- const blockTitle=(b,i)=>weekly?t('Day','दिन')+' '+(i+1)+(b.date?' · '+dayLabel(b.date,language):''):t('Period','कालांश')+' '+(i+1);
+ const blockTitle=(b,i)=>weekly?t('Day','दिन')+' '+(i+1)+(b.date?' · '+dayLabel(b.date,language):''):t('Period','कालांश')+' '+(savedToday.length+i+1);
  const blockSummary=b=>{const m=merged(b);return [m.grade&&option(m.grade)+(m.section&&m.section!=='Not Applicable'?' '+m.section:''),m.subject&&option(m.subject),b.topic].filter(Boolean).join(' · ');};
 
  return <form className="lp-form" id="teacher-submission-form" onSubmit={save} noValidate><fieldset disabled={!!busy} className="teacher-fields">
@@ -78,12 +84,19 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
    {warning&&!warning.block&&<p className="lp-error" role="alert"><CircleAlert size={16}/>{topMessages[warning.key]||fieldMessage}</p>}
   </section>
 
+  {savedToday.length>0&&<section className="lp-card lp-saved" aria-label={t('Already planned','पहले से योजना')}>
+   <h3>{t('Already planned for ','पहले से योजना — ')+dayLabel(plan.date,language)}</h3>
+   <ul>{savedToday.map(x=><li key={x.key}><button type="button" className="lp-saved-row" disabled={!onReadSaved} onClick={()=>onReadSaved?.(x.lesson.resumeToken,x.index,x.period)}>
+    <CircleCheck size={20} className="lp-saved-tick" aria-hidden="true"/><span><b>{t('Period','कालांश')} {x.number} · {[x.period.grade&&option(x.period.grade)+(x.period.section&&x.period.section!=='Not Applicable'?' '+x.period.section:''),x.period.subject&&option(x.period.subject)].filter(Boolean).join(' · ')}</b><small>{x.period.topic}</small></span><span className="pill green">{t('Saved','सहेजा गया')}</span></button></li>)}</ul>
+   {maxNew>0?<p className="hint">{t('Add the next periods below, starting with Period '+(savedToday.length+1)+'.','नीचे अगले कालांश जोड़ें — कालांश '+(savedToday.length+1)+' से।')}</p>:<p className="hint">{t('All '+MAX_DAILY_PERIODS+' periods of this day are planned. Choose another date to plan more.','इस दिन के सभी '+MAX_DAILY_PERIODS+' कालांश की योजना बन चुकी है। और योजना के लिए दूसरी तिथि चुनें।')}</p>}
+  </section>}
+
   {plan.blocks.map((b,i)=>{const locked=savedFor(b),isOpen=open.has(b.id)&&!locked,complete=!issue(b),filled=guide.filter(([k])=>b.answers?.[k]?.trim()).length;
    return <section key={b.id} data-block={b.id} ref={el=>{refs.current[b.id]=el;}} className={'lp-card lp-block'+(complete?' complete':'')+(isOpen?' open':'')}>
     <header className="lp-block-head">
      <button type="button" className="lp-block-toggle" aria-expanded={isOpen} onClick={()=>toggle(b.id)}>
-      <span className="lp-num">{complete?<Check size={16}/>:i+1}</span>
-      <span className="lp-block-title"><b>{blockTitle(b,i)}</b><small>{blockSummary(b)||t('Add class details and your plan','कक्षा का विवरण और योजना भरें')}</small></span>
+      <span className="lp-num">{complete?<Check size={16}/>:weekly?i+1:savedToday.length+i+1}</span>
+      <span className="lp-block-title"><b>{blockTitle(b,i)}</b><small>{blockSummary(b)||t('Add class details and your plan','कक्षा का विवरण और योजना भरें')}</small>{!locked&&alreadyPlanned(b)&&<small className="lp-already">{t('A plan for this class and subject is already saved on this day.','इस दिन इस कक्षा और विषय की योजना पहले से सहेजी गई है।')}</small>}</span>
       {locked?<span className="pill green">{t('Saved','सहेजा गया')}</span>:<span className="lp-progress" aria-label={filled+' / '+guide.length}><span style={{width:(filled/guide.length*100)+'%'}}/></span>}
       <ChevronDown size={18} className="lp-chevron"/>
      </button>
@@ -110,7 +123,7 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
     </div>}
    </section>;})}
 
-  {plan.blocks.length<(weekly?MAX_WEEKLY_DAYS:MAX_DAILY_PERIODS)&&<button type="button" className="lp-add" onClick={addBlock}><Plus size={18}/>{weekly?t('Add another day','एक और दिन जोड़ें'):t('Add another period','एक और कालांश जोड़ें')}</button>}
+  {plan.blocks.length<maxNew&&<button type="button" className="lp-add" onClick={addBlock}><Plus size={18}/>{weekly?t('Add another day','एक और दिन जोड़ें'):t('Add another period','एक और कालांश जोड़ें')}</button>}
 
   <div className="lp-submit-bar">
    <div><b>{done} / {plan.blocks.length}</b> <span>{weekly?t('days ready','दिन तैयार'):t('periods ready','कालांश तैयार')}</span>{busy&&<small role="status">{busy}…</small>}</div>

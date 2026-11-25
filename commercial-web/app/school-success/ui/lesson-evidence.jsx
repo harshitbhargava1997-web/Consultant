@@ -7,6 +7,7 @@ import {isGeneratedPreparationPdf} from '@/lib/school-success/lesson-records';
 import {successFetch} from '@/lib/school-success/client';
 import {mapLimited} from '@/lib/school-success/parallel';
 import {shrinkPhoto} from '@/lib/school-success/shrink-photo';
+import {planDays} from '@/lib/school-success/day-periods';
 import {requestJson} from '@/lib/school-success/request-json';
 import {transferWrittenReflections} from '@/lib/school-success/storage-upload';
 import { useEffect, useRef, useState } from 'react';
@@ -42,6 +43,11 @@ export function SavedPeriodRecord({ lesson, period }) {
 // Lessons a teacher can add evidence to from the day dropdown: planned on or before today, newest first.
 export function evidenceDayChoices(lessons, todayValue) {
     return (lessons || []).filter(l => l.resumeToken && l.plannedOn && l.plannedOn <= todayValue).sort((a, b) => b.plannedOn.localeCompare(a.plannedOn) || String(a.id).localeCompare(String(b.id)));
+}
+// The day's number of a lesson's first period (Period 1, 2, 3… in save order, as on Home); 1 when unknown.
+export function firstPeriodNumber(lessons, lessonId) {
+    for (const d of planDays(lessons)) { const hit = d.periods.find(x => x.lesson.id === lessonId); if (hit) return hit.number; }
+    return 1;
 }
 export function periodLabel(p, i, language = 'en') {
     const section = p.section && p.section !== 'Not Applicable' ? p.section : '';
@@ -133,7 +139,9 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
         items.forEach(uploadable);
         setPending(prev => ({ ...prev, [periodId]: [...prev[periodId] || [], ...items] }));
     }
-    const dayOption = l => { const first = l.periods?.[0] || {}; return (dayLabel(l.plannedOn, language) || l.plannedOn) + ' · ' + [[first.grade, first.section && first.section !== 'Not Applicable' ? first.section : ''].filter(Boolean).join(' '), first.subject].filter(Boolean).join(' · ') + ((l.periods?.length || 0) > 1 ? ' +' + (l.periods.length - 1) : '') + (l.evidence ? ' · ✓ ' + t('evidence added','प्रमाण जमा') : ''); };
+    const first1 = lessonChoices && lesson ? firstPeriodNumber(lessonChoices, lesson.submission?.id) - 1 : 0;
+    const numbers = l => { const a = firstPeriodNumber(lessonChoices, l.id), n = l.periods?.length || 1; return (language === 'hi' ? 'कालांश ' : n > 1 ? 'Periods ' : 'Period ') + (n > 1 ? a + '–' + (a + n - 1) : a); };
+    const dayOption = l => { const first = l.periods?.[0] || {}; return (dayLabel(l.plannedOn, language) || l.plannedOn) + ' · ' + numbers(l) + ' · ' + [[first.grade, first.section && first.section !== 'Not Applicable' ? first.section : ''].filter(Boolean).join(' '), first.subject].filter(Boolean).join(' · ') + ((l.periods?.length || 0) > 1 ? ' +' + (l.periods.length - 1) : '') + (l.evidence ? ' · ✓ ' + t('evidence added','प्रमाण जमा') : ''); };
     // On any failure the typed reflections and chosen files stay on screen with the same update ID, so a retry
     // resubmits the same update and cannot create a duplicate.
     async function save(e) { e.preventDefault(); if (!lesson || busy)
@@ -172,7 +180,7 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
         const periods = lesson.submission.periods, byType = {};
         for (const f of all) byType[f.category] = (byType[f.category] || 0) + 1;
         const sentIds = new Set([...all.map(f => f.periodId), ...written.map(r => r.periodId)]), rest = periods.findIndex(p => !sentIds.has(p.id));
-        setShared({ receipt: result, byType, reflections: written.length, plannedOn: lesson.submission.date, token, rest: rest >= 0 ? { index: rest, label: periodLabel(periods[rest], rest, language), topic: periods[rest].topic || '' } : null, periods: periods.filter(p => all.some(f => f.periodId === p.id) || written.some(r => r.periodId === p.id)).map(p => periodLabel(p, periods.indexOf(p), language)) });
+        setShared({ receipt: result, byType, reflections: written.length, plannedOn: lesson.submission.date, token, rest: rest >= 0 ? { index: rest, label: periodLabel(periods[rest], first1 + rest, language), topic: periods[rest].topic || '' } : null, periods: periods.filter(p => all.some(f => f.periodId === p.id) || written.some(r => r.periodId === p.id)).map(p => periodLabel(p, first1 + periods.indexOf(p), language)) });
         // A receipt closes this draft even if refreshing the saved lesson fails. Reopening starts a new update.
         setLesson(null);
         setPending({}); setReflections({}); uploadedFiles.current.clear(); shrunk.current.clear();
@@ -191,7 +199,7 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
         <h2>{shared.receipt.alreadySaved ? t('Already shared','पहले ही जमा है') : t('Evidence shared','प्रमाण जमा हो गया')}</h2>
         <p>{shared.periods.join(' · ')}{shared.plannedOn ? ' · ' + when(shared.plannedOn) : ''}</p>
         <div className="ev-sum">{Object.entries(shared.byType).map(([k, n]) => <div key={k}><span>{typeLabel(k, language)}</span><b>{n} {t(n === 1 ? 'file' : 'files','फ़ाइल')}</b></div>)}{shared.reflections > 0 && <div><span>{t('After-class reflection','कक्षा के बाद का चिंतन')}</span><b>{t('Saved','सहेजा गया')}</b></div>}<div><span>{t('Receipt','रसीद')}</span><b>{String(shared.receipt.submissionId || '').slice(0, 8)}</b></div></div>
-        {shared.rest && onReadPlan ? <><p className="ev-label">{t('Next','आगे')}</p><button type="button" className="ev-next" onClick={() => onReadPlan(shared.token, shared.rest.index)}><span className="ev-pnum">P{shared.rest.index + 1}</span><span className="ev-next-text"><b>{shared.rest.label}</b><small>{shared.rest.topic} · {t('Read plan','योजना पढ़ें')}</small></span><ChevronRight size={18}/></button></>
+        {shared.rest && onReadPlan ? <><p className="ev-label">{t('Next','आगे')}</p><button type="button" className="ev-next" onClick={() => onReadPlan(shared.token, shared.rest.index)}><span className="ev-pnum">P{first1 + shared.rest.index + 1}</span><span className="ev-next-text"><b>{shared.rest.label}</b><small>{shared.rest.topic} · {t('Read plan','योजना पढ़ें')}</small></span><ChevronRight size={18}/></button></>
         : nextLesson && <><p className="ev-label">{t('Next','आगे')}</p><button type="button" className="ev-next" onClick={nextLesson.onOpen}><span className="ev-pnum">{nextLesson.badge}</span><span className="ev-next-text"><b>{nextLesson.title}</b><small>{nextLesson.subtitle}</small></span><ChevronRight size={18}/></button></>}
         <div className="ev-shared-actions">{onHome && <button type="button" className="button" onClick={onHome}><House size={16}/>{t('Back to home','मुख्य पृष्ठ')}</button>}<button type="button" className="button" onClick={() => { setShared(null); void load(); }}><Camera size={16}/>{t('Add more to this lesson','इस पाठ में और जोड़ें')}</button></div>
     </section>;
@@ -204,10 +212,10 @@ export default function LessonEvidence({ token: initialToken, headers, uploadsEn
      {lesson && <form onSubmit={save}><fieldset className="teacher-fields" disabled={!!busy}>
       <div className="ev-lesson-head"><div><span className="ev-day"><CircleCheck size={12}/>{when(lesson.submission.date)}</span><b>{lesson.submission.school}</b></div><span className="pill green">{lessonStageLabel(lesson.stage)}</span></div>
       <label className="field"><span>{t('Actual lesson conducted on','पढ़ाने की वास्तविक तिथि')}</span><input type="date" required max={today()} value={conductedOn} onChange={e => setConductedOn(e.target.value)}/></label>
-      {periods.length > 1 && <><p className="ev-label">{t('Period','कालांश')}</p><div className="ev-periods" role="tablist" aria-label={t('Period','कालांश')}>{periods.map((p, i) => { const has = pending[p.id]?.length || reflections[p.id]?.trim(); return <button type="button" role="tab" aria-selected={focus === p.id} key={p.id} className={'ev-period-chip' + (focus === p.id ? ' on' : '')} onClick={() => setFocus(p.id)}><b>{t('Period','कालांश')} {i + 1}{has ? <span className="ev-dot" aria-label={t('added','जोड़ा')}/> : null}</b><small>{[[p.grade, p.section && p.section !== 'Not Applicable' ? p.section : ''].filter(Boolean).join(' '), p.subject].filter(Boolean).join(' · ')}</small></button>; })}</div><p className="hint">{t('Files added to other periods are kept and submitted together.','दूसरे कालांशों में जोड़ी गई फ़ाइलें भी साथ में जमा होंगी।')}</p></>}
+      {periods.length > 1 && <><p className="ev-label">{t('Period','कालांश')}</p><div className="ev-periods" role="tablist" aria-label={t('Period','कालांश')}>{periods.map((p, i) => { const has = pending[p.id]?.length || reflections[p.id]?.trim(); return <button type="button" role="tab" aria-selected={focus === p.id} key={p.id} className={'ev-period-chip' + (focus === p.id ? ' on' : '')} onClick={() => setFocus(p.id)}><b>{t('Period','कालांश')} {first1 + i + 1}{has ? <span className="ev-dot" aria-label={t('added','जोड़ा')}/> : null}</b><small>{[[p.grade, p.section && p.section !== 'Not Applicable' ? p.section : ''].filter(Boolean).join(' '), p.subject].filter(Boolean).join(' · ')}</small></button>; })}</div><p className="hint">{t('Files added to other periods are kept and submitted together.','दूसरे कालांशों में जोड़ी गई फ़ाइलें भी साथ में जमा होंगी।')}</p></>}
       {periods.map((p, index) => { const goal = parsePlanText(p.reflection).find(s => s.key === 'objective'), cat = category[p.id] || 'activity', items = pending[p.id] || [];
         return <section className="ev-period" id={'ev-period-' + p.id} key={p.id} hidden={focus !== p.id && periods.length > 1}>
-         <div className="ev-period-head"><b>{periodLabel(p, index, language)}</b><small>{p.topic || t('No topic recorded','विषयवस्तु दर्ज नहीं')}</small>{onReadPlan && <button type="button" className="text-button" onClick={() => onReadPlan(token, index)}><BookOpen size={14}/>{t('Read plan','योजना पढ़ें')}</button>}</div>
+         <div className="ev-period-head"><b>{periodLabel(p, first1 + index, language)}</b><small>{p.topic || t('No topic recorded','विषयवस्तु दर्ज नहीं')}</small>{onReadPlan && <button type="button" className="text-button" onClick={() => onReadPlan(token, index)}><BookOpen size={14}/>{t('Read plan','योजना पढ़ें')}</button>}</div>
          {goal && <div className="ev-goal"><b><Target size={13}/>{t('Your learning outcome','आपका सीखने का प्रतिफल')}</b><p>{goal.text}</p></div>}
          <p className="ev-label">{t('What are you adding?','आप क्या जोड़ रहे हैं?')}</p>
          <div className="ev-types" role="radiogroup" aria-label={t('Evidence type','प्रमाण का प्रकार')}>{evidenceTypes.filter(([k]) => classroomEvidenceCategories[k]).map(([k, Icon, en, hi, c]) => <button type="button" role="radio" aria-checked={cat === k} key={k} className={'ev-type ' + c + (cat === k ? ' on' : '')} onClick={() => setCategory(old => ({ ...old, [p.id]: k }))}><span className="ev-type-icon"><Icon size={17}/></span>{language === 'hi' ? hi : en}</button>)}</div>
