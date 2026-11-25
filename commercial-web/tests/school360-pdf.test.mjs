@@ -8,7 +8,7 @@ test('portfolio PDF includes every school and quantitative totals without eviden
 });
 test('school PDF adds ordered evidence links and independent selected observations',()=>{
  const data=school360Fixture(),model=buildSchoolPortfolio(data,from,to),options={schools:[model.schools[0]],settings:model.settings,from,to,detail:true,includeEvidence:true,rawObservations:data.entries};
- const text=extract(options),order=['Lesson preparation PDFs','Audio recordings','Classroom activities','Writing samples','Phonics evidence'];for(let i=1;i<order.length;i++)assert.ok(text.indexOf(order[i-1])<text.indexOf(order[i]),order[i]);
+ const text=extract(options),order=['Lesson plans','Audio recordings','Classroom activities','Writing samples','Phonics evidence'];for(let i=1;i<order.length;i++)assert.ok(text.indexOf(order[i-1])<text.indexOf(order[i]),order[i]);
  assert.ok(!text.includes('Observation marker'));assert.ok(extract({...options,includeObservations:true}).includes('Observation marker'));assert.ok(!text.includes('Beta School'));
 });
 test('disabled report sections and benchmarks disappear from school PDF',()=>{

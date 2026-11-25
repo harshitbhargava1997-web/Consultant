@@ -1,5 +1,4 @@
 'use client';
-import {mapLimited} from '@/lib/school-success/parallel';
 import {requestJson} from '@/lib/school-success/request-json';
 import {successFetch} from '@/lib/school-success/client';
 import { useEffect, useRef, useState } from 'react';
@@ -85,24 +84,13 @@ export default function TeacherPortal({ data, school, refresh }) {
     }
     function readPlan(token, period = 0, match = null) { setReadTarget({ token, period, match }); setMode('read'); setReceipt(null); requestAnimationFrame(() => top.current?.scrollIntoView({ block: 'start' })); }
 
-    // Saves one submission through the existing preparation workflow (PDF, direct upload, prepare/commit).
+    // Saves one day's lesson plan through the preparation workflow (prepare, then commit).
     async function saveOne(sub) {
-        let submission = submissionSchema.parse({ id: sub.id, school: selectedSchool, teacher: teacherValue, date: sub.date, periods: sub.periods.map(p => ({ id: p.id, grade: p.grade, section: p.section, subject: p.subject, topic: p.topic, reflection: p.reflection, materials: p.materials })), files: [] });
-        const { preparationPdf } = await import('@/lib/school-success/preparation-pdf');
-        const generated = [];
-        for (const [index, p] of submission.periods.entries()) {
-            const bytes = await preparationPdf({ school: selectedSchool, teacher: teacherValue, date: sub.date, ...p, audioUrls: [] });
-            generated.push({ id: p.id, category: 'lesson_plan', file: new File([bytes], 'Lesson-preparation-' + (index + 1) + '.pdf', { type: 'application/pdf' }) });
-        }
-        submission = submissionSchema.parse({ ...submission, files: generated.map(f => ({ id: f.id, periodId: f.id, category: f.category, name: f.file.name, size: f.file.size })) });
-        const prepared = await request({ action: 'prepare', mode: 'preparation', submission, directUploads: true });
+        // The plan is saved as text in the lesson record; no PDF is made (owner decision, 25 November 2026).
+        // Reports read the plan from the lesson record (see lib/school-success/lesson-plan-items.js).
+        const submission = submissionSchema.parse({ id: sub.id, school: selectedSchool, teacher: teacherValue, date: sub.date, periods: sub.periods.map(p => ({ id: p.id, grade: p.grade, section: p.section, subject: p.subject, topic: p.topic, reflection: p.reflection, materials: p.materials })), files: [] });
+        const prepared = await request({ action: 'prepare', mode: 'preparation', submission });
         if (prepared.saved) return prepared;
-        await mapLimited(prepared.files, async file => {
-            const actual = generated.find(f => f.id === file.id);
-            if (!actual) throw Error('A lesson plan PDF is missing. Submit again.');
-            const response = await successFetch('/api/school-success/evidence/upload', {method: 'POST', headers: {'X-Evidence-Token': file.token, ...contextHeaders()}, body: actual.file, uploadTicket: file.upload});
-            if (!response.ok) throw Error((await response.json()).error || 'Upload failed');
-        });
         return request({ action: 'commit', token: prepared.token, submission });
     }
     async function submit(e) { e.preventDefault(); if (busy) return; setError(''); setReceipt(null);

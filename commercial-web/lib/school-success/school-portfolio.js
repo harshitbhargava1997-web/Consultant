@@ -1,6 +1,7 @@
 import {buildProfiles,defaultReportSettings,reportSettingsSchema,includedMetric,eligibleDays,teacherKey} from './reports.js';
 import {reportDirectorySource,isArchived} from './directory.js';
 import {chronologicalRows,isClosureFile,isRemedialFile} from '../report-sequence.js';
+import {evidenceFiles,evidenceKey,isLessonPlanRecord} from './lesson-plan-items.js';
 import {formatReportDuration} from './report-units.js';
 
 export const portfolioModules=settings=>[0,1,3,2].filter(i=>includedMetric(i,settings)&&(i!==1||settings.sections.book!==false));
@@ -29,22 +30,25 @@ export const fileCategory=file=>{
  if(column==='Event_Pictures_Link'||file.category==='event_pictures')return 'events';
  return 'other';
 };
-export const portfolioCategories=[['all','All evidence'],['preparation','Lesson preparation PDFs'],['audio','Audio recordings'],['closure','After-class reflections'],['remedial','Remedial plans / support shared with students'],['activity','Classroom activities'],['writing','Writing samples'],['phonics','Phonics evidence'],['portfolio','Portfolio artifacts'],['events','Event pictures'],['other','Other files']];
+export const portfolioCategories=[['all','All evidence'],['preparation','Lesson plans'],['audio','Audio recordings'],['closure','After-class reflections'],['remedial','Remedial plans / support shared with students'],['activity','Classroom activities'],['writing','Writing samples'],['phonics','Phonics evidence'],['portfolio','Portfolio artifacts'],['events','Event pictures'],['other','Other files']];
 export const lessonIdentity=row=>JSON.stringify([row.school,row.teacher,row.recordId||row.id||[row.plannedDate||row.date,row.grade,row.section,row.subject,row.topic]]);
 export function submissionStats(rows){
- const lessons=new Map(),preparations=new Set(),classroomLessons=new Set(),files=new Map(),teachers=new Set();
+ const lessons=new Map(),preparations=new Set(),classroomLessons=new Set(),files=new Map(),teachers=new Set(),savedPlans=new Set();
  for(const row of rows){
   const lesson=lessonIdentity(row),reviewed=Boolean(row.review?.trim());
   lessons.set(lesson,Boolean(lessons.get(lesson))||reviewed);
   if(row.stage==='preparation_saved'||row.feedStage==='Lesson preparation')preparations.add(lesson);
-  for(const file of row.files||[]){
+  // A saved lesson plan with no plan file counts under "Lesson plans" (see lesson-plan-items.js). It is not an
+  // uploaded file, so it is not in the file totals.
+  for(const file of evidenceFiles(row)){
+   if(file.lessonPlan){savedPlans.add(JSON.stringify([row.school,row.teacher,evidenceKey(file)]));continue;}
    if(!file.url)continue;
    const key=JSON.stringify([row.school,row.teacher,file.url]),category=fileCategory(file);
    files.set(key,{...file,category,teacher:row.teacher,date:row.date});teachers.add(teacherKey(row.school,row.teacher));
    if(!['preparation','audio'].includes(category))classroomLessons.add(lesson);
   }
  }
- const categories=Object.fromEntries(portfolioCategories.filter(([key])=>key!=='all').map(([key])=>[key,[...files.values()].filter(f=>f.category===key).length]));
+ const categories=Object.fromEntries(portfolioCategories.filter(([key])=>key!=='all').map(([key])=>[key,[...files.values()].filter(f=>f.category===key).length+(key==='preparation'?savedPlans.size:0)]));
  return {preparations:preparations.size,classroomLessons:classroomLessons.size,files:files.size,teachersWithFiles:teachers.size,pendingReview:[...lessons.values()].filter(reviewed=>!reviewed).length,categories};
 }
 function aggregate(name,profiles,submissions,from,to,settings,calendars){
@@ -82,7 +86,7 @@ export function filterPortfolioSchools(schools,{school='',query='',status='all',
  });
 }
 export function filterSchoolEvidence(rows,{teacher='',category='all',review='all',query='',order='oldest'}={}){
- const filtered=rows.filter(r=>(!teacher||r.teacher===teacher)&&(category==='all'||(r.files||[]).some(f=>fileCategory(f)===category))&&
+ const filtered=rows.filter(r=>(!teacher||r.teacher===teacher)&&(category==='all'||category==='preparation'&&isLessonPlanRecord(r)||(r.files||[]).some(f=>fileCategory(f)===category))&&
   (review==='all'||review==='pending'&&!r.review?.trim()||review==='reviewed'&&Boolean(r.review?.trim()))&&
   [r.school,r.teacher,r.grade,r.section,r.subject,r.topic,r.reflection,r.materials,r.date].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
  const ordered=chronologicalRows(filtered);

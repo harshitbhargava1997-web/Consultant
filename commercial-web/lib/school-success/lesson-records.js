@@ -11,12 +11,9 @@ import {noteSummary} from './feedback-notes.js';
 import {chronologicalRows} from '../report-sequence.js';
 import {isReflectionTextUrl} from './reflection-text.js';
 
-// Provenance of the automatically generated preparation PDF: teacher-portal.jsx uploads it with
-// file ID = lesson-period ID, so its key ends in implementation_<P>/lesson_plan/<P>.pdf. Uploaded
-// lesson-plan documents and photos always get random IDs. This is an identity check, not a name guess.
-export function isGeneratedPreparationPdf(url){
- try{const m=/\/implementation_([0-9a-f-]{36})\/lesson_plan\/([0-9a-f-]{36})\.pdf$/i.exec(decodeURIComponent(new URL(url).pathname));return Boolean(m)&&m[1].toLowerCase()===m[2].toLowerCase();}catch{return false;}
-}
+// The generated preparation PDF of older lessons (see lesson-plan-items.js).
+import {isGeneratedPreparationPdf} from './lesson-plan-items.js';
+export {isGeneratedPreparationPdf};
 
 // Labels written by formatReflection() in teacher-flow.js. Only these exact
 // heading lines are treated as structure; anything else stays as written text.
