@@ -150,7 +150,7 @@ export default function TeacherPortal({ data, school, refresh }) {
         const tab = next => { setSheet(false); if (next === 'read') return; go(next); };
         if (video.id && (!video.watched || video.replay)) return <div className="teacher-workspace tp ta-app" lang={language} ref={top}>
          <div className="ta-top"><div className="ta-brand"><i>S</i>School Success</div></div>
-         <OnboardingVideo key={video.id + (video.replay ? ':r' : '')} videoId={video.id} language={language} headers={contextHeaders} firstTime={!video.watched} onDone={() => setVideo(v => ({ ...v, watched: true, replay: false }))}/>
+         <OnboardingVideo key={video.id + (video.replay ? ':r' : '')} videoId={video.id} language={language} headers={contextHeaders} firstTime={!video.watched} watermark={teacherValue + ' · ' + selectedSchool} onDone={() => setVideo(v => ({ ...v, watched: true, replay: false }))}/>
         </div>;
         return <div className="teacher-workspace tp ta-app" lang={language} ref={top}>
          <div className="ta-top"><div className="ta-brand"><i>S</i>School Success</div><button type="button" className="ta-avatar" aria-label={t('Your profile','आपकी प्रोफ़ाइल')} onClick={() => setSheet(true)}>{initials}</button></div>

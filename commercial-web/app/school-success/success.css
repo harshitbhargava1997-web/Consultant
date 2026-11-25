@@ -402,3 +402,17 @@
 .success-app .ov-sum{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:10px 0}.success-app .ov-sum .text-button{margin-left:auto}
 .success-app .ov-table{width:100%;border-collapse:collapse;font-size:13px}.success-app .ov-table th,.success-app .ov-table td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
 .success-app .ov-wait .button{background:#fff;color:var(--green);border-color:#fff;justify-content:center;font-weight:800}
+/* Locked video player */
+.success-app .ov-frame{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.success-app .ov-shield{position:absolute;left:0;right:0;z-index:3;background:transparent;border:0;padding:0}
+.success-app .ov-shield.top{top:0;height:84px}
+.success-app .ov-shield.full{top:0;bottom:56px;display:grid;place-items:center;cursor:pointer}
+.success-app .ov-big{width:72px;height:72px;border-radius:50%;background:rgba(43,109,85,.92);color:#fff;display:grid;place-items:center;box-shadow:0 8px 24px #0006}
+.success-app .ov-start{position:absolute;left:0;right:0;top:84px;display:flex;justify-content:center;z-index:2;pointer-events:none}
+.success-app .ov-start span{margin-top:8px;background:rgba(15,31,26,.85);color:#fff;font-weight:700;font-size:13px;padding:6px 12px;border-radius:999px}
+.success-app .ov-mark{position:absolute;inset:0;z-index:2;display:grid;place-items:center;pointer-events:none;color:rgba(255,255,255,.22);font-weight:800;font-size:15px;transform:rotate(-24deg);text-align:center;padding:0 20px;text-shadow:0 1px 2px rgba(0,0,0,.25)}
+.success-app .ov-bar{position:absolute;left:0;right:0;bottom:0;height:56px;z-index:4;display:flex;align-items:center;gap:8px;padding:0 10px;background:linear-gradient(transparent,rgba(0,0,0,.75))}
+.success-app .ov-btn{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:#fff;background:rgba(255,255,255,.14);position:relative;flex:none}
+.success-app .ov-btn small{position:absolute;font-size:8px;font-weight:800;top:15px}.success-app .ov-btn:disabled{opacity:.4}
+.success-app .ov-track{flex:1;height:4px;border-radius:9px;background:rgba(255,255,255,.3);overflow:hidden}.success-app .ov-track span{display:block;height:100%;background:#7fd1a8}
+.success-app .ov-time{color:#fff;font-size:12px;font-variant-numeric:tabular-nums;flex:none}
