@@ -14,10 +14,11 @@ export function weekGroups(lessons,reviewRows,week){
  const numbered=inWeek.map(l=>{const n=(perDay.get(l.plannedDate)||0)+1;perDay.set(l.plannedDate,n);return {...l,dayNumber:n};});
  const groups=new Map();
  for(const l of numbered){const key=groupKey(l);if(!groups.has(key))groups.set(key,{key,grade:l.grade,section:sectionOf(l.section),subject:l.subject,lessons:[]});groups.get(key).lessons.push(l);}
- const weekly=new Map();
+ // A weekly review belongs to a group only through the periods it covers (never by class and subject alone, which
+ // another teacher can share).
+ const groupOfRecord=new Map(numbered.map(l=>[String(l.recordId),groupKey(l)])),weekly=new Map();
  for(const r of reviewRows||[]){
-  const w=r.weekly;if(!w||w.weekStart!==from)continue;
-  const key=JSON.stringify([w.grade||'',sectionOf(w.section),w.subject||'']);
+  const w=r.weekly,key=groupOfRecord.get(String(r.record_id));if(!w||w.weekStart!==from||!key)continue;
   if(!weekly.has(key))weekly.set(key,new Map());
   weekly.get(key).set(r.review_id,{id:r.review_id,date:r.updated_at,by:r.by||null,periods:w.periods,review:w.review,text:r.feedback});
  }
@@ -25,4 +26,15 @@ export function weekGroups(lessons,reviewRows,week){
   reflections:g.lessons.filter(l=>l.reflections.length||(l.writtenReflections||[]).length).length,
   reviews:[...(weekly.get(g.key)||new Map()).values()].sort((a,b)=>String(b.date).localeCompare(String(a.date)))}))
   .sort((a,b)=>a.grade.localeCompare(b.grade,undefined,{numeric:true})||a.section.localeCompare(b.section)||a.subject.localeCompare(b.subject))};
+}
+
+// Week overview (owner decision, 26 November 2026): every teacher's class-and-subject weeks in one school, with the
+// number of periods, how many have an Academic Review, and whether the weekly review is done.
+export function weekOverview(lessons,reviewRows,week){
+ const teachers=[...new Set((lessons||[]).map(l=>l.teacher))].sort((a,b)=>a.localeCompare(b));
+ let from='',to='';
+ const rows=teachers.map(teacher=>{const v=weekGroups(lessons.filter(l=>l.teacher===teacher),reviewRows,week);from=v.from;to=v.to;
+  return {teacher,groups:v.groups.map(g=>({key:g.key,grade:g.grade,section:g.section,subject:g.subject,periods:g.periods,reviewedPeriods:g.lessons.filter(l=>l.feedback).length,weeklyReviewed:g.reviews.length>0}))};}).filter(t=>t.groups.length);
+ if(!from)({from,to}=weekRange(week));
+ return {from,to,teachers:rows};
 }

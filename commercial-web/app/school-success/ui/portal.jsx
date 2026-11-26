@@ -9,7 +9,7 @@ const SuccessSignIn=dynamic(()=>import('./success-sign-in'),{loading:()=> <main 
 const LeaderApp=dynamic(()=>import('./leader-app'),{loading:()=> <section className="card">Opening your dashboard…</section>});
 const LessonReviewWorkspace=dynamic(()=>import('./lesson-review'),{loading:()=> <section className="card">Loading lesson reviews…</section>});
 const LessonReviewDialog=dynamic(()=>import('./lesson-review').then(m=>m.LessonReviewDialog),{ssr:false});
-const WeeklyReview=dynamic(()=>import('./weekly-review'),{loading:()=> <section className="card">Loading weekly review…</section>});
+const ReviewScreens=dynamic(()=>import('./review-screens'),{loading:()=> <section className="card">Loading lesson reviews…</section>});
 const CRMWorkspace=dynamic(()=>import("./crm-workspace"),{loading:()=> <section className="card">Opening workspace…</section>});
 import CRMPriorities from './crm-priorities';
 const SchoolDirectory=dynamic(()=>import("./school-directory"),{loading:()=> <section className="card">Opening workspace…</section>});
@@ -41,8 +41,9 @@ export default function Portal({ shortLink = null } = {}) {
     // A short school link (schoolsuccess.in/sunrise-4821) passes the school link behind it.
     setShortLink(shortLink);
     const [reviewId,setReviewId]=useState('');
-    // Lesson reviews: single lessons (by day and period) or a weekly review (owner decision, 26 November 2026).
-    const [reviewMode,setReviewMode]=useState('lessons'),[weeklyReload,setWeeklyReload]=useState(0);
+    // Lesson reviews: day-wise, weekly subject-wise and week overview screens, or the earlier lesson list
+    // (owner decision, 26 November 2026).
+    const [reviewMode,setReviewMode]=useState('screens'),[weeklyReload,setWeeklyReload]=useState(0);
     const openReview=row=>setReviewId(String(row.recordId || row.id));
     const [crmRecord, setCrmRecord] = useState(null), [docLink, setDocLink] = useState(null), [signInHref, setSignInHref] = useState('/');
     // School Success's own sign-in: '' (signed in), 'signin', 'change' (set own password) or 'noaccess'.
@@ -143,9 +144,9 @@ export default function Portal({ shortLink = null } = {}) {
  {isAdmin && page === 'School 360°' && <SchoolPortfolio data={data} schoolFilter={school} query={query} from={from} to={to} setFrom={setFrom} setTo={setTo} refresh={refresh} view={school360View} onViewChange={setSchool360View} onReview={openReview}/>}
  {page === 'Teacher 360°' && <ReportWorkspace data={data} school={school} from={from} to={to} setFrom={setFrom} setTo={setTo} refresh={refresh} mode={page} onReview={openReview}/>}
  {isAdmin && page === 'Lesson reviews' && <div className="section-actions"><button className="button" onClick={() => csvExport(submissions, 'teacher-submissions')}><Download size={16}/>Export submissions (CSV)</button></div>}
- {isAdmin && page === 'Lesson reviews' && <div className="tabs review-mode" role="tablist" aria-label="Review type">{[['lessons','Single lessons (day / period)'],['weekly','Weekly review']].map(([k,l])=><button key={k} type="button" role="tab" aria-selected={reviewMode===k} className={reviewMode===k?'selected':''} onClick={()=>setReviewMode(k)}>{l}</button>)}</div>}
- {isAdmin && page === 'Lesson reviews' && reviewMode === 'lessons' && <LessonReviewWorkspace key={school} data={data} school={school} from={from} to={to} setFrom={setFrom} setTo={setTo} onApply={()=>run(()=>refresh({from,to}))} busy={busy} query={query} onReview={openReview}/>}
- {isAdmin && page === 'Lesson reviews' && reviewMode === 'weekly' && <WeeklyReview key={school} data={data} school={school} reloadKey={weeklyReload} onReviewLesson={id=>setReviewId(String(id))} onSaved={()=>{void refresh().catch(()=>{});}}/>}
+ {isAdmin && page === 'Lesson reviews' && <p className="review-mode-switch">{reviewMode==='screens'?<button type="button" className="text-button" onClick={()=>setReviewMode('list')}>Show the list of all lessons in a date range</button>:<button type="button" className="text-button" onClick={()=>setReviewMode('screens')}>← Back to day-wise, weekly and overview reviews</button>}</p>}
+ {isAdmin && page === 'Lesson reviews' && reviewMode === 'list' && <LessonReviewWorkspace key={school} data={data} school={school} from={from} to={to} setFrom={setFrom} setTo={setTo} onApply={()=>run(()=>refresh({from,to}))} busy={busy} query={query} onReview={openReview}/>}
+ {isAdmin && page === 'Lesson reviews' && reviewMode === 'screens' && <ReviewScreens key={school} data={data} school={school} reloadKey={weeklyReload} onSaved={()=>{void refresh().catch(()=>{});}}/>}
  {page === 'Classroom visits' && <><div className="section-actions">{!isLeader && <button className="button primary" disabled={!selected} onClick={() => open('observation')}><Plus size={16}/>Record observation</button>}<button className="button" onClick={() => window.print()}>Print / PDF</button></div>{visits.filter(search).map(r => <section className="card" key={r.id}><div className="card-head"><div><h2>{r.teacher}</h2><p>{r.school} · {r.date} · Grade {r.grade} · {r.subject}</p></div><span className="pill blue">Existing visit · read only</span></div><h3>{r.topic}</h3><div className="rubric-summary">{Object.entries(r.rubrics).map(([k, v]) => <span key={k}>{k}<b className={'grade grade' + v}>{v}</b></span>)}</div><div className="form-grid"><div><h3>Strengths</h3><p>{r.strengths}</p></div><div><h3>Areas for growth</h3><p>{r.improvements}</p></div><div><h3>Agreed actions</h3><p>{r.actions}</p><small>Review on {r.followup}</small></div></div></section>)}{!visits.length && <section className="card"><Empty title="Make every visit count" detail="Record classroom observations, rubric scores and agreed follow-up actions."/></section>}</>}
  {page === 'Data & imports' && <UsageImport refresh={refresh} entries={entries} members={members} onPeriod={async (from, to) => { setFrom(from); setTo(to); await refresh({ from, to }); setPage('Teacher 360°'); }}/>}
  {data.actor.isSuperAdmin && page === 'Media settings' && <MediaSettings refresh={refresh}/>}

@@ -19,6 +19,7 @@ const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s=>Number.isFinite(Da
 const text = z.string().trim().max(200);
 export const weeklyRequest = z.discriminatedUnion('action',[
  z.object({action:z.literal('week'),school:text.min(1),teacher:text.min(1),week:day}).strict(),
+ z.object({action:z.literal('overview'),school:text.min(1),week:day}).strict(),
  z.object({action:z.literal('save'),school:text.min(1),teacher:text.min(1),week:day,grade:text.min(1),section:z.string().trim().max(40),subject:text.min(1),requestId:z.string().uuid(),review:weeklyReview}).strict()
 ]);
 const weekDay=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',timeZone:'UTC'}),weekYear=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'});

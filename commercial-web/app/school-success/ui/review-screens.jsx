@@ -1,0 +1,187 @@
+'use client';
+// Lesson review screens (owner decision, 26 November 2026), for School Success staff and for principals and
+// coordinators of their own school:
+//   Day-wise       — a date and a teacher: that day's periods in order, each reviewed on the spot;
+//   Weekly         — teacher → subject (with class) → week: one weekly review (Planning, Execution, focus);
+//   Week overview  — every teacher's class-and-subject weeks in the school, reviewed or awaiting review.
+// The three share one selection, so the overview opens a teacher's day or a subject's week directly.
+import {useEffect,useRef,useState} from 'react';
+import {ArrowUpRight,CircleCheck,ClipboardCheck,RefreshCw,ChevronLeft,ChevronRight} from 'lucide-react';
+import {successFetch} from '@/lib/school-success/client';
+import {formatDay} from '@/lib/school-success/lesson-records';
+import {reviewCriteria,reviewLevels,weekLabel,reviewerLabel} from '@/lib/school-success/lesson-reviews';
+import {weekRange} from '@/lib/school-success/day-periods';
+import './lesson-records.css';
+
+const istToday=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+const addDays=(day,n)=>new Date(Date.parse(day+'T00:00:00Z')+n*86400000).toISOString().slice(0,10);
+const weekday=day=>new Date(day+'T00:00:00Z').toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'});
+const longDay=day=>new Date(day+'T00:00:00Z').toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short',year:'numeric',timeZone:'UTC'});
+const classOf=g=>[[g.grade,g.section].filter(Boolean).join(' '),g.subject].filter(Boolean).join(' · ');
+const subjectOf=g=>g.subject+' · '+[g.grade,g.section].filter(Boolean).join(' ');
+async function post(url,body){
+ const r=await successFetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Could not load. Please try again.');return d;
+}
+const weeklyApi=body=>post('/api/school-success/weekly-reviews',body);
+const lessonApi=body=>post('/api/school-success/lesson-reviews',body);
+const hasEvidence=l=>l.activities.length||l.writing.length||(l.remedial||[]).length||(l.portfolio||[]).length;
+const hasReflection=l=>l.reflections.length||(l.writtenReflections||[]).length;
+function Files({title,files}){if(!files?.length)return null;return <div className="wr-files"><span>{title}</span>{files.map(f=><a key={f.url} href={f.url} target="_blank" rel="noopener noreferrer">{f.label}<ArrowUpRight size={13}/></a>)}</div>;}
+function Ratings({draft,edit,disabled}){
+ return Object.entries(reviewCriteria).map(([key,c])=><fieldset key={key} className="review-criterion" disabled={disabled}><legend>{c.label}</legend><p>{c.question}</p>
+  <label className="field"><span>{c.label} rating</span><select value={draft[key]?.level||''} onChange={e=>edit(key,'level',e.target.value)}><option value="">Not reviewed</option>{Object.entries(reviewLevels).map(([level,label])=><option key={level} value={level}>{level} · {label}</option>)}</select></label>
+  {draft[key]?.level&&<><p className="hint">{c[draft[key].level]}</p><label className="field"><span>{c.label} feedback</span><textarea rows={2} maxLength={500} required value={draft[key].note||''} onChange={e=>edit(key,'note',e.target.value)}/></label></>}
+ </fieldset>);
+}
+const ratingsReady=d=>Object.values(d).some(v=>v.level)&&!Object.values(d).some(v=>v.level&&!v.note?.trim());
+const ratingsOf=d=>Object.fromEntries(Object.entries(d).filter(([,v])=>v.level).map(([k,v])=>[k,{level:v.level,note:v.note.trim()}]));
+function useDraft(){const [draft,setDraft]=useState({}),requestId=useRef(null);return {draft,requestId,reset(){setDraft({});requestId.current=null;},edit(key,field,value){requestId.current=null;setDraft(o=>({...o,[key]:{...o[key],[field]:value}}));}};}
+
+// One period: plan, evidence, reflection, and (on request) its review form.
+function PeriodCard({l,showClass,open,onOpen,onClose,onSaved}){
+ const d=useDraft(),[saving,setSaving]=useState(false),[error,setError]=useState('');
+ async function save(e){e.preventDefault();if(saving||!ratingsReady(d.draft))return;setSaving(true);setError('');
+  try{d.requestId.current ||= crypto.randomUUID();await lessonApi({action:'save',recordId:l.recordId,requestId:d.requestId.current,review:ratingsOf(d.draft)});d.reset();onSaved?.();}catch(e){setError(e.message);}finally{setSaving(false);}}
+ return <article className={'wr-period'+(open?' open':'')}>
+  <div className="wr-period-head"><span className="ta-pnum">Period {l.dayNumber}</span><b>{showClass?classOf(l)+' — ':''}{l.topic}</b>{l.feedback?<span className="pill green">{l.feedback.weekly?'Weekly review':'Reviewed'}</span>:<span className="pill amber">Awaiting review</span>}{!open&&onOpen&&<button type="button" className="button" onClick={onOpen}><ClipboardCheck size={15}/>{l.feedback?'Add a review':'Review this period'}</button>}</div>
+  {l.feedback&&<div className="wr-done"><b>{l.feedback.weekly?'Weekly review':'Review'}{l.feedback.date?' · '+formatDay(String(l.feedback.date).slice(0,10)):''}{l.feedback.by?' · '+l.feedback.by:''}</b><p>{l.feedback.text}</p></div>}
+  <details open={open}><summary>Lesson plan</summary>{l.plan.fields.map(f=><div className="review-plan-field" key={f.key}><b>{f.label}</b><p>{f.text}</p></div>)}{l.plan.notes&&<p className="review-note">{l.plan.notes}</p>}{!l.plan.fields.length&&!l.plan.notes&&<p className="hint">No written plan.</p>}</details>
+  <Files title="Classroom activities" files={l.activities}/><Files title="Student written work" files={l.writing}/><Files title="Remedial support" files={l.remedial}/><Files title="Student portfolio / assessment" files={l.portfolio}/>
+  {(l.writtenReflections||[]).map(r=><div className="wr-reflection" key={r.url}><span>After-class reflection</span>{['achievement','nextStep'].filter(k=>r.answers?.[k]).map(k=><p key={k}>{r.answers[k]}</p>)}</div>)}
+  <Files title="After-class reflection" files={l.reflections}/>
+  {!hasEvidence(l)&&!hasReflection(l)&&<p className="hint">No classroom evidence or reflection yet.</p>}
+  {open&&<form className="wr-inline" onSubmit={save}><h4>Review Period {l.dayNumber}</h4>{error&&<p className="alert error" role="alert">{error}</p>}
+   <Ratings draft={d.draft} edit={d.edit} disabled={saving}/>
+   <div className="modal-actions"><button type="button" className="button" disabled={saving} onClick={()=>{d.reset();onClose();}}>Cancel</button><button className="button primary" disabled={saving||!ratingsReady(d.draft)}>{saving?'Saving…':'Save review for Period '+l.dayNumber}</button></div></form>}
+ </article>;
+}
+function Stats({items}){return <div className="wr-stats">{items.map(([n,l])=><div key={l}><strong>{n}</strong><span>{l}</span></div>)}</div>;}
+
+function Pickers({schools,school,setSchool,teachers,teacher,setTeacher,children}){
+ return <div className="form-grid wr-pick">
+  {schools.length>1&&<label className="field"><span>School</span><select value={school} onChange={e=>setSchool(e.target.value)}><option value="">Choose a school</option>{schools.map(s=><option key={s}>{s}</option>)}</select></label>}
+  {setTeacher&&<label className="field"><span>Teacher</span><select value={teacher} disabled={!school} onChange={e=>setTeacher(e.target.value)}><option value="">Choose a teacher</option>{teachers.map(t=><option key={t}>{t}</option>)}</select></label>}
+  {children}
+ </div>;
+}
+
+function useWeek(school,teacher,week,reloadKey){
+ const [view,setView]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[n,setN]=useState(0);
+ useEffect(()=>{if(!school||!teacher){setView(null);return;}let live=true;setLoading(true);setError('');
+  weeklyApi({action:'week',school,teacher,week}).then(d=>{if(live)setView(d);}).catch(e=>{if(live){setError(e.message);setView(null);}}).finally(()=>{if(live)setLoading(false);});
+  return ()=>{live=false;};},[school,teacher,week,reloadKey,n]);
+ return {view,loading,error,reload:()=>setN(x=>x+1)};
+}
+
+function DayWise({sel,set,schools,teachers,reloadKey,onSaved}){
+ const {view,loading,error,reload}=useWeek(sel.school,sel.teacher,weekRange(sel.date).from,reloadKey);
+ const [open,setOpen]=useState(''),[show,setShow]=useState('all');
+ const day=(view?.groups||[]).flatMap(g=>g.lessons).filter(l=>l.plannedDate===sel.date).sort((a,b)=>a.dayNumber-b.dayNumber);
+ const shown=show==='awaiting'?day.filter(l=>!l.feedback):day;
+ return <>
+  <p className="hint">Choose a day and a teacher. Every period of that day, in order, with its plan, evidence and reflection. Review each period here.</p>
+  <Pickers {...{schools,teachers}} school={sel.school} setSchool={v=>set({school:v,teacher:''})} teacher={sel.teacher} setTeacher={v=>set({teacher:v})}>
+   <label className="field"><span>Date</span><input type="date" value={sel.date} onChange={e=>e.target.value&&set({date:e.target.value})}/><small>{longDay(sel.date)}</small></label>
+   <label className="field"><span>Show</span><select value={show} onChange={e=>setShow(e.target.value)}><option value="all">All periods</option><option value="awaiting">Awaiting review</option></select></label>
+  </Pickers>
+  <div className="ta-filters wr-weeks"><button type="button" className="ta-chip" onClick={()=>set({date:addDays(sel.date,-1)})}><ChevronLeft size={13}/>Previous day</button><button type="button" className={'ta-chip'+(sel.date===istToday()?' on':'')} onClick={()=>set({date:istToday()})}>Today</button><button type="button" className="ta-chip" onClick={()=>set({date:addDays(sel.date,1)})}>Next day<ChevronRight size={13}/></button></div>
+  {error&&<p className="alert error" role="alert">{error}</p>}
+  {!sel.school||!sel.teacher?<p className="hint">Choose {schools.length>1&&!sel.school?'a school and ':''}a teacher.</p>
+  :loading&&!view?<p role="status">Opening the day…</p>
+  :!day.length?<p className="hint">{sel.teacher} has no lesson plans for {longDay(sel.date)}.</p>
+  :<>
+   <Stats items={[[day.length,'Periods planned'],[day.filter(hasEvidence).length,'With classroom evidence'],[day.filter(hasReflection).length,'With after-class reflection'],[day.filter(l=>l.feedback).length,'Reviewed']]}/>
+   {shown.map(l=><PeriodCard key={l.key} l={l} showClass open={open===l.key} onOpen={()=>setOpen(l.key)} onClose={()=>setOpen('')} onSaved={()=>{setOpen('');reload();onSaved?.('Review saved for Period '+l.dayNumber+'. '+sel.teacher+' will see it in their Feedback tab.');}}/>)}
+   {!shown.length&&<p className="hint">Every period of this day has been reviewed.</p>}
+  </>}
+ </>;
+}
+
+function WeeklySubject({sel,set,schools,teachers,reloadKey,onSaved}){
+ const range=weekRange(sel.week),{view,loading,error,reload}=useWeek(sel.school,sel.teacher,range.from,reloadKey);
+ const groups=view?.groups||[],group=groups.find(g=>g.key===sel.group)||groups[0];
+ const d=useDraft(),[focus,setFocus]=useState(''),[saving,setSaving]=useState(false),[saveError,setSaveError]=useState(''),[open,setOpen]=useState('');
+ useEffect(()=>{d.reset();setFocus('');},[group?.key,range.from,sel.teacher]);
+ const thisWeek=weekRange(istToday()).from,lastWeek=weekRange(addDays(istToday(),-7)).from;
+ const ready=ratingsReady(d.draft)&&focus.trim();
+ async function save(e){e.preventDefault();if(saving||!ready||!group)return;setSaving(true);setSaveError('');
+  try{d.requestId.current ||= crypto.randomUUID();
+   const r=await weeklyApi({action:'save',school:sel.school,teacher:sel.teacher,week:range.from,grade:group.grade,section:group.section,subject:group.subject,requestId:d.requestId.current,review:{...ratingsOf(d.draft),focus:focus.trim()}});
+   d.reset();setFocus('');reload();onSaved?.('Weekly review saved for '+r.periods+(r.periods===1?' period':' periods')+'. '+sel.teacher+' will see it in their Feedback tab.');
+  }catch(e){setSaveError(e.message);}finally{setSaving(false);}}
+ const days=group?[...new Set(group.lessons.map(l=>l.plannedDate))]:[];
+ return <>
+  <p className="hint">Choose the teacher, the subject (with its class) and the week. One review for that subject's week; single periods can still be reviewed below.</p>
+  <Pickers {...{schools,teachers}} school={sel.school} setSchool={v=>set({school:v,teacher:'',group:''})} teacher={sel.teacher} setTeacher={v=>set({teacher:v,group:''})}>
+   <label className="field"><span>Subject · class</span><select value={group?.key||''} disabled={!groups.length} onChange={e=>set({group:e.target.value})}>{!groups.length&&<option value="">{sel.teacher?'No plans this week':'Choose a teacher first'}</option>}{groups.map(g=><option key={g.key} value={g.key}>{subjectOf(g)} ({g.periods} {g.periods===1?'period':'periods'}){g.reviews.length?' · ✓ reviewed':''}</option>)}</select></label>
+   <label className="field"><span>Week</span><input type="date" value={range.from} onChange={e=>e.target.value&&set({week:weekRange(e.target.value).from})}/><small>{weekLabel(range.from,range.to)}</small></label>
+  </Pickers>
+  <div className="ta-filters wr-weeks" role="group" aria-label="Week">{[[lastWeek,'Last week'],[thisWeek,'This week']].map(([w,l])=><button key={l} type="button" className={'ta-chip'+(range.from===w?' on':'')} aria-pressed={range.from===w} onClick={()=>set({week:w})}>{l}</button>)}<button type="button" className="ta-chip" onClick={()=>set({week:addDays(range.from,-7)})}><ChevronLeft size={13}/>Earlier</button><button type="button" className="ta-chip" onClick={()=>set({week:addDays(range.from,7)})}>Later<ChevronRight size={13}/></button></div>
+  {error&&<p className="alert error" role="alert">{error}</p>}
+  {!sel.school||!sel.teacher?<p className="hint">Choose {schools.length>1&&!sel.school?'a school and ':''}a teacher to see their week.</p>
+  :loading&&!view?<p role="status">Opening the week…</p>
+  :!groups.length?<p className="hint">{sel.teacher} has no lesson plans for {weekLabel(range.from,range.to)}.</p>
+  :group&&<>
+   <Stats items={[[group.periods,'Periods planned'],[group.withEvidence,'With classroom evidence'],[group.reflections,'With after-class reflection'],[group.lessons.filter(l=>l.feedback).length,'Reviewed']]}/>
+   {days.map(day=><div className="wr-day" key={day}><h3>{weekday(day)}</h3>{group.lessons.filter(l=>l.plannedDate===day).map(l=><PeriodCard key={l.key} l={l} open={open===l.key} onOpen={()=>setOpen(l.key)} onClose={()=>setOpen('')} onSaved={()=>{setOpen('');reload();onSaved?.('Review saved for Period '+l.dayNumber+'.');}}/>)}</div>)}
+   {group.reviews.length>0&&<section className="wr-earlier"><h3>Weekly reviews for this week</h3>{group.reviews.map(r=><div className="lr-review" key={r.id}><b>{formatDay(String(r.date).slice(0,10))}{r.by?' · '+reviewerLabel(r.by):''}</b><p>{r.text}</p></div>)}</section>}
+   <form className="wr-form" onSubmit={save}><h3>{group.reviews.length?'Add another weekly review':'Weekly review'} · {subjectOf(group)} · {weekLabel(view.from,view.to)}</h3>
+    <p className="hint">Rate planning, execution or both, with one or two sentences each, and add a focus for next week. It covers the {group.periods} {group.periods===1?'period':'periods'} above.</p>
+    {saveError&&<p className="alert error" role="alert">{saveError}</p>}
+    <Ratings draft={d.draft} edit={d.edit} disabled={saving}/>
+    <label className="field"><span>Focus for next week</span><textarea rows={2} maxLength={500} required disabled={saving} value={focus} placeholder="One clear focus the teacher can work on next week." onChange={e=>{d.requestId.current=null;setFocus(e.target.value);}}/></label>
+    <div className="modal-actions"><button type="button" className="button" disabled={loading} onClick={reload}><RefreshCw size={15}/>Refresh week</button><button className="button primary" disabled={saving||!ready}>{saving?'Saving…':<><CircleCheck size={16}/>Save weekly review</>}</button></div>
+   </form>
+  </>}
+ </>;
+}
+
+function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
+ const range=weekRange(sel.week),[view,setView]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[subject,setSubject]=useState(''),[show,setShow]=useState('all');
+ useEffect(()=>{if(!sel.school){setView(null);return;}let live=true;setLoading(true);setError('');
+  weeklyApi({action:'overview',school:sel.school,week:range.from}).then(d=>{if(live)setView(d);}).catch(e=>{if(live){setError(e.message);setView(null);}}).finally(()=>{if(live)setLoading(false);});return ()=>{live=false;};},[sel.school,range.from,reloadKey]);
+ const planned=new Map((view?.teachers||[]).map(t=>[t.teacher,t.groups]));
+ const names=[...new Set([...roster.filter(r=>r.school===sel.school).map(r=>r.name),...planned.keys()])].sort((a,b)=>a.localeCompare(b));
+ const subjects=[...new Set((view?.teachers||[]).flatMap(t=>t.groups.map(g=>g.subject)))].sort();
+ const rows=names.map(name=>({name,groups:(planned.get(name)||[]).filter(g=>!subject||g.subject===subject)})).filter(r=>show==='all'||r.groups.some(g=>!g.weeklyReviewed));
+ const all=[...planned.values()].flat(),done=all.filter(g=>g.weeklyReviewed).length;
+ const thisWeek=weekRange(istToday()).from,lastWeek=weekRange(addDays(istToday(),-7)).from;
+ return <>
+  <p className="hint">Every teacher's subjects this week, and whether the weekly subject review is done. Tap a subject to open its weekly review; tap a teacher for the day-wise view.</p>
+  <Pickers schools={schools} school={sel.school} setSchool={v=>set({school:v})} teachers={[]}>
+   <label className="field"><span>Week</span><input type="date" value={range.from} onChange={e=>e.target.value&&set({week:weekRange(e.target.value).from})}/><small>{weekLabel(range.from,range.to)}</small></label>
+   <label className="field"><span>Subject</span><select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">All subjects</option>{subjects.map(s=><option key={s}>{s}</option>)}</select></label>
+   <label className="field"><span>Show</span><select value={show} onChange={e=>setShow(e.target.value)}><option value="all">All teachers</option><option value="awaiting">With a subject awaiting review</option></select></label>
+  </Pickers>
+  <div className="ta-filters wr-weeks">{[[lastWeek,'Last week'],[thisWeek,'This week']].map(([w,l])=><button key={l} type="button" className={'ta-chip'+(range.from===w?' on':'')} onClick={()=>set({week:w})}>{l}</button>)}<button type="button" className="ta-chip" onClick={()=>set({week:addDays(range.from,-7)})}><ChevronLeft size={13}/>Earlier</button><button type="button" className="ta-chip" onClick={()=>set({week:addDays(range.from,7)})}>Later<ChevronRight size={13}/></button></div>
+  {error&&<p className="alert error" role="alert">{error}</p>}
+  {!sel.school?<p className="hint">Choose a school.</p>:loading&&!view?<p role="status">Opening the week…</p>:view&&<>
+   <Stats items={[[names.length,'Teachers'],[all.length,'Subject weeks planned'],[done,'Weekly reviews done'],[all.length-done,'Awaiting weekly review']]}/>
+   <div className="table-scroll"><table className="wo-table"><thead><tr><th>Teacher</th><th>Subjects this week (class)</th></tr></thead><tbody>
+    {rows.map(r=><tr key={r.name}><td><button type="button" className="text-button" onClick={()=>openDay(r.name)}><b>{r.name}</b></button><small>Open day-wise ›</small></td>
+     <td>{!r.groups.length?<span className="wo-none">{planned.get(r.name)?.length?'No plans for this subject':'No plans this week'}</span>:<div className="wo-cells">{r.groups.map(g=><button type="button" key={g.key} className={'wo-cell '+(g.weeklyReviewed?'ok':'wait')} onClick={()=>openWeekly(r.name,g.key)}><span>{subjectOf(g)}</span><b>{g.weeklyReviewed?'✓ Weekly review done':'Awaiting weekly review'}</b><small>{g.periods} {g.periods===1?'period':'periods'} · {g.reviewedPeriods} reviewed</small></button>)}</div>}</td></tr>)}
+   </tbody></table></div>
+   {!rows.length&&<p className="hint">No teacher matches these filters.</p>}
+  </>}
+ </>;
+}
+
+// tab: 'day' | 'weekly' | 'overview'. compact: inside the principal's phone dashboard.
+export default function ReviewScreens({data,school:initialSchool='',reloadKey=0,onSaved,compact=false,initialTab='overview'}){
+ const roster=data?.roster||[],schools=[...new Set(roster.map(r=>r.school))].filter(Boolean).sort();
+ const [tab,setTab]=useState(initialTab),[notice,setNotice]=useState('');
+ const [sel,setSel]=useState(()=>({school:initialSchool&&schools.includes(initialSchool)?initialSchool:schools.length===1?schools[0]:'',teacher:'',date:istToday(),week:weekRange(istToday()).from,group:''}));
+ const set=change=>{setSel(s=>({...s,...change}));setNotice('');};
+ const teachers=[...new Set(roster.filter(r=>r.school===sel.school).map(r=>r.name))].sort((a,b)=>a.localeCompare(b));
+ const saved=m=>{setNotice(m);onSaved?.(m);};
+ const common={sel,set,schools,teachers,reloadKey,onSaved:saved};
+ return <section className={'card lesson-records weekly-review review-screens'+(compact?' compact':'')}>
+  <div className="rs-tabs" role="tablist" aria-label="Review type">{(compact?[['day','Day-wise'],['weekly','Weekly'],['overview','Overview']]:[['day','Day-wise · period by period'],['weekly','Weekly · subject-wise'],['overview','Week overview']]).map(([k,l])=><button key={k} type="button" role="tab" aria-selected={tab===k} className={tab===k?'on':''} onClick={()=>{setTab(k);setNotice('');}}>{l}</button>)}</div>
+  {notice&&<p className="alert success" role="status">{notice}</p>}
+  {tab==='day'&&<DayWise {...common}/>}
+  {tab==='weekly'&&<WeeklySubject {...common}/>}
+  {tab==='overview'&&<WeekOverview sel={sel} set={set} schools={schools} roster={roster} reloadKey={reloadKey}
+   openWeekly={(teacher,group)=>{set({teacher,group});setTab('weekly');}} openDay={teacher=>{set({teacher,date:sel.week<=istToday()&&istToday()<=addDays(sel.week,6)?istToday():sel.week});setTab('day');}}/>}
+ </section>;
+}

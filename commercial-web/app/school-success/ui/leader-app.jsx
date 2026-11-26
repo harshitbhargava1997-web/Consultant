@@ -7,7 +7,7 @@ import {useEffect,useMemo,useState} from 'react';
 import {ClipboardCheck,Bell,CalendarDays,ChevronRight,CircleCheck,KeyRound,LogOut,X,MessageSquareText,ArrowLeft,RefreshCw,BookOpen,CalendarRange} from 'lucide-react';
 import {buildLessonRecords,formatDay} from '@/lib/school-success/lesson-records';
 import {LessonReviewDialog} from './lesson-review';
-import WeeklyReview from './weekly-review';
+import ReviewScreens from './review-screens';
 import TeacherPinAdmin from './teacher-pin-admin';
 import {browserClient} from '@/lib/supabase';
 
@@ -74,18 +74,16 @@ export default function LeaderApp({data,refresh}){
   <div className="ta-me"><span className="ta-avatar big la-avatar">{initials(actor.name)}</span><div><b>{actor.name}</b><small>{role} · {school}</small></div></div>
   <button type="button" className="ta-opt" onClick={()=>{setSheet(false);setView('pins');}}><span className="ta-opt-icon"><KeyRound size={18}/></span><span className="ta-opt-label">Teacher PINs</span><ChevronRight size={18}/></button>
   <button type="button" className="ta-opt danger" onClick={()=>void signOut()}><span className="ta-opt-icon"><LogOut size={18}/></span><span className="ta-opt-label">Sign out</span></button></div></>;
- // Weekly review: one teacher, one class and subject, one week (owner decision, 26 November 2026).
- if(view==='weekly')return <div className="teacher-workspace tp ta-app leader-app">{top}<div className="ta-title"><button type="button" className="ta-back" aria-label="Back" onClick={()=>setView('home')}><ArrowLeft size={18}/></button><h2>Weekly review</h2></div>
-  {notice&&<div className="alert success" role="status">{notice}</div>}
-  <WeeklyReview compact data={data} school={school} reloadKey={weeklyReload} onReviewLesson={id=>setReviewId(String(id))} onSaved={m=>{setNotice(m);void refresh({from:data.period.from,to:data.period.to}).catch(()=>{});}}/>
-  {reviewId&&<LessonReviewDialog key={reviewId} recordId={reviewId} onClose={()=>setReviewId('')} onSaved={()=>{setReviewId('');setNotice('Feedback saved. The teacher will see it in their Feedback tab.');setWeeklyReload(n=>n+1);}}/>}
+ // Reviews: day-wise, weekly subject-wise and week overview (owner decision, 26 November 2026).
+ if(view==='weekly')return <div className="teacher-workspace tp ta-app leader-app">{top}<div className="ta-title"><button type="button" className="ta-back" aria-label="Back" onClick={()=>setView('home')}><ArrowLeft size={18}/></button><h2>Lesson reviews</h2></div>
+  <ReviewScreens compact data={data} school={school} reloadKey={weeklyReload} onSaved={()=>{void refresh({from:data.period.from,to:data.period.to}).catch(()=>{});}}/>
   {sheetEl}</div>;
  if(view==='pins')return <div className="teacher-workspace tp ta-app leader-app">{top}<div className="ta-title"><button type="button" className="ta-back" aria-label="Back" onClick={()=>setView('home')}><ArrowLeft size={18}/></button><h2>Teacher PINs</h2></div><TeacherPinAdmin schools={school?[school]:[]} initialSchool={school} open/>{sheetEl}</div>;
  const shownLessons=showAll?v.lessons:v.lessons.slice(0,8);
  return <div className="teacher-workspace tp ta-app leader-app">
   {top}
   <div className="ta-hello"><small>{role} · {school}</small><h1>{label}</h1><p>{span}</p></div>
-  <button type="button" className="ta-cta la-weekly" onClick={()=>{setNotice('');setView('weekly');}}><CalendarRange size={18}/>Weekly review</button>
+  <button type="button" className="ta-cta la-weekly" onClick={()=>{setNotice('');setView('weekly');}}><CalendarRange size={18}/>Review lessons · day, week, overview</button>
   <section className="la-filters" aria-label="Filters">
    <div className="ta-filters" role="group" aria-label="Dates">{[['week','This week'],['last','Last week'],['month','This month'],['range','Dates']].map(([k,l])=><button type="button" key={k} aria-pressed={filter===k} className={'ta-chip'+(filter===k?' on':'')} onClick={()=>{setFilter(k);setShowAll(false);}}>{k==='range'&&<CalendarDays size={13}/>}{l}</button>)}</div>
    {filter==='range'&&<div className="ta-range"><label><span>From</span><input type="date" max={today} value={custom.from} onChange={e=>setCustom(c=>({...c,from:e.target.value}))}/></label><label><span>To</span><input type="date" max={today} value={custom.to} onChange={e=>setCustom(c=>({...c,to:e.target.value}))}/></label></div>}

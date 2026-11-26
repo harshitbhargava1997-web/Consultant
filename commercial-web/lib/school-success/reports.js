@@ -2,6 +2,7 @@ import {isClosureFile,isRemedialFile} from '../report-sequence.js';
 import { z } from 'zod';
 import {chronologicalRows} from '../report-sequence.js';
 import {evidenceFiles,evidenceKey} from './lesson-plan-items.js';
+import {reviewSummary} from './review-summary.js';
 import {formatReportDuration as duration} from './report-units.js';
 export const moduleNames = ['Lesson Plan', 'Content / Book', 'Additional Materials', 'E-book'];
 export const moduleLabels = ['Lesson preparation', 'Book usage', 'Additional Materials', 'E-books'];
@@ -63,7 +64,9 @@ export function buildProfiles(entries, roster, from, to, settings, calendars = {
             item.minutes += Number(r.minutes || 0);
             preparationGroups.set(key, item);
         }
-        return { ...t, days, holidays, metrics, evidence, legacyEvidence, closures:chronologicalRows([...closureMap.values()]), remedials:chronologicalRows([...remedialMap.values()]), evidenceStatus, observations, preparations: [...preparationGroups.values()].sort((a, b) => b.minutes - a.minutes), usage, books: [...bookGroups.values()].sort((a, b) => b.minutes - a.minutes), events: unique(['Event_Pictures_Link']) };
+        // Academic reviews of this teacher's lessons in these dates (single-period and weekly).
+        const reviews = reviewSummary(submissions);
+        return { ...t, days, holidays, metrics, evidence, reviews, legacyEvidence, closures:chronologicalRows([...closureMap.values()]), remedials:chronologicalRows([...remedialMap.values()]), evidenceStatus, observations, preparations: [...preparationGroups.values()].sort((a, b) => b.minutes - a.minutes), usage, books: [...bookGroups.values()].sort((a, b) => b.minutes - a.minutes), events: unique(['Event_Pictures_Link']) };
     });
 }
 export function includedMetric(index, settings) { return index === 1 && settings.sections.book !== false || index === 0 && settings.sections.lessonPlan || index === 2 && settings.sections.additional || index === 3 && settings.sections.ebooks; }

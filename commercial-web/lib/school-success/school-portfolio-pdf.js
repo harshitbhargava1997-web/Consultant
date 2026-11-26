@@ -5,6 +5,7 @@ import {portfolioModules,portfolioCategories,fileCategory,portfolioTotals,select
 import {formatReportDuration as duration} from './report-units.js';
 import {chronologicalRows} from '../report-sequence.js';
 import {evidenceFiles,evidenceKey} from './lesson-plan-items.js';
+import {reviewSummary,reviewSummaryByTeacher} from './review-summary.js';
 const labels=['Lesson preparation','Book usage','Additional Materials','E-books'];
 const sessions=count=>`${count} session${count===1?'':'s'}`;
 export function createSchoolPortfolioPdf({schools,from,to,settings,detail=false,includeEvidence=false,includeObservations=false,rawObservations=[],options={},comparison}){
@@ -40,6 +41,12 @@ export function createSchoolPortfolioPdf({schools,from,to,settings,detail=false,
   text('Preparation and evidence counts',13,true);
   table(['School',...counts.map(([,label])=>label)],schools.map(s=>[s.name,...counts.map(([key])=>s[key])]));
  }
+ // Academic reviews (owner decision, 26 November 2026): lessons in these dates reviewed one by one or in a weekly
+ // review, whenever the review was given.
+ if(settings.sections.evidence&&options.reviews!==false){
+  text('Academic reviews',13,true);
+  table(['School','Lessons','Reviewed','Awaiting review','Weekly reviews'],schools.map(s=>{const r=reviewSummary(s.submissions||[]);return [s.name,r.lessons,r.reviewed,r.awaiting,r.weekly.length];}));
+ }
  if(settings.quantitative){
   text('School usage targets',13,true);
   table(['School',...modules.map(i=>labels[i]+' target')],schools.map(s=>[s.name,...modules.map(i=>s.metrics[i].target?duration(s.metrics[i].target):'Off')]));
@@ -55,6 +62,14 @@ export function createSchoolPortfolioPdf({schools,from,to,settings,detail=false,
    table(['School',`Previous period\n${comparison.from} to ${comparison.to}`,`Current period\n${from} to ${to}`,'Change in time'],rows.map(({current:s,previous:p})=>{const before=p?.metrics[i],delta=s.metrics[i].actual-(before?.actual||0);return [s.name,`${duration(before?.actual||0)}\n${sessions(before?.sessions||0)}`,`${duration(s.metrics[i].actual)}\n${sessions(s.metrics[i].sessions)}`,(delta>0?'+':'')+duration(delta)];}));
   }
   if(settings.sections.evidence)for(const [key,label] of counts){text(label+' comparison',13,true);table(['School',`Previous period\n${comparison.from} to ${comparison.to}`,`Current period\n${from} to ${to}`,'Change'],rows.map(({current:s,previous:p})=>[s.name,p?.[key]||0,s[key],s[key]-(p?.[key]||0)]));}
+ }
+ if(schoolDetail&&settings.sections.evidence&&options.reviews!==false){
+  const school=schools[0],byTeacher=reviewSummaryByTeacher(school.submissions||[],school.profiles.map(p=>p.name));
+  text('Academic reviews by teacher',13,true);
+  table(['Teacher','Lessons','Reviewed','Awaiting review','Reviewed one by one','Covered by a weekly review'],byTeacher.map(t=>[t.teacher,t.lessons,t.reviewed,t.awaiting,t.single,t.weeklyCovered]));
+  const weekly=byTeacher.flatMap(t=>t.weekly);
+  if(weekly.length){text('Weekly reviews',13,true);table(['Week','Teacher','Class · subject','Planning','Execution','Focus for next week'],weekly.map(w=>[w.week,w.teacher,w.cls+' ('+w.periods+(w.periods===1?' period)':' periods)'),w.planning,w.execution,w.focus||'—']));}
+  text('A lesson counts as reviewed when it has an Academic Review, given one period at a time or in a weekly review, whenever it was given.',9);
  }
  if(schoolDetail){
   const school=schools[0];text('Teacher breakdown',13,true);
