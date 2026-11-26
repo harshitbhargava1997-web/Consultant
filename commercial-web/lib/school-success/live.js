@@ -26,11 +26,11 @@ export async function reviewerLesson(id,a) {
     assertSchool(a,row.Center || row.Institution);
     return row;
 }
-// One teacher's lesson records planned in one week, with their reviews and "Noted" marks (weekly review screen).
-// The caller checks the school with assertSchool first.
-export async function weekLessonRows({school,teacher,from,to}) {
-    const records=(await all('teacher_records','id',{Center:'eq.'+school,FullName:'eq.'+teacher,and:'(planned_lesson_on.gte.'+from+',planned_lesson_on.lte.'+to+')',lesson_stage:'not.is.null'}))
-        .filter(r=>r.Center===school&&r.FullName===teacher&&r.lesson_stage&&r.planned_lesson_on>=from&&r.planned_lesson_on<=to&&hasLessonRecord(r));
+// Lesson records planned in one week — one teacher's, or (no teacher) the whole school's for the week overview —
+// with their reviews and "Noted" marks (review screens). The caller checks the school with assertSchool first.
+export async function weekLessonRows({school,teacher='',from,to}) {
+    const records=(await all('teacher_records','id',{Center:'eq.'+school,...(teacher?{FullName:'eq.'+teacher}:{}),and:'(planned_lesson_on.gte.'+from+',planned_lesson_on.lte.'+to+')',lesson_stage:'not.is.null'}))
+        .filter(r=>r.Center===school&&(!teacher||r.FullName===teacher)&&r.lesson_stage&&r.planned_lesson_on>=from&&r.planned_lesson_on<=to&&hasLessonRecord(r));
     const ids=records.map(r=>String(r.id)).filter(id=>lessonRecordId.safeParse(id).success),scope={school:'eq.'+school},reviews=[],notes=[];
     for(let i=0;i<ids.length;i+=200){
         const batch=ids.slice(i,i+200);

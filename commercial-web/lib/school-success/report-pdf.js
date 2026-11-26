@@ -37,6 +37,15 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
     } room(20); autoTable(doc, { startY: y, head: [head], body: body.length ? body : [['No records in this review period', ...head.slice(1).map(() => '')]], margin: { left: 16, right: 16, top: 22, bottom: 20 }, styles: { font: 'Report', fontSize: 8, cellPadding: 2.6, textColor: '#243e48', overflow: 'linebreak' }, headStyles: { fillColor: navy, textColor: '#ffffff', fontStyle: 'bold' }, alternateRowStyles: { fillColor: '#f1f7f6' }, ...(columnStyles ? { columnStyles } : {}), rowPageBreak: 'avoid', didParseCell: data => { if (data.section === 'body' && linkMap[data.column.index]) { data.cell.styles.textColor = teal; data.cell.styles.fontStyle = 'bold'; } }, didDrawCell: data => { const url = data.section === 'body' && linkMap[data.column.index]?.[data.row.index]; if (url)
             doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url }); } }); y = doc.lastAutoTable.finalY + 9; };
     const banner = (kicker, title, subtitle) => { doc.setFillColor(navy); doc.rect(0, 0, 210, 8, 'F'); text('ONELERN  /  SCHOOL SUCCESS', 16, 19, 9, teal, true); text(kicker.toUpperCase(), 16, 32, 9, '#647780', true); doc.setFont('Report', 'bold'); doc.setFontSize(23); const lines = doc.splitTextToSize(title, 178); text(lines, 16, 43, 23, navy, true); y = 45 + lines.length * 8; paragraph(subtitle); doc.setDrawColor('#c6ded9'); doc.line(16, y, 194, y); y += 10; };
+    // Academic reviews (owner decision, 26 November 2026): lessons in these dates reviewed one by one or in a weekly
+    // review, and each weekly review's ratings and focus for next week. Review notes stay in lesson documentation.
+    function academicReviews(r) {
+        heading('Academic reviews');
+        table(['Lessons in these dates', 'Reviewed', 'Awaiting review', 'Reviewed one by one', 'Covered by a weekly review'], [[r.lessons, r.reviewed, r.awaiting, r.single, r.weeklyCovered]]);
+        if (r.weekly.length) table(['Week', 'Class · subject', 'Planning', 'Execution', 'Focus for next week', 'Reviewed by'], r.weekly.map(w => [w.week, w.cls + ' (' + w.periods + (w.periods === 1 ? ' period)' : ' periods)'), w.planning, w.execution, w.focus || '—', w.by || '—']));
+        else paragraph('No weekly review covers these dates.');
+        paragraph('A lesson counts as reviewed when it has an Academic Review, given one period at a time or in a weekly review, whenever it was given. The full review notes are in the lesson documentation.');
+    }
     const usageKpis = [0, 1, 2, 3].filter(i => settings.quantitative && settings.daily[i] > 0 && includedMetric(i, settings));
     const evidenceKpis = [0, 1, 2, 3, 4, 5].filter(i => settings.qualitative && settings.sections.evidence && settings.evidence[i] > 0);
     const schools = [...new Set(profiles.map(p => p.school))];
@@ -58,6 +67,10 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
         if (evidenceKpis.length) {
             heading('Evidence submission overview');
             table(['Teacher', ...evidenceKpis.map(i => group[0].evidence[i].label)], group.map(p => [p.name, ...evidenceKpis.map(i => `${p.evidence[i].actual} / ${p.evidence[i].target}`)]));
+        }
+        if (settings.qualitative && settings.sections.evidence && group.some(p => p.reviews)) {
+            heading('Academic reviews');
+            table(['Teacher', 'Lessons', 'Reviewed', 'Awaiting review', 'Weekly reviews'], group.map(p => { const r = p.reviews || { lessons: 0, reviewed: 0, awaiting: 0, weekly: [] }; return [p.name, r.lessons, r.reviewed, r.awaiting, r.weekly.length]; }));
         }
         if (comparison) {
             doc.addPage();
@@ -128,6 +141,7 @@ export function createReportPdf(profiles, from, to, settings, comparison, option
                         table([linked ? 'Open evidence' : 'Evidence', 'Date', 'Grade / subject', 'Lesson / topic'], e.files.map((f, i) => [(linked ? action : e.label) + ' ' + (i + 1), f.date, [f.grade, f.subject].filter(Boolean).join(' / '), f.topic]), linked ? e.files.map(evidenceUrl) : undefined);
                     }
             }
+            if (settings.qualitative && settings.sections.evidence && p.reviews) academicReviews(p.reviews);
             if (settings.sections.observations) {
                 heading('Classroom observation report');
                 if (!p.observations.length)

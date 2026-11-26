@@ -107,3 +107,21 @@
 .success-app .wr-files a{display:inline-flex;align-items:center;gap:3px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--ink);text-decoration:none}
 .success-app .wr-reflection{background:#f6f9f7;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:13px}.success-app .wr-reflection span{font-weight:600;color:var(--muted);font-size:12px}.success-app .wr-reflection p{margin:3px 0;white-space:pre-wrap}
 .success-app .wr-earlier{margin-top:1rem}.success-app .wr-form{margin-top:1rem;border-top:1px solid var(--line);padding-top:1rem}
+/* Review screens: day-wise, weekly subject-wise, week overview (owner decision, 26 November 2026) */
+.success-app .rs-tabs{display:flex;gap:6px;background:#f4f7f5;border:1px solid var(--line);border-radius:12px;padding:5px;margin-bottom:12px;overflow-x:auto}
+.success-app .rs-tabs button{flex:1;white-space:nowrap;border:0;background:none;border-radius:9px;padding:9px 12px;font-weight:700;color:var(--muted);font-size:13.5px}
+.success-app .rs-tabs button.on{background:var(--ink);color:#fff}
+.success-app .wr-period.open{border-color:var(--green);box-shadow:0 8px 24px #1f3a2f14}
+.success-app .wr-period-head .button{padding:6px 10px;font-size:12.5px}
+.success-app .wr-done{border-left:3px solid #1f9d55;background:#f3faf5;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:12.5px}.success-app .wr-done p{margin:3px 0 0;white-space:pre-wrap}
+.success-app .wr-inline{margin-top:8px;border-top:1px dashed var(--line);padding-top:8px}.success-app .wr-inline h4{margin:0 0 4px}
+.success-app .wo-table{width:100%;border-collapse:collapse;font-size:13px}
+.success-app .wo-table th{text-align:left;background:#f1f5f2;padding:9px 10px;font-size:12px;color:#40514c}
+.success-app .wo-table td{border-top:1px solid var(--line);padding:9px 10px;vertical-align:top}
+.success-app .wo-table td:first-child{width:170px}.success-app .wo-table td:first-child small{display:block;color:var(--muted);font-size:11.5px}
+.success-app .wo-cells{display:flex;flex-wrap:wrap;gap:8px}
+.success-app .wo-cell{text-align:left;border:0;border-radius:10px;padding:8px 10px;min-width:170px;cursor:pointer}
+.success-app .wo-cell span{display:block;font-size:12px;font-weight:700;color:#40514c}.success-app .wo-cell b{display:block;font-size:13px}.success-app .wo-cell small{display:block;font-size:11.5px;opacity:.85}
+.success-app .wo-cell.ok{background:#e8f5ec;color:#1f6f45}.success-app .wo-cell.wait{background:#fff4df;color:#8a5a12}
+.success-app .wo-none{color:#9aa6a1}
+.success-app .review-screens.compact .wo-table td:first-child{width:110px}

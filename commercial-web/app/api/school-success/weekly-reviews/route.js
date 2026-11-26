@@ -3,12 +3,13 @@ import {weekLessonRows,saveWeeklyReview,publicBase} from '@/lib/school-success/l
 import {mapLive} from '@/lib/school-success/live-mapping';
 import {weeklyRequest} from '@/lib/school-success/lesson-reviews';
 import {buildLessonRecords} from '@/lib/school-success/lesson-records';
-import {weekGroups} from '@/lib/school-success/weekly-review';
+import {weekGroups,weekOverview} from '@/lib/school-success/weekly-review';
 import {weekRange} from '@/lib/school-success/day-periods';
 export const runtime='nodejs';
 // Weekly review (owner decision, 26 November 2026). School Success staff, principals and coordinators, for their
 // own schools:
 //   week {school, teacher, week}                         → the teacher's lessons in that week by class and subject
+//   overview {school, week}                              → every teacher's class-and-subject weeks, with review status
 //   save {…, grade, section, subject, requestId, review} → one weekly review for that class and subject
 async function readWeek(school,teacher,week){
  const {from,to}=weekRange(week);
@@ -26,6 +27,11 @@ export async function POST(req){
    const input=weeklyRequest.parse(await req.json());
    assertSchool(a,input.school);
    const headers={'Cache-Control':'no-store'};
+   if(input.action==='overview'){
+    const {from,to}=weekRange(input.week),raw=await weekLessonRows({school:input.school,from,to});
+    const {entries}=await mapLive({records:raw.records,reviews:raw.reviews,notes:raw.notes},publicBase());
+    return Response.json(weekOverview(buildLessonRecords(entries,'0001-01-01','9999-12-31',{scope:'all'}),raw.reviews,input.week),{headers});
+   }
    const week=await readWeek(input.school,input.teacher,input.week);
    if(input.action==='week')return Response.json(week,{headers});
    // The covered periods are read again here, never taken from the browser.
