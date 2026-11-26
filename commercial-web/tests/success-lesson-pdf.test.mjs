@@ -30,7 +30,7 @@ test('teacher PDF: cover, chronological index and lessons in original submission
 
 test('individual lesson PDF keeps the approved section order and its own evidence only',async()=>{
  const {text,doc}=await make('lesson');
- const order=['Lesson plan','Learning objective','Classroom activities','Student written work','After-class reflections','Academic Review'].map(h=>text.indexOf(h.toUpperCase())>=0?text.indexOf(h.toUpperCase()):text.indexOf(h));
+ const order=['Lesson plan','Learning outcome','Classroom activities','Student written work','After-class reflections','Academic Review'].map(h=>text.indexOf(h.toUpperCase())>=0?text.indexOf(h.toUpperCase()):text.indexOf(h));
  assert.ok(order.every(i=>i>=0),JSON.stringify(order));
  assert.deepEqual([...order].sort((a,b)=>a-b),order);
  assert.doesNotMatch(text,/CFU|Check for understanding/i);
@@ -167,4 +167,14 @@ test('consolidated report: complete content, and every evidence link routed thro
  assert.match(flat,/Most children blended CVC words on their own\./);assert.match(flat,/Four children need more practice/);
  assert.match(flat,/Strong modelling; add one more check for understanding\./);
  assert.ok(flat.indexOf('Counting in tens')<flat.lastIndexOf('Blending CVC words'),'submission order preserved');
+});
+
+test('the lesson PDF uses the plan form headings, with classwork and homework as its own row (owner request, 26 Nov 2026)',()=>{
+ const text='Why — learning objective\nGhj\n\nTeaching-learning materials / resources\nGjj\n\nTeacher activity — how\nFgjj\n\nStudent activity\nFfhj\n\nPractice & apply\nFhjk\n\nReview / next step\nBjk\nClasswork and homework:\nHji';
+ const row={kind:'submission',id:'9:preparation',recordId:'9',school:'Life',teacher:'Harshit Life',date:'2026-11-26',grade:'Nursery',section:'A',subject:'English',topic:'Ghkk',plannedDate:'2026-11-26',reflection:text,materials:'Gjj',stage:'preparation_saved',feedStage:'Lesson preparation',files:[],review:''};
+ const lessons=buildLessonRecords([row],'2026-11-01','2026-11-26');
+ const out=pdfText(createLessonDocumentationPdf({kind:'lesson',lessons,from:'2026-11-01',to:'2026-11-26'})).text.replace(/\s+/g,' ');
+ const order=['Learning outcome Ghj','Teaching-learning','Teacher activity (I do) Fgjj','Student activity and','Practice and apply (You','Check learning and next','Classwork and homework Hji'].map(s=>out.indexOf(s));
+ assert.ok(order.every(i=>i>=0),JSON.stringify(order));assert.deepEqual([...order].sort((a,b)=>a-b),order);
+ assert.doesNotMatch(out,/Bjk Classwork and homework: Hji|Review \/ homework|Learning objective/);
 });

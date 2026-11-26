@@ -20,7 +20,7 @@ test('fields follow the lesson order with I do / We do / You do, no field is lab
 test('answers keep the existing saved lesson structure in English and Hindi; classwork and homework come after the learning check',()=>{
  for(const lang of ['en','hi']){
   const answers={...answersFor(lang==='hi'?'बच्चे पत्तियाँ छाँटेंगे।':'Children sort leaves.'),review:'Ask each child to explain.',classwork:'Workbook page 12. Homework: observe a leaf at home.'};
-  const p=withPlanning({id:id(),grade:'Grade 2',section:'A',subject:'EVS',topic:'Leaves'},{answers,answerLanguage:lang});
+  const p=withPlanning({id:id(),grade:'Grade 2',section:'A',subject:'Environmental Studies (EVS)',topic:'Leaves'},{answers,answerLanguage:lang});
   assert.equal(planningIssue(p),'');
   const parsed=JSON.stringify(parseLessonPlan(p.reflection,p.materials));
   for(const v of Object.values(answers))assert.ok(parsed.includes(v),v);
@@ -29,12 +29,12 @@ test('answers keep the existing saved lesson structure in English and Hindi; cla
  }
  const maxed=withPlanning({grade:'Grade 2',subject:'English',topic:'Leaves'},{answerLanguage:'hi',answers:Object.fromEntries(guide.map(([k,,,max])=>[k,'अ'.repeat(max)]))});
  assert.equal(planningIssue(maxed),'');assert.ok(maxed.reflection.length<=5000,'maximum answers fit the existing limit');
- const old=withPlanning({grade:'Grade 2',subject:'EVS',topic:'Leaves'},{answers:{objective:'x',homework:'Earlier draft homework'},answerLanguage:'en'});
+ const old=withPlanning({grade:'Grade 2',subject:'Environmental Studies (EVS)',topic:'Leaves'},{answers:{objective:'x',homework:'Earlier draft homework'},answerLanguage:'en'});
  assert.match(old.reflection,/Classwork and homework:\nEarlier draft homework/,'earlier drafts keep their homework');
 });
 
 test('no planning field is mandatory; only class, subject and topic identify the lesson',()=>{
- const empty=withPlanning({grade:'Grade 2',subject:'EVS',topic:'Leaves'},{answers:{},answerLanguage:'en'});
+ const empty=withPlanning({grade:'Grade 2',subject:'Environmental Studies (EVS)',topic:'Leaves'},{answers:{},answerLanguage:'en'});
  assert.equal(planningIssue(empty),'','a plan may be submitted with every field blank');
  submissionSchema.parse({id:id(),school:'Alpha',teacher:'Asha',date:'2026-11-23',periods:[{id:id(),...empty}],files:[]});
  assert.equal(planningIssue({...empty,topic:' '}),'details');

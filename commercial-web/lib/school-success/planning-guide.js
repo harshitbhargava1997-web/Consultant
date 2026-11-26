@@ -1,4 +1,4 @@
-import {formatReflection} from './teacher-flow.js';
+import {formatReflection,subjectsFor} from './teacher-flow.js';
 // One-page lesson planning. Every field is visible at once; its guiding question and sentence starter are shown
 // as faded placeholder text inside the box (never inserted into the answer).
 // Entry: [key, [English title, Hindi title], [English placeholder, Hindi placeholder], max length, required]
@@ -30,7 +30,9 @@ export function planningParts(p){
 export function withPlanning(p,changes){const n={...p,...changes};return {...n,reflection:formatReflection(planningParts(n)),materials:n.answers?.materials||''};}
 // First incomplete part of one block: 'details', 'date', a guide key, or 'length'. Empty string when complete.
 export function planningIssue(p,{needsDate=false}={}){
- if(!p.grade||!p.subject||!p.topic?.trim())return 'details';
+ // The subject must be one offered for the class (an older draft may hold "All Subjects Together", or a primary
+ // subject after the class was changed to Nursery); it is then chosen again.
+ if(!p.grade||!p.subject||!subjectsFor(p.grade).includes(p.subject)||!p.topic?.trim())return 'details';
  if(needsDate&&!/^\d{4}-\d{2}-\d{2}$/.test(p.date||''))return 'date';
  const a=p.answers||{};
  for(const key of requiredKeys)if(!a[key]?.trim())return key;
@@ -60,7 +62,7 @@ export function planSubmissions({type,date,shared,blocks,school,teacher}){
 export function planProblem({type,date,shared,blocks}){
  if(!blocks.length)return 'empty';
  if(type==='daily'){if(!/^\d{4}-\d{2}-\d{2}$/.test(date||''))return 'date';if(blocks.length>MAX_DAILY_PERIODS)return 'count';return '';}
- if(!shared.grade||!shared.subject)return 'subject';
+ if(!shared.grade||!shared.subject||!subjectsFor(shared.grade).includes(shared.subject))return 'subject';
  if(blocks.length>MAX_WEEKLY_DAYS)return 'count';
  const dates=blocks.map(b=>b.date);
  if(dates.some(d=>!/^\d{4}-\d{2}-\d{2}$/.test(d||'')))return 'date';
