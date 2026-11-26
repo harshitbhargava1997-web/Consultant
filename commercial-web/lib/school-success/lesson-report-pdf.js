@@ -125,12 +125,14 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   const labelW=43,valueX=M+labelW+4,valueW=W-labelW-4,size=9.8,h=lineHeight(size);
   const lines=wrap(value,valueW,size),labelLines=wrap(label,labelW,8.2,true);
   ensure(Math.max(labelLines.length*lineHeight(8.2),Math.min(lines.length,3)*h)+2);
-  let labelDrawn=false;
+  let labelDrawn=false,labelEnd=0;
   for(const line of lines){
    if(state.y+h>BOTTOM){newPage();labelDrawn=false;}
-   if(!labelDrawn){labelLines.forEach((l,k)=>drawLine(l,M,state.y+0.5+k*lineHeight(8.2),8.2,{bold:true,color:palette.muted}));labelDrawn=true;}
+   if(!labelDrawn){labelLines.forEach((l,k)=>drawLine(l,M,state.y+0.5+k*lineHeight(8.2),8.2,{bold:true,color:palette.muted}));labelDrawn=true;labelEnd=state.y+0.5+labelLines.length*lineHeight(8.2);}
    drawLine(line,valueX,state.y,size);state.y+=line?h:h*0.55;
   }
+  // A label longer than its answer (e.g. "Student activity and participation (We do)") keeps its own space.
+  if(state.y<labelEnd)state.y=labelEnd;
   state.y+=2.2;rule(state.y-1.1,palette.hair,0.15);state.y+=1.4;
  }
  function linkRow(file,{action='Open',style=sectionStyle.plan}={}){

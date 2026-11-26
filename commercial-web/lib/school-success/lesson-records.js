@@ -15,16 +15,20 @@ import {isReflectionTextUrl} from './reflection-text.js';
 import {isGeneratedPreparationPdf} from './lesson-plan-items.js';
 export {isGeneratedPreparationPdf};
 
-// Labels written by formatReflection() in teacher-flow.js. Only these exact
-// heading lines are treated as structure; anything else stays as written text.
+// [key, heading saved by formatReflection() in teacher-flow.js, label shown in reviews and lesson PDFs]. Only the
+// exact saved heading lines are treated as structure; anything else stays as written text. The labels are the
+// headings of the teacher's lesson plan form (owner request, 26 November 2026): Learning outcome, materials,
+// I do, We do, You do, Check learning and next steps, then Classwork and homework (saved inside the review section
+// after a "Classwork and homework:" line, and shown as its own section).
 export const lessonPlanFields=[
- ['objective','Why — learning objective','Learning objective'],
+ ['objective','Why — learning objective','Learning outcome'],
  ['materials','Teaching-learning materials / resources','Teaching-learning materials'],
- ['teacher','Teacher activity — how','Teacher activity'],
- ['student','Student activity','Student activity'],
- ['practice','Practice & apply','Practice / classwork'],
- ['review','Review / next step','Review / homework']
+ ['teacher','Teacher activity — how','Teacher activity (I do)'],
+ ['student','Student activity','Student activity and participation (We do)'],
+ ['practice','Practice & apply','Practice and apply (You do)'],
+ ['review','Review / next step','Check learning and next steps']
 ];
+const CLASSWORK_LINE=/^(Classwork and homework:|कक्षा कार्य और गृहकार्य:)\s*$/m;
 // Same evidence categories, in the same order, as Teacher 360° "Teacher evidence", then the Academic Review
 // (owner decision, 25 November 2026). Items that exist only in the previous portal (audio notes, phonics
 // evidence, event pictures, other files) are not part of lesson records or lesson documentation; their stored
@@ -65,7 +69,12 @@ export function parseLessonPlan(reflection='',materials=''){
   (current?values[current]:notes).push(line);
  }
  const join=lines=>(lines||[]).join('\n').replace(/^\n+|\n+$/g,'').trim();
- const fields=lessonPlanFields.map(([key,,label])=>({key,label,text:join(values[key])})).filter(f=>f.text);
+ const fields=lessonPlanFields.flatMap(([key,,label])=>{
+  const text=join(values[key]);
+  if(key!=='review'||!CLASSWORK_LINE.test(text))return [{key,label,text}];
+  const [review,classwork]=text.split(CLASSWORK_LINE).filter((_,i)=>i!==1).map(s=>(s||'').trim());
+  return [{key,label,text:review},{key:'classwork',label:'Classwork and homework',text:classwork}];
+ }).filter(f=>f.text);
  const extra=clean(materials);
  // Mirrors the preparation PDF: separate materials are shown unless already written in the plan.
  if(extra&&!fields.some(f=>f.key==='materials')&&!text.includes(extra))fields.splice(Math.min(1,fields.length),0,{key:'materials',label:'Teaching-learning materials',text:extra});

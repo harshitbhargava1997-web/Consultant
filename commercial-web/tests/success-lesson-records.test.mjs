@@ -92,9 +92,13 @@ test('hierarchy and breakdown keep same-name teachers apart',async()=>{
 
 test('lesson plan uses the stored prompt structure and never invents fields',()=>{
  const plan=parseLessonPlan('Why — learning objective\nRead CVC words\n\nPractice & apply\nWorkbook p. 4','Letter tiles');
- assert.deepEqual(plan.fields.map(f=>[f.label,f.text]),[['Learning objective','Read CVC words'],['Teaching-learning materials','Letter tiles'],['Practice / classwork','Workbook p. 4']]);
+ assert.deepEqual(plan.fields.map(f=>[f.label,f.text]),[['Learning outcome','Read CVC words'],['Teaching-learning materials','Letter tiles'],['Practice and apply (You do)','Workbook p. 4']]);
  assert.equal(plan.notes,'');
  assert.ok(!plan.fields.some(f=>/CFU|Check for understanding/i.test(f.label)));
+ // Same headings as the teacher's plan form; classwork and homework (saved inside the review section) is its own field.
+ const form=parseLessonPlan('Why — learning objective\nO\n\nTeaching-learning materials / resources\nM\n\nTeacher activity — how\nT\n\nStudent activity\nS\n\nPractice & apply\nP\n\nReview / next step\nR\nClasswork and homework:\nC');
+ assert.deepEqual(form.fields.map(f=>[f.label,f.text]),[['Learning outcome','O'],['Teaching-learning materials','M'],['Teacher activity (I do)','T'],['Student activity and participation (We do)','S'],['Practice and apply (You do)','P'],['Check learning and next steps','R'],['Classwork and homework','C']]);
+ assert.deepEqual(parseLessonPlan('Review / next step\nकक्षा कार्य और गृहकार्य:\nपृष्ठ 4').fields.map(f=>[f.key,f.text]),[['classwork','पृष्ठ 4']],'Hindi heading, no review text');
  const free=parseLessonPlan('Children practise sounds. Why — learning objective appears mid-sentence.','');
  assert.deepEqual(free.fields,[]);assert.match(free.notes,/mid-sentence/);
  assert.deepEqual(parseLessonPlan('',''),{fields:[],notes:''});
