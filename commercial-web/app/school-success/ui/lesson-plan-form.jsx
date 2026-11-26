@@ -5,7 +5,7 @@ import {periodsOn,classOf} from '@/lib/school-success/day-periods';
 import {guide,withPlanning,planningIssue,planProblem,MAX_DAILY_PERIODS,MAX_WEEKLY_DAYS,nextSchoolDay} from '@/lib/school-success/planning-guide';
 import {teacherGrades,teacherSections,teacherSubjects} from '@/lib/school-success/teacher-flow';
 
-export const hindiOptions={'Nursery':'नर्सरी','LKG':'एलकेजी','UKG':'यूकेजी','Not Applicable':'लागू नहीं','All Subjects Together':'सभी विषय एक साथ','Phonics / Literacy':'ध्वनि एवं साक्षरता','Mathematics':'गणित','Numeracy':'संख्या ज्ञान','English':'अंग्रेज़ी','Hindi':'हिन्दी','Environmental Studies (EVS)':'पर्यावरण अध्ययन','Science':'विज्ञान','Social Science':'सामाजिक विज्ञान','General Knowledge (GK)':'सामान्य ज्ञान','English Grammar':'अंग्रेज़ी व्याकरण','Computer':'कंप्यूटर','Play Activity':'खेल गतिविधि','Play Time':'खेल का समय','Play Based':'खेल आधारित'};
+export const hindiOptions={'Nursery':'नर्सरी','LKG':'एलकेजी','UKG':'यूकेजी','Not Applicable':'लागू नहीं','All Subjects Together':'सभी विषय एक साथ','Phonics / Literacy':'ध्वनि एवं साक्षरता','Mathematics':'गणित','Numeracy':'संख्या ज्ञान','English':'अंग्रेज़ी','Hindi':'हिन्दी','Environmental Studies (EVS)':'पर्यावरण अध्ययन','Science':'विज्ञान','Social Science':'सामाजिक विज्ञान','General Knowledge (GK)':'सामान्य ज्ञान','English Grammar':'अंग्रेज़ी व्याकरण','Computer':'कंप्यूटर','Play Activity':'खेल गतिविधि','Play-based activities (gross and fine motor)':'खेल-आधारित गतिविधियाँ (स्थूल और सूक्ष्म गतिक)','Stories and rhymes':'कहानियाँ और कविताएँ','Art and craft':'कला और शिल्प','Play Time':'खेल का समय','Play Based':'खेल आधारित'};
 const icons={objective:Target,materials:Package,teacher:Presentation,student:Users,practice:PencilLine,review:ListChecks,classwork:House};
 const months={en:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],hi:['जन','फ़र','मार्च','अप्रै','मई','जून','जुल','अग','सित','अक्टू','नव','दिस']};
 const weekdays={en:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],hi:['रवि','सोम','मंगल','बुध','गुरु','शुक्र','शनि']};
@@ -63,7 +63,7 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
  const topMessages={empty:t('Add at least one period.','कम से कम एक कालांश जोड़ें।'),date:weekly?t('Choose a date for every day.','हर दिन की तिथि चुनें।'):t('Choose the lesson date.','पाठ की तिथि चुनें।'),subject:t('Choose the class and subject for this weekly plan.','इस साप्ताहिक योजना के लिए कक्षा और विषय चुनें।'),count:weekly||!savedToday.length?t('Too many blocks for one plan.','एक योजना में बहुत अधिक भाग हैं।'):t('A day can have up to '+MAX_DAILY_PERIODS+' periods. '+savedToday.length+' are already saved for this date.','एक दिन में अधिकतम '+MAX_DAILY_PERIODS+' कालांश हो सकते हैं। इस तिथि के '+savedToday.length+' पहले से सहेजे गए हैं।'),'duplicate-date':t('Two days have the same date. Give each day its own date.','दो दिनों की तिथि एक ही है। हर दिन की अलग तिथि चुनें।')};
  const fieldMessage=t('Please complete this part.','कृपया यह भाग पूरा करें।');
  const missing=(b,key)=>warning?.block===b.id&&warning.key===key;
- const select=(label,value,options,onChange,id,invalid)=><label className={'field'+(invalid?' invalid':'')}><span>{label}</span><select id={id} value={value} onChange={e=>onChange(e.target.value)}><option value="">{t('Select','चुनें')}</option>{options.map(v=><option key={v} value={v}>{option(v)}</option>)}</select></label>;
+ const select=(label,value,options,onChange,id,invalid)=><label className={'field'+(invalid?' invalid':'')}><span>{label}</span><select id={id} value={options.includes(value)?value:''} onChange={e=>onChange(e.target.value)}><option value="">{t('Select','चुनें')}</option>{options.map(v=><option key={v} value={v}>{option(v)}</option>)}</select></label>;
  const blockTitle=(b,i)=>weekly?t('Day','दिन')+' '+(i+1)+(b.date?' · '+dayLabel(b.date,language):''):t('Period','कालांश')+' '+(savedToday.length+i+1);
  const blockSummary=b=>{const m=merged(b);return [m.grade&&option(m.grade)+(m.section&&m.section!=='Not Applicable'?' '+m.section:''),m.subject&&option(m.subject),b.topic].filter(Boolean).join(' · ');};
 
@@ -78,7 +78,7 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
    {weekly?<div className="lp-shared">
      {select(t('Class','कक्षा'),plan.shared.grade,teacherGrades,v=>update({shared:{...plan.shared,grade:v}}),'plan-shared-grade',warning?.key==='subject'&&!plan.shared.grade)}
      {select(t('Section','वर्ग'),plan.shared.section,teacherSections,v=>update({shared:{...plan.shared,section:v}}),'plan-shared-section')}
-     {select(t('Subject','विषय'),plan.shared.subject,teacherSubjects,v=>update({shared:{...plan.shared,subject:v}}),'plan-shared-subject',warning?.key==='subject'&&!plan.shared.subject)}
+     {select(t('Subject','विषय'),plan.shared.subject,teacherSubjects,v=>update({shared:{...plan.shared,subject:v}}),'plan-shared-subject',warning?.key==='subject'&&!teacherSubjects.includes(plan.shared.subject))}
     </div>
     :<div className="lp-shared single"><label className={'field'+(warning?.key==='date'?' invalid':'')}><span>{t('Lesson date','पाठ की तिथि')}</span><input type="date" value={plan.date} onChange={e=>update({date:e.target.value})}/><small>{plan.date?dayLabel(plan.date,language):''}</small></label></div>}
    {warning&&!warning.block&&<p className="lp-error" role="alert"><CircleAlert size={16}/>{topMessages[warning.key]||fieldMessage}</p>}
@@ -107,7 +107,7 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
       {weekly?<label className={'field'+(missing(b,'date')?' invalid':'')}><span>{t('Date','तिथि')}</span><input id={'plan-'+b.id+'-date'} type="date" value={b.date||''} onChange={e=>setPlan(p=>({...p,blocks:p.blocks.map(x=>x.id===b.id?{...x,date:e.target.value}:x)}))}/></label>
       :<>{select(t('Class','कक्षा'),b.grade,teacherGrades,v=>updateBlock(b.id,{grade:v}),'plan-'+b.id+'-details',missing(b,'details')&&!b.grade)}
         {select(t('Section','वर्ग'),b.section,teacherSections,v=>updateBlock(b.id,{section:v}))}
-        {select(t('Subject','विषय'),b.subject,teacherSubjects,v=>updateBlock(b.id,{subject:v}),undefined,missing(b,'details')&&!b.subject)}</>}
+        {select(t('Subject','विषय'),b.subject,teacherSubjects,v=>updateBlock(b.id,{subject:v}),undefined,missing(b,'details')&&!teacherSubjects.includes(b.subject))}</>}
       <label className={'field lp-topic'+(missing(b,'details')&&!b.topic?.trim()?' invalid':'')}><span>{t('Lesson number and topic','पाठ क्रमांक और विषयवस्तु')}</span><input id={weekly?'plan-'+b.id+'-details':undefined} maxLength={1000} value={b.topic} placeholder={t('Example: LP 12 — Plants around us','उदाहरण: पाठ 12 — हमारे आस-पास के पौधे')} onChange={e=>updateBlock(b.id,{topic:e.target.value})}/></label>
      </div>
      <div className="lp-fields">

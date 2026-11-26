@@ -1,6 +1,9 @@
 export const teacherGrades = ['Nursery', 'LKG', 'UKG', 'Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5'];
 export const teacherSections = ['A', 'B', 'C', 'D', 'Not Applicable'];
-export const teacherSubjects = ['All Subjects Together', 'Phonics / Literacy', 'Mathematics', 'Numeracy', 'English', 'Hindi', 'Environmental Studies (EVS)', 'Science', 'Social Science', 'General Knowledge (GK)', 'English Grammar', 'Computer', 'Play Activity', 'Play Time', 'Play Based'];
+// Subjects a teacher can plan for (owner decision, 26 November 2026): "All Subjects Together" is removed, because
+// a plan must name one subject; the three play options are one "Play-based activities (gross and fine motor)";
+// "Stories and rhymes" and "Art and craft" are added for pre-primary. Lessons saved earlier keep their subject.
+export const teacherSubjects = ['Phonics / Literacy', 'Mathematics', 'Numeracy', 'English', 'Hindi', 'Environmental Studies (EVS)', 'Science', 'Social Science', 'General Knowledge (GK)', 'English Grammar', 'Computer', 'Play-based activities (gross and fine motor)', 'Stories and rhymes', 'Art and craft'];
 export const reflectionPrompts = [['objective', 'Why — learning objective'], ['materials', 'Teaching-learning materials / resources'], ['teacher', 'Teacher activity — how'], ['student', 'Student activity'], ['practice', 'Practice & apply'], ['review', 'Review / next step']];
 export const reflectionSectionLimit = 800;
 export function formatReflection(parts) { return reflectionPrompts.filter(([key]) => parts[key]?.trim()).map(([key, label]) => label + '\n' + parts[key].trim()).join('\n\n'); }

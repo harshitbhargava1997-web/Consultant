@@ -20,3 +20,21 @@
 **School 360° evidence feed:** shows the plan under these headings instead of the raw saved text.
 
 **Lesson PDF:** a long label now keeps its own space; before, a wrapped label ran into the next row.
+
+## Subjects for new lesson plans (owner decision, 26 November 2026)
+**Removed:**
+- "All Subjects Together", because a plan must name one subject.
+- "Play Activity", "Play Time" and "Play Based".
+
+**Added:**
+- **Play-based activities (gross and fine motor)**, which replaces the three play options.
+- **Stories and rhymes.**
+- **Art and craft.**
+
+Hindi labels are included.
+
+**Older plans and drafts:**
+- Lessons saved earlier keep their subject in reports and history.
+- A draft that still has a removed subject shows "Select". The teacher must choose a subject before saving; this check is in `planningIssue` and `planProblem`.
+
+**Vision:** its own teacher portal (`app/ImplementationWorkspace.jsx`) is not changed.
