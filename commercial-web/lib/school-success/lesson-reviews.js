@@ -11,6 +11,24 @@ export const lessonRecordId = z.string().regex(/^\d{1,19}$/);
 const criterion = z.object({level:z.enum(['A','B','C']), note:z.string().trim().min(1,'Add a short feedback note.').max(500)}).strict();
 export const rubricReview = z.object({planning:criterion.optional(), execution:criterion.optional()}).strict()
  .refine(r=>r.planning || r.execution,'Review planning, execution or both.');
+// Weekly review (owner decision, 26 November 2026): one teacher, one class and subject, one week (Monday–Sunday).
+// Planning and Execution ratings as for a lesson, plus a focus for next week. Kept alongside lesson reviews.
+export const weeklyReview = z.object({planning:criterion.optional(), execution:criterion.optional(), focus:z.string().trim().min(1,'Add a focus for next week.').max(500)}).strict()
+ .refine(r=>r.planning || r.execution,'Review planning, execution or both.');
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s=>Number.isFinite(Date.parse(s))&&new Date(s).toISOString().slice(0,10)===s,'Choose a valid date');
+const text = z.string().trim().max(200);
+export const weeklyRequest = z.discriminatedUnion('action',[
+ z.object({action:z.literal('week'),school:text.min(1),teacher:text.min(1),week:day}).strict(),
+ z.object({action:z.literal('save'),school:text.min(1),teacher:text.min(1),week:day,grade:text.min(1),section:z.string().trim().max(40),subject:text.min(1),requestId:z.string().uuid(),review:weeklyReview}).strict()
+]);
+const weekDay=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',timeZone:'UTC'}),weekYear=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'});
+export const weekLabel=(from,to)=>weekDay.format(new Date(from+'T00:00:00Z'))+' – '+weekYear.format(new Date(to+'T00:00:00Z'));
+export const weekClass=w=>[[w.grade,w.section&&w.section!=='Not Applicable'?w.section:''].filter(Boolean).join(' '),w.subject].filter(Boolean).join(' · ');
+// The text the teacher and the reports show for a weekly review.
+export function weeklyText(review,weekly){
+ return ['Weekly review · '+weekLabel(weekly.weekStart,weekly.weekEnd)+' · '+weekClass(weekly)+' ('+weekly.periods+(weekly.periods===1?' period)':' periods)'),
+  reviewText(review),'Focus for next week\n'+review.focus].filter(Boolean).join('\n\n');
+}
 export const reviewRequest = z.discriminatedUnion('action',[
  z.object({action:z.literal('open'),recordId:lessonRecordId}).strict(),
  z.object({action:z.literal('save'),recordId:lessonRecordId,requestId:z.string().uuid(),review:rubricReview}).strict()

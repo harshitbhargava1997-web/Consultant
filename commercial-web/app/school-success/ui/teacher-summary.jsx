@@ -97,7 +97,7 @@ export function FeedbackCard({summary,language,who,onOpen,onNote,filters=false})
     <div className="ts-feed-head"><b>{lessonTitle(f,language)}</b>{isNew(f)&&<span className="ts-new small">{t('New','नई')}</span>}<small>{f.date?dayLabel(String(f.date).slice(0,10),language):''}</small></div>
     <p className="ts-topic">{f.topic}</p>
     {f.by&&<p className="ts-by">{t('From ','द्वारा ')}{f.by}</p>}
-    <p className="ts-feed-text">{f.text}</p>
+    <p className={'ts-feed-text'+(f.weekly?' full':'')}>{f.text}</p>
     <div className="ts-feed-actions">{onNote&&f.recordId&&(f.notedAt?<span className="ts-noted done"><CircleCheck size={14}/>{t('Noted on ','नोट किया · ')+dayLabel(String(f.notedAt).slice(0,10),language)}</span>:<button type="button" className="ts-noted" disabled={!!noting} onClick={()=>void note(f)}><ThumbsUp size={14}/>{noting===f.recordId+'|'+f.key?t('Saving…','सहेजा जा रहा है…'):t('Noted','नोट किया')}</button>)}<button type="button" className="text-button" onClick={()=>onOpen(f.resumeToken)}>{t('Open lesson','पाठ खोलें')}<ArrowRight size={14}/></button></div>
    </li>)}</ul>}
   {noteError&&<p className="alert error" role="alert">{noteError}</p>}

@@ -1,6 +1,6 @@
 import { actor, assertSchool } from './server';
 import {hasLessonRecord,LEGACY_MEDIA_BASES} from './live-mapping.js';
-import {readRubricRows,appendRubric} from './lesson-review-store.js';
+import {readRubricRows,appendRubric,appendWeeklyReview} from './lesson-review-store.js';
 import {readNotes,appendNote,feedbackKey} from './feedback-notes.js';
 import {lessonRecordId,reviewerRole} from './lesson-reviews.js';
 import { service, checked } from './database';
@@ -25,6 +25,24 @@ export async function reviewerLesson(id,a) {
     if (!row || !hasLessonRecord(row)) throw Error('403:Lesson unavailable for this account');
     assertSchool(a,row.Center || row.Institution);
     return row;
+}
+// One teacher's lesson records planned in one week, with their reviews and "Noted" marks (weekly review screen).
+// The caller checks the school with assertSchool first.
+export async function weekLessonRows({school,teacher,from,to}) {
+    const records=(await all('teacher_records','id',{Center:'eq.'+school,FullName:'eq.'+teacher,and:'(planned_lesson_on.gte.'+from+',planned_lesson_on.lte.'+to+')',lesson_stage:'not.is.null'}))
+        .filter(r=>r.Center===school&&r.FullName===teacher&&r.lesson_stage&&r.planned_lesson_on>=from&&r.planned_lesson_on<=to&&hasLessonRecord(r));
+    const ids=records.map(r=>String(r.id)).filter(id=>lessonRecordId.safeParse(id).success),scope={school:'eq.'+school},reviews=[],notes=[];
+    for(let i=0;i<ids.length;i+=200){
+        const batch=ids.slice(i,i+200);
+        const [legacy,rubrics,noted]=await Promise.all([
+            request('/rest/v1/portal_evidence_reviews?'+new URLSearchParams({...scope,record_id:'in.('+batch.join(',')+')',select:'record_id,school,feedback,updated_at,reviewer'})),
+            readRubricRows(batch,scope,all),readNotes(batch,scope,all)]);
+        reviews.push(...legacy,...rubrics);notes.push(...noted);
+    }
+    return {records,reviews,notes};
+}
+export async function saveWeeklyReview({school,teacher,grade,section,subject,weekStart,weekEnd,recordIds,requestId,review},a) {
+    return appendWeeklyReview({school,teacher,grade,section,subject,weekStart,weekEnd,recordIds,reviewer:a.email,reviewerName:String(a.name||'').slice(0,160),reviewerRole:reviewerRole(a),requestId,review},request);
 }
 export async function saveLessonRubric(row,a,input) {
     return appendRubric({recordId:String(row.id),school:row.Center || row.Institution,reviewer:a.email,reviewerName:String(a.name||'').slice(0,160),reviewerRole:reviewerRole(a),requestId:input.requestId,review:input.review},request);

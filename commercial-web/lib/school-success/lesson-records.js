@@ -153,7 +153,7 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
   ...Object.fromEntries(Object.entries(sections).map(([key,list])=>[key,scoped(list)])),
   outsidePeriodFiles:scope==='all'?0:all.filter(f=>!keep(f)).length,
   reviewOutsidePeriod:visibleReviews.length<history.length,
-  feedback:visibleReviews.length?{label:'Academic Review',text:feedbackTextWithReviewer(visibleReviews),date:utcStamp(visibleReviews.at(-1).date),by:reviewerLabel(visibleReviews.at(-1).by)}:null,
+  feedback:visibleReviews.length?{label:'Academic Review',text:feedbackTextWithReviewer(visibleReviews),date:utcStamp(visibleReviews.at(-1).date),by:reviewerLabel(visibleReviews.at(-1).by),key:visibleReviews.at(-1).key||'',weekly:visibleReviews.at(-1).weekly||null}:null,
   // The teacher's "Noted" on the feedback shown here: latest date, and whether every item was noted.
   feedbackNoted:noteSummary(visibleReviews.filter(r=>r.key),first.feedbackNotes||[])
  };
