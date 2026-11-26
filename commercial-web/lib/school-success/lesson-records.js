@@ -154,6 +154,9 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
   outsidePeriodFiles:scope==='all'?0:all.filter(f=>!keep(f)).length,
   reviewOutsidePeriod:visibleReviews.length<history.length,
   feedback:visibleReviews.length?{label:'Academic Review',text:feedbackTextWithReviewer(visibleReviews),date:utcStamp(visibleReviews.at(-1).date),by:reviewerLabel(visibleReviews.at(-1).by),key:visibleReviews.at(-1).key||'',weekly:visibleReviews.at(-1).weekly||null}:null,
+  // Each review on its own (period review or weekly review), with the teacher's "Noted" date for it.
+  reviews:visibleReviews.map(r=>({key:r.key||'',text:clean(r.text),date:utcStamp(r.date),by:reviewerLabel(r.by),weekly:r.weekly||null,
+   notedAt:r.key?(first.feedbackNotes||[]).filter(n=>n.key===r.key).map(n=>n.noted_at||n.notedAt).filter(Boolean).sort().at(-1)||'':''})),
   // The teacher's "Noted" on the feedback shown here: latest date, and whether every item was noted.
   feedbackNoted:noteSummary(visibleReviews.filter(r=>r.key),first.feedbackNotes||[])
  };

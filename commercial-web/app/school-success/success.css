@@ -442,3 +442,22 @@
 .success-app .lp-already{color:#9a6a00 !important;font-weight:600}
 .success-app .leader-app .la-weekly{margin:0 0 12px;background:var(--ink);color:#fff;width:100%}
 .success-app .ts-feed-text.full{display:block;-webkit-line-clamp:unset;overflow:visible}
+/* Principal home (26 November 2026): teacher cards with subject chips, bottom tabs, one Feedback list. */
+.success-app .leader-app{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+.success-app .leader-app .ta-filters{margin-bottom:12px}
+.success-app button.ta-stat{text-align:left;cursor:pointer}
+.success-app .la-stats .la-act{border-color:#f0c98a;background:#fffaf0}.success-app .la-stats .la-act em{display:inline-flex;align-items:center;gap:2px;font-style:normal;font-size:11.5px;font-weight:800;color:var(--green);margin-top:4px}
+.success-app .la-stats .la-done b{color:var(--green)}
+.success-app .la-teachers .ta-card-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}.success-app .la-hint{font-size:11.5px;color:var(--muted);font-weight:600}
+.success-app .la-teacher{padding:11px 0;border-top:1px solid var(--line)}.success-app .la-teacher:first-of-type{border-top:0}
+.success-app .la-trow{display:flex;align-items:center;gap:11px}.success-app .la-open{font-size:12.5px;flex:none}
+.success-app .la-flag{font-style:normal;display:inline-block;background:#fde8e6;color:#a8402e;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:800;margin-left:4px;vertical-align:1px}
+.success-app .la-subs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:7px;margin:9px 0 2px 49px}
+.success-app .la-sub{text-align:left;border-radius:11px;padding:7px 10px;line-height:1.3;border:1px solid transparent}.success-app .la-sub b{display:block;font-size:12.5px}.success-app .la-sub small{font-size:11px;line-height:1.35;color:inherit;opacity:.85}
+.success-app .la-sub.ok{background:#e8f5ec;color:#1f6f45}.success-app .la-sub.wait{background:#fff4df;color:#8a5a12;border-color:#f3dfb8}
+.success-app .la-sub:focus-visible{outline:2px solid var(--green)}
+.success-app .la-fb-filters{margin:0 0 12px}
+.success-app .la-feed li.period{border-left-color:#3d6aa6;background:#f7f9fd}
+.success-app .la-kind{flex:none;font-size:10.5px;font-weight:800;border-radius:999px;padding:2px 8px;background:var(--mint);color:var(--green);height:fit-content}.success-app .la-kind.period{background:#e9f0fa;color:#3d6aa6}
+.success-app .la-feed-by{font-size:11.5px}
+@media(max-width:520px){.success-app .la-subs{margin-left:0;grid-template-columns:1fr 1fr}}
