@@ -21,20 +21,22 @@
 
 **Lesson PDF:** a long label now keeps its own space; before, a wrapped label ran into the next row.
 
-## Subjects for new lesson plans (owner decision, 26 November 2026)
-**Removed:**
-- "All Subjects Together", because a plan must name one subject.
-- "Play Activity", "Play Time" and "Play Based".
+## Subjects for new lesson plans depend on the class (owner decision, 26 November 2026)
+| Classes | Subjects offered |
+|---|---|
+| Nursery, LKG, UKG | Phonics / Literacy, Numeracy, Environmental Studies (EVS), Gross and fine motor activities, Stories and rhymes, Art and craft, Hindi, Playtime, Extracurricular / co-curricular |
+| Grades 1–5 | Environmental Studies (EVS), English, Mathematics, Hindi, Computer, General Knowledge (GK), English Grammar, Science, Social Science, Extracurricular / co-curricular, Phonics / Literacy, Stories and rhymes, Art and craft |
 
-**Added:**
-- **Play-based activities (gross and fine motor)**, which replaces the three play options.
-- **Stories and rhymes.**
-- **Art and craft.**
+**Removed:** "All Subjects Together", "Play Activity", "Play Based" and "Play Time". "Play Time" is replaced by "Playtime" for pre-primary.
 
-Hindi labels are included.
+**Labels:** Hindi labels are included. The same label "Extracurricular / co-curricular" is used for both groups, so reports and filters group it together.
 
-**Older plans and drafts:**
+**Code:** `subjectsFor(grade)` in `lib/school-success/teacher-flow.js`. Before a class is chosen, every subject is listed.
+
+**When the subject no longer fits:**
+- This covers a removed subject in an older draft, or a class changed after the subject was picked.
+- The Subject box shows "Select", and the teacher must choose again before saving. The check is in `planningIssue` and `planProblem`.
+
+**Unchanged:**
 - Lessons saved earlier keep their subject in reports and history.
-- A draft that still has a removed subject shows "Select". The teacher must choose a subject before saving; this check is in `planningIssue` and `planProblem`.
-
-**Vision:** its own teacher portal (`app/ImplementationWorkspace.jsx`) is not changed.
+- Vision's own teacher portal (`app/ImplementationWorkspace.jsx`).
