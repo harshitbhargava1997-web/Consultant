@@ -4,9 +4,10 @@
 // teachers with no plan yet; every lesson plan with its status; and the feedback already given, with the teacher's
 // "Noted". Reads the same school-scoped data as before; reviews use the existing lesson review dialog.
 import {useEffect,useMemo,useState} from 'react';
-import {ClipboardCheck,Bell,CalendarDays,ChevronRight,CircleCheck,KeyRound,LogOut,X,MessageSquareText,ArrowLeft,RefreshCw,BookOpen} from 'lucide-react';
+import {ClipboardCheck,Bell,CalendarDays,ChevronRight,CircleCheck,KeyRound,LogOut,X,MessageSquareText,ArrowLeft,RefreshCw,BookOpen,CalendarRange} from 'lucide-react';
 import {buildLessonRecords,formatDay} from '@/lib/school-success/lesson-records';
 import {LessonReviewDialog} from './lesson-review';
+import WeeklyReview from './weekly-review';
 import TeacherPinAdmin from './teacher-pin-admin';
 import {browserClient} from '@/lib/supabase';
 
@@ -37,7 +38,8 @@ export function leaderView(lessons,roster,{teacher='',subject=''}={},allLessons=
   reviewed:list.filter(l=>l.feedback).length,
   toReview:list.filter(l=>fileCount(l)>0&&!l.feedback&&!l.reviewOutsidePeriod),
   noPlan:staff.filter(n=>!planned.has(n)).map(name=>({name,lastPlan:lastPlan(name)})),
-  feedback:list.filter(l=>l.feedback).sort((a,b)=>String(b.feedback.date).localeCompare(String(a.feedback.date)))
+  // A weekly review covers several periods; it is listed once.
+ feedback:[...new Map(list.filter(l=>l.feedback).map(l=>[l.feedback.weekly&&l.feedback.key?'weekly|'+l.feedback.key:l.key,l])).values()].sort((a,b)=>String(b.feedback.date).localeCompare(String(a.feedback.date)))
  };
 }
 function evidenceLine(l){
@@ -50,7 +52,7 @@ const tone=name=>['c1','c2','c3','c4'][[...String(name)].reduce((n,c)=>n+c.charC
 export default function LeaderApp({data,refresh}){
  const today=istToday(),actor=data.actor,school=[...new Set((data.roster||[]).map(r=>r.school).concat((data.entries||[]).filter(e=>e.kind==='school').map(e=>e.school||e.name)))].filter(Boolean).sort()[0]||'';
  const [filter,setFilter]=useState('week'),[custom,setCustom]=useState({from:'',to:''}),[teacher,setTeacher]=useState(''),[subject,setSubject]=useState('');
- const [loading,setLoading]=useState(false),[error,setError]=useState(''),[reviewId,setReviewId]=useState(''),[notice,setNotice]=useState(''),[sheet,setSheet]=useState(false),[view,setView]=useState('home'),[showAll,setShowAll]=useState(false);
+ const [loading,setLoading]=useState(false),[error,setError]=useState(''),[reviewId,setReviewId]=useState(''),[notice,setNotice]=useState(''),[sheet,setSheet]=useState(false),[view,setView]=useState('home'),[showAll,setShowAll]=useState(false),[weeklyReload,setWeeklyReload]=useState(0);
  const range=rangeFor(filter,today,custom),ready=Boolean(range.from&&range.to);
  const days=ready?Math.round((Date.parse(range.to)-Date.parse(range.from))/86400000)+1:0,tooLong=days>MAX_RANGE_DAYS;
  const loaded=data.period&&ready&&range.from>=data.period.from&&range.to<=data.period.to;
@@ -72,11 +74,18 @@ export default function LeaderApp({data,refresh}){
   <div className="ta-me"><span className="ta-avatar big la-avatar">{initials(actor.name)}</span><div><b>{actor.name}</b><small>{role} · {school}</small></div></div>
   <button type="button" className="ta-opt" onClick={()=>{setSheet(false);setView('pins');}}><span className="ta-opt-icon"><KeyRound size={18}/></span><span className="ta-opt-label">Teacher PINs</span><ChevronRight size={18}/></button>
   <button type="button" className="ta-opt danger" onClick={()=>void signOut()}><span className="ta-opt-icon"><LogOut size={18}/></span><span className="ta-opt-label">Sign out</span></button></div></>;
+ // Weekly review: one teacher, one class and subject, one week (owner decision, 26 November 2026).
+ if(view==='weekly')return <div className="teacher-workspace tp ta-app leader-app">{top}<div className="ta-title"><button type="button" className="ta-back" aria-label="Back" onClick={()=>setView('home')}><ArrowLeft size={18}/></button><h2>Weekly review</h2></div>
+  {notice&&<div className="alert success" role="status">{notice}</div>}
+  <WeeklyReview compact data={data} school={school} reloadKey={weeklyReload} onReviewLesson={id=>setReviewId(String(id))} onSaved={m=>{setNotice(m);void refresh({from:data.period.from,to:data.period.to}).catch(()=>{});}}/>
+  {reviewId&&<LessonReviewDialog key={reviewId} recordId={reviewId} onClose={()=>setReviewId('')} onSaved={()=>{setReviewId('');setNotice('Feedback saved. The teacher will see it in their Feedback tab.');setWeeklyReload(n=>n+1);}}/>}
+  {sheetEl}</div>;
  if(view==='pins')return <div className="teacher-workspace tp ta-app leader-app">{top}<div className="ta-title"><button type="button" className="ta-back" aria-label="Back" onClick={()=>setView('home')}><ArrowLeft size={18}/></button><h2>Teacher PINs</h2></div><TeacherPinAdmin schools={school?[school]:[]} initialSchool={school} open/>{sheetEl}</div>;
  const shownLessons=showAll?v.lessons:v.lessons.slice(0,8);
  return <div className="teacher-workspace tp ta-app leader-app">
   {top}
   <div className="ta-hello"><small>{role} · {school}</small><h1>{label}</h1><p>{span}</p></div>
+  <button type="button" className="ta-cta la-weekly" onClick={()=>{setNotice('');setView('weekly');}}><CalendarRange size={18}/>Weekly review</button>
   <section className="la-filters" aria-label="Filters">
    <div className="ta-filters" role="group" aria-label="Dates">{[['week','This week'],['last','Last week'],['month','This month'],['range','Dates']].map(([k,l])=><button type="button" key={k} aria-pressed={filter===k} className={'ta-chip'+(filter===k?' on':'')} onClick={()=>{setFilter(k);setShowAll(false);}}>{k==='range'&&<CalendarDays size={13}/>}{l}</button>)}</div>
    {filter==='range'&&<div className="ta-range"><label><span>From</span><input type="date" max={today} value={custom.from} onChange={e=>setCustom(c=>({...c,from:e.target.value}))}/></label><label><span>To</span><input type="date" max={today} value={custom.to} onChange={e=>setCustom(c=>({...c,to:e.target.value}))}/></label></div>}

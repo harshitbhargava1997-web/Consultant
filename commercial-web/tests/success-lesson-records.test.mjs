@@ -64,7 +64,7 @@ test('repeated evidence submissions do not duplicate files or inflate counts',as
 
 test('feedback is shown only for the reviewed lesson, labelled Academic Review with its date',async()=>{
  const lessons=buildLessonRecords(await load(),from,to);
- assert.deepEqual(byId(lessons,'101').feedback,{label:'Academic Review',text:'Strong modelling. Next, give pairs a timed blending challenge.\n— School Success team',date:'2026-10-27T10:30:00.000Z',by:'School Success team'});
+ assert.deepEqual(byId(lessons,'101').feedback,{label:'Academic Review',text:'Strong modelling. Next, give pairs a timed blending challenge.\n— School Success team',date:'2026-10-27T10:30:00.000Z',by:'School Success team',key:'legacy:2026-10-27T10:30:00+00:00',weekly:null});
  assert.deepEqual(lessons.filter(l=>l.feedback).map(l=>l.recordId),['101']);
  assert.ok(!JSON.stringify(lessons).includes('consultant@example.test'),'reviewer emails are not carried into reports');
 });

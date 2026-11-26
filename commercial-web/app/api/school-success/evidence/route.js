@@ -4,7 +4,7 @@ import { actor, database, checkOrigin, failure, assertConsultant } from '@/lib/s
 import { gateway, publicBase } from '@/lib/school-success/live';
 import { currentMediaUrl } from '@/lib/school-success/live-mapping';
 import { feedbackKey } from '@/lib/school-success/feedback-notes';
-import { reviewerLabel, reviewerFromSignIn } from '@/lib/school-success/lesson-reviews';
+import { reviewerLabel, reviewerFromSignIn, weekLabel } from '@/lib/school-success/lesson-reviews';
 import { scopedSubmission, evidencePlan, submissionRecords } from '@/lib/school-success/teacher-submissions';
 import { seal, unseal, r2UploadsConfigured, r2Request, loadR2Config } from '@/lib/school-success/r2-evidence';
 import { assertResumeAccess, lessonFromRows, assertEvidenceMatches } from '@/lib/school-success/lesson-workflow';
@@ -71,10 +71,15 @@ async function handlerPOST(req, timing = {}) {
             }
             const lessons = [...grouped.values()].map(l => ({ ...l, evidence: l.periods.every(p => p.evidence) }));
             const noted = new Map((data.notes || []).map(n => [String(n.record_id) + '|' + n.key, n.noted_at]));
-            const feedback = (data.reviews || []).filter(r => byRecord.has(String(r.record_id))).map(r => {
+            const items = (data.reviews || []).filter(r => byRecord.has(String(r.record_id))).map(r => {
                 const { lesson, period } = byRecord.get(String(r.record_id)), key = feedbackKey(r);
-                return { lessonId: lesson.id, recordId: String(r.record_id), key, notedAt: noted.get(String(r.record_id) + '|' + key) || '', plannedOn: lesson.plannedOn, grade: period.grade, section: period.section, subject: period.subject, topic: period.topic, text: String(r.feedback), by: reviewerLabel(r.by || reviewerFromSignIn(r.reviewer)), date: r.updated_at || '', resumeToken: lesson.resumeToken };
-            }).sort((x, y) => String(y.date).localeCompare(String(x.date)));
+                const weekly = r.weekly ? { weekStart: r.weekly.weekStart, weekEnd: r.weekly.weekEnd, periods: r.weekly.periods } : null;
+                return { lessonId: lesson.id, recordId: String(r.record_id), key, notedAt: noted.get(String(r.record_id) + '|' + key) || '', plannedOn: lesson.plannedOn, grade: period.grade, section: period.section, subject: period.subject, topic: weekly ? 'Weekly review · ' + weekLabel(weekly.weekStart, weekly.weekEnd) : period.topic, text: weekly ? String(r.feedback).split('\n\n').slice(1).join('\n\n') : String(r.feedback), by: reviewerLabel(r.by || reviewerFromSignIn(r.reviewer)), date: r.updated_at || '', resumeToken: lesson.resumeToken, ...(weekly ? { weekly } : {}) };
+            });
+            // A weekly review is stored once per covered period: the teacher sees it once, noted if any copy is noted.
+            const once = new Map();
+            for (const f of items) { const k = f.weekly ? 'weekly|' + f.key : f.recordId + '|' + f.key, had = once.get(k); if (!had) once.set(k, f); else if (!had.notedAt && f.notedAt) once.set(k, { ...had, notedAt: f.notedAt }); }
+            const feedback = [...once.values()].sort((x, y) => String(y.date).localeCompare(String(x.date)));
             return Response.json({ today, lessons, feedback }, { headers: { 'Cache-Control': 'no-store' } });
         }
         if (body.action === 'noteFeedback') {

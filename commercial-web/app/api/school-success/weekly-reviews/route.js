@@ -1,0 +1,39 @@
+import {withRequest,actor,checkOrigin,failure,assertSchool} from '@/lib/school-success/server';
+import {weekLessonRows,saveWeeklyReview,publicBase} from '@/lib/school-success/live';
+import {mapLive} from '@/lib/school-success/live-mapping';
+import {weeklyRequest} from '@/lib/school-success/lesson-reviews';
+import {buildLessonRecords} from '@/lib/school-success/lesson-records';
+import {weekGroups} from '@/lib/school-success/weekly-review';
+import {weekRange} from '@/lib/school-success/day-periods';
+export const runtime='nodejs';
+// Weekly review (owner decision, 26 November 2026). School Success staff, principals and coordinators, for their
+// own schools:
+//   week {school, teacher, week}                         → the teacher's lessons in that week by class and subject
+//   save {…, grade, section, subject, requestId, review} → one weekly review for that class and subject
+async function readWeek(school,teacher,week){
+ const {from,to}=weekRange(week);
+ const raw=await weekLessonRows({school,teacher,from,to});
+ const {entries}=await mapLive({records:raw.records,reviews:raw.reviews,notes:raw.notes},publicBase());
+ const lessons=buildLessonRecords(entries,'0001-01-01','9999-12-31',{scope:'all'});
+ return weekGroups(lessons,raw.reviews,week);
+}
+export async function POST(req){
+ return withRequest(req,async()=>{
+  try{
+   checkOrigin(req);
+   const a=await actor(req);
+   if(a.role!=='admin')throw Error('403:School Success staff access required');
+   const input=weeklyRequest.parse(await req.json());
+   assertSchool(a,input.school);
+   const headers={'Cache-Control':'no-store'};
+   const week=await readWeek(input.school,input.teacher,input.week);
+   if(input.action==='week')return Response.json(week,{headers});
+   // The covered periods are read again here, never taken from the browser.
+   const key=JSON.stringify([input.grade,input.section&&input.section!=='Not Applicable'?input.section:'',input.subject]);
+   const group=week.groups.find(g=>g.key===key);
+   if(!group)throw Error('There are no lessons in this week for this class and subject.');
+   const result=await saveWeeklyReview({school:input.school,teacher:input.teacher,grade:group.grade,section:group.section,subject:group.subject,weekStart:week.from,weekEnd:week.to,recordIds:group.lessons.map(l=>l.recordId),requestId:input.requestId,review:input.review},a);
+   return Response.json(result,{headers});
+  }catch(e){return failure(e);}
+ });
+}

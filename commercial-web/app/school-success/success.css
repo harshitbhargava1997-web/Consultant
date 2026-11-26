@@ -440,3 +440,5 @@
 .success-app .lp-saved-tick{color:#1f9d55;flex:none}
 .success-app .lp-saved .hint{margin:8px 0 0}
 .success-app .lp-already{color:#9a6a00 !important;font-weight:600}
+.success-app .leader-app .la-weekly{margin:0 0 12px;background:var(--ink);color:#fff;width:100%}
+.success-app .ts-feed-text.full{display:block;-webkit-line-clamp:unset;overflow:visible}

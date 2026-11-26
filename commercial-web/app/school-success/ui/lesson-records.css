@@ -89,3 +89,21 @@
 .success-app .review-criterion { margin: 1rem 0; padding: 1rem; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
 .success-app .review-criterion legend { padding: 0 .4rem; font-weight: 700; }
 .success-app .review-list-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .75rem; align-items: center; }
+/* Weekly review (owner decision, 26 November 2026) */
+.success-app .weekly-review .wr-pick small{display:block;color:var(--muted);font-size:12px;margin-top:3px}
+.success-app .weekly-review .wr-weeks{margin:.25rem 0 1rem;flex-wrap:wrap}
+.success-app .wr-groups{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin:.5rem 0 1rem}
+.success-app .wr-group{flex:none;text-align:left;border:1px solid var(--line);background:#fff;border-radius:12px;padding:9px 12px;color:var(--ink)}
+.success-app .wr-group b{display:block;font-size:14px}.success-app .wr-group small{color:var(--muted);font-size:12px}
+.success-app .wr-group.on{border-color:var(--green);background:var(--mint)}
+.success-app .wr-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:1rem}
+.success-app .wr-stats div{border:1px solid var(--line);border-radius:10px;padding:10px}.success-app .wr-stats strong{display:block;font-size:20px}.success-app .wr-stats span{color:var(--muted);font-size:12px}
+@media (max-width:640px){.success-app .wr-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.success-app .wr-day h3{font-size:14px;margin:1rem 0 .4rem;color:var(--green)}
+.success-app .wr-period{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;background:#fff}
+.success-app .wr-period-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.success-app .wr-period-head b{flex:1;min-width:140px}
+.success-app .wr-period details{margin:6px 0}.success-app .wr-period summary{cursor:pointer;font-weight:600;font-size:13px;color:var(--green)}
+.success-app .wr-files{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;font-size:12.5px}.success-app .wr-files span{color:var(--muted);font-weight:600;margin-right:2px}
+.success-app .wr-files a{display:inline-flex;align-items:center;gap:3px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--ink);text-decoration:none}
+.success-app .wr-reflection{background:#f6f9f7;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:13px}.success-app .wr-reflection span{font-weight:600;color:var(--muted);font-size:12px}.success-app .wr-reflection p{margin:3px 0;white-space:pre-wrap}
+.success-app .wr-earlier{margin-top:1rem}.success-app .wr-form{margin-top:1rem;border-top:1px solid var(--line);padding-top:1rem}
