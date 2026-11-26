@@ -1,4 +1,7 @@
-import {withRequest,actor,checkOrigin,failure,assertSchool} from '@/lib/school-success/server';
+import {withRequest,actor,checkOrigin,failure,assertSchool,database} from '@/lib/school-success/server';
+import {env} from '@/lib/school-success/environment';
+import {loadR2Config,r2UploadsConfigured,r2Request} from '@/lib/school-success/r2-evidence';
+import {attachReflectionText,reflectionFetcher} from '@/lib/school-success/reflection-text';
 import {weekLessonRows,saveWeeklyReview,publicBase} from '@/lib/school-success/live';
 import {mapLive} from '@/lib/school-success/live-mapping';
 import {weeklyRequest} from '@/lib/school-success/lesson-reviews';
@@ -11,10 +14,16 @@ export const runtime='nodejs';
 //   week {school, teacher, week}                         → the teacher's lessons in that week by class and subject
 //   overview {school, week}                              → every teacher's class-and-subject weeks, with review status
 //   save {…, grade, section, subject, requestId, review} → one weekly review for that class and subject
+async function withReflectionText(entries){
+ const config=await loadR2Config(env,database());
+ await attachReflectionText(entries,reflectionFetcher({base:publicBase(),get:(key,url)=>r2UploadsConfigured(config)?r2Request(config,key,'GET'):fetch(url,{signal:AbortSignal.timeout(8000)})}));
+}
 async function readWeek(school,teacher,week){
  const {from,to}=weekRange(week);
  const raw=await weekLessonRows({school,teacher,from,to});
  const {entries}=await mapLive({records:raw.records,reviews:raw.reviews,notes:raw.notes},publicBase());
+ // Written after-class reflections are small saved documents: show the teacher's answers, not the file.
+ await withReflectionText(entries);
  const lessons=buildLessonRecords(entries,'0001-01-01','9999-12-31',{scope:'all'});
  return weekGroups(lessons,raw.reviews,week);
 }

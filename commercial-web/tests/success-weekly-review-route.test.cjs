@@ -10,9 +10,11 @@ const rec=(id,date,subject)=>({id,Type:'Classroom Reflection',Center:S,FullName:
 function harness(actor){
  const state={actor,saved:null,asked:null};
  const route=load('app/api/school-success/weekly-reviews/route.js',{
-  '@/lib/school-success/server':{withRequest:(r,fn)=>fn(),checkOrigin(){},actor:async()=>state.actor,
+  '@/lib/school-success/server':{withRequest:(r,fn)=>fn(),checkOrigin(){},actor:async()=>state.actor,database:()=>({}),
    assertSchool:(a,s)=>{if(!s||a.allowedSchools&&!a.allowedSchools.includes(s))throw Error('403:School is outside your assignment');},
    failure:e=>{const m=String(e.message||e),status=Number(m.match(/^(401|403|409)/)?.[1]||400);return Response.json({error:m.replace(/^\d+:/,'')},{status});}},
+  '@/lib/school-success/r2-evidence':{loadR2Config:async()=>({}),r2UploadsConfigured:()=>false,r2Request:async()=>{throw Error('not used');}},
+  '@/lib/school-success/reflection-text':{reflectionFetcher:()=>null,attachReflectionText:async entries=>{state.attached=(state.attached||0)+entries.length;}},
   '@/lib/school-success/live':{publicBase:()=>'https://media.test',
    weekLessonRows:async q=>{state.asked=q;return {records:[rec(101,'2026-11-23','English'),rec(102,'2026-11-25','English'),rec(103,'2026-11-24','Hindi')],reviews:[],notes:[]};},
    saveWeeklyReview:async(input,a)=>{state.saved={input,by:a.email};return {saved:true,periods:input.recordIds.length};}}});
@@ -25,7 +27,8 @@ test('consultants and principals of the school can open a week; it is read Monda
  for(const who of [consultant,principal]){const h=harness(who);const r=await h.call({action:'week',school:S,teacher:'Asha Verma',week:'2026-11-26'});
   assert.equal(r.status,200,JSON.stringify(r.body));assert.deepEqual([r.body.from,r.body.to],['2026-11-23','2026-11-29']);
   assert.deepEqual(h.state.asked,{school:S,teacher:'Asha Verma',from:'2026-11-23',to:'2026-11-29'});
-  assert.deepEqual(r.body.groups.map(g=>g.subject+':'+g.periods),['English:2','Hindi:1']);}
+  assert.deepEqual(r.body.groups.map(g=>g.subject+':'+g.periods),['English:2','Hindi:1']);
+  assert.ok(h.state.attached>0,'written reflections are turned into text before the week is shown');}
 });
 
 test('other schools, teachers on a school link and unsigned visitors are refused',async()=>{

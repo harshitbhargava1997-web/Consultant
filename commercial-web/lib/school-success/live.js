@@ -2,7 +2,7 @@ import { actor, assertSchool } from './server';
 import {hasLessonRecord,LEGACY_MEDIA_BASES} from './live-mapping.js';
 import {readRubricRows,appendRubric,appendWeeklyReview} from './lesson-review-store.js';
 import {readNotes,appendNote,feedbackKey} from './feedback-notes.js';
-import {lessonRecordId,reviewerRole} from './lesson-reviews.js';
+import {lessonRecordId,reviewerRole,reviewerName} from './lesson-reviews.js';
 import { service, checked } from './database';
 import { prepareUsageImport } from './usage-import.js';
 import {readScope,recordQuery,readAllPages} from './read-query.js';
@@ -42,10 +42,10 @@ export async function weekLessonRows({school,teacher='',from,to}) {
     return {records,reviews,notes};
 }
 export async function saveWeeklyReview({school,teacher,grade,section,subject,weekStart,weekEnd,recordIds,requestId,review},a) {
-    return appendWeeklyReview({school,teacher,grade,section,subject,weekStart,weekEnd,recordIds,reviewer:a.email,reviewerName:String(a.name||'').slice(0,160),reviewerRole:reviewerRole(a),requestId,review},request);
+    return appendWeeklyReview({school,teacher,grade,section,subject,weekStart,weekEnd,recordIds,reviewer:a.email,reviewerName:reviewerName(a.name),reviewerRole:reviewerRole(a),requestId,review},request);
 }
 export async function saveLessonRubric(row,a,input) {
-    return appendRubric({recordId:String(row.id),school:row.Center || row.Institution,reviewer:a.email,reviewerName:String(a.name||'').slice(0,160),reviewerRole:reviewerRole(a),requestId:input.requestId,review:input.review},request);
+    return appendRubric({recordId:String(row.id),school:row.Center || row.Institution,reviewer:a.email,reviewerName:reviewerName(a.name),reviewerRole:reviewerRole(a),requestId:input.requestId,review:input.review},request);
 }
 // Re-read just the selected lessons when issuing file access. Older clients omit the row IDs.
 export async function reportLessonRows({school, from, to}, recordIds) {
