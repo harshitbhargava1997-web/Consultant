@@ -44,7 +44,7 @@ async function harness(t){
   return Response.json(result,{headers:{'content-range':'0-'+result.length+'/'+result.length}});
  };
  const live=load('lib/school-success/live.js',{'./server':server,'./database':{}});
- const route=load('app/api/school-success/lesson-reviews/route.js',{'@/lib/school-success/server':server,'@/lib/school-success/live':live});
+ const route=load('app/api/school-success/lesson-reviews/route.js',{'@/lib/school-success/server':{...server,database:()=>({})},'@/lib/school-success/live':live,'@/lib/school-success/r2-evidence':{loadR2Config:async()=>({}),r2UploadsConfigured:()=>false,r2Request:async()=>{throw Error('not used');}}});
  async function post(body){
   const res=await route.POST(new Request('http://app.test/api/school-success/lesson-reviews',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}));
   return {status:res.status,body:await res.json()};

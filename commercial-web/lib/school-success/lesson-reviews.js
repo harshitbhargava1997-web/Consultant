@@ -37,9 +37,13 @@ export const reviewRequest = z.discriminatedUnion('action',[
 
 // Who gave a review, for display: "Meera Rao, Principal". Reviews saved before names were recorded only carry the
 // reviewer's sign-in: mobile-number sign-ins are school leaders, others the School Success team.
+// The reviewer's display name, or '' when the account has none (its sign-in email or mobile is never shown).
+export const reviewerName=name=>{const n=String(name||'').trim();return !n||n.includes('@')||/^\+?\d[\d\s-]{6,}$/.test(n)?'':n.slice(0,160);};
 export function reviewerLabel(by){
  if(!by)return '';
- if(by.name)return by.name+(by.role?', '+by.role:'');
+ // A sign-in address is never shown as a name (accounts without a display name; also reviews saved before this).
+ const name=reviewerName(by.name);
+ if(name)return name+(by.role?', '+by.role:'');
  return by.role||'';
 }
 export function reviewerFromSignIn(signIn){
