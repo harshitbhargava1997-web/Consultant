@@ -168,16 +168,20 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
 }
 
 // tab: 'day' | 'weekly' | 'overview'. compact: inside the principal's phone dashboard.
-export default function ReviewScreens({data,school:initialSchool='',reloadKey=0,onSaved,compact=false,initialTab='overview'}){
+// tab (optional): shown screen, chosen outside (the principal's bottom tabs) — the tab strip is then hidden.
+// initial: a starting teacher, date, week or subject group; onSelect: told of every change of selection.
+export default function ReviewScreens({data,school:initialSchool='',reloadKey=0,onSaved,compact=false,initialTab='overview',tab:shownTab,initial={},onSelect}){
  const roster=data?.roster||[],schools=[...new Set(roster.map(r=>r.school))].filter(Boolean).sort();
- const [tab,setTab]=useState(initialTab),[notice,setNotice]=useState('');
- const [sel,setSel]=useState(()=>({school:initialSchool&&schools.includes(initialSchool)?initialSchool:schools.length===1?schools[0]:'',teacher:'',date:istToday(),week:weekRange(istToday()).from,group:''}));
+ const [ownTab,setTab]=useState(initialTab),[notice,setNotice]=useState(''),tab=shownTab||ownTab;
+ const [sel,setSel]=useState(()=>({school:initialSchool&&schools.includes(initialSchool)?initialSchool:schools.length===1?schools[0]:'',teacher:'',date:istToday(),week:weekRange(istToday()).from,group:'',
+  ...Object.fromEntries(Object.entries(initial).filter(([k,v])=>v&&['teacher','date','week','group'].includes(k)))}));
+ useEffect(()=>{onSelect?.(sel);},[sel]);
  const set=change=>{setSel(s=>({...s,...change}));setNotice('');};
  const teachers=[...new Set(roster.filter(r=>r.school===sel.school).map(r=>r.name))].sort((a,b)=>a.localeCompare(b));
  const saved=m=>{setNotice(m);onSaved?.(m);};
  const common={sel,set,schools,teachers,reloadKey,onSaved:saved};
  return <section className={'card lesson-records weekly-review review-screens'+(compact?' compact':'')}>
-  <div className="rs-tabs" role="tablist" aria-label="Review type">{(compact?[['day','Day-wise'],['weekly','Weekly'],['overview','Overview']]:[['day','Day-wise · period by period'],['weekly','Weekly · subject-wise'],['overview','Week overview']]).map(([k,l])=><button key={k} type="button" role="tab" aria-selected={tab===k} className={tab===k?'on':''} onClick={()=>{setTab(k);setNotice('');}}>{l}</button>)}</div>
+  {!shownTab&&<div className="rs-tabs" role="tablist" aria-label="Review type">{(compact?[['day','Day-wise'],['weekly','Weekly'],['overview','Overview']]:[['day','Day-wise · period by period'],['weekly','Weekly · subject-wise'],['overview','Week overview']]).map(([k,l])=><button key={k} type="button" role="tab" aria-selected={tab===k} className={tab===k?'on':''} onClick={()=>{setTab(k);setNotice('');}}>{l}</button>)}</div>}
   {notice&&<p className="alert success" role="status">{notice}</p>}
   {tab==='day'&&<DayWise {...common}/>}
   {tab==='weekly'&&<WeeklySubject {...common}/>}

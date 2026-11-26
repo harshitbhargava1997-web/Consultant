@@ -81,6 +81,22 @@ School leaders (Principal, Coordinator, School management) now open **one review
 
 Server permissions are unchanged: leaders still read only their own school and can only record reviews and reset PINs. Their job title (`title`) is now included in the signed-in identity. Code: `app/school-success/ui/leader-app.jsx`. Tests: `tests/success-leader-dashboard.test.mjs`.
 
+## 26 November 2026: principal home without repeated lists (owner decision)
+The 24 November dashboard showed the same lessons in four lists. It is replaced by one home screen and four bottom tabs. The sections "New evidence to review", "No plan yet", "Lesson plans" and "Feedback given" are gone; their content now lives in the places below.
+- **This week (home):**
+  - date chips: Last week, This week, This month, Dates (up to 100 days);
+  - three counts: teachers who planned / all teachers, evidence files shared, and subjects awaiting review. The last count has **Review now**, which opens the first subject week still awaiting review;
+  - **Your teachers:** one row per teacher with their periods, how many are reviewed, and **Open day**. Their subjects (class and subject, per week) show as chips: amber when awaiting review (or "1 of 3 reviewed"), green when every period is reviewed ("Weekly review done" or "Reviewed"). Tapping a chip opens that subject's week.
+  - Teachers without a plan in the dates show a **No plan yet** flag with their last plan date, at the end of the list.
+- **Day:** the day-wise review (every period of one teacher's day, each reviewed on the spot).
+- **Weekly:** the weekly subject-wise review. One review for the subject's week, and each period can still be reviewed on its own below it.
+- **Feedback:** every review given in the dates, each on its own: weekly reviews (once, however many periods they cover) and period reviews ("Period 2 · 23 Nov").
+  - Each shows the reviewer, date and whether the teacher has noted it, with **Open week** or **Open day**.
+  - Filters: teacher, subject, review type (weekly and period / weekly / period) and noted / not noted.
+- The Week overview table stays on the staff screens; on the principal home the teacher card replaces it.
+- No server or permission change. Lesson records now also carry each review separately (`reviews`: text, date, reviewer, weekly details, the teacher's noted date) alongside the combined `feedback`.
+- Code: `lib/school-success/leader-home.js`, `app/school-success/ui/leader-app.jsx`; `ReviewScreens` takes `tab`, `initial` and `onSelect`. Tests: `tests/success-leader-dashboard.test.mjs`.
+
 ## 24 November 2026: sign-in fixes (owner decision)
 - **Passwords:** every Vision and School Success account uses one rule, 6 to 128 characters (6 digits are fine), with no uppercase, number or symbol requirement. It covers:
   - first sign-in;
