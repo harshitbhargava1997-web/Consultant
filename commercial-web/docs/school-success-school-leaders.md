@@ -97,6 +97,29 @@ The 24 November dashboard showed the same lessons in four lists. It is replaced 
 - No server or permission change. Lesson records now also carry each review separately (`reviews`: text, date, reviewer, weekly details, the teacher's noted date) alongside the combined `feedback`.
 - Code: `lib/school-success/leader-home.js`, `app/school-success/ui/leader-app.jsx`; `ReviewScreens` takes `tab`, `initial` and `onSelect`. Tests: `tests/success-leader-dashboard.test.mjs`.
 
+## 27 November 2026: editing reviews and yellow highlights (owner decision)
+**Editing.** Every saved period review and weekly review has an **Edit** button on the review screens (Day and Weekly) for those allowed. The editor can change the Planning and Execution ratings, the remarks, the weekly focus and the highlights.
+- Who may edit (checked on the server, `mayEditReview`):
+  - Super Admin: every review.
+  - Principal, coordinator and school management: reviews first given by their school's leadership, for their own school only.
+  - A School Success consultant: only reviews they gave.
+- Nothing is overwritten. An edit is a new stored version (`edits` names the first version). Screens, reports, PDFs and the teacher see the latest version, credited to who first gave it, with "Updated" and who changed it.
+- The latest version has its own key, so the teacher's earlier **Noted** no longer applies and they note it again.
+- An edit must start from the latest version. If someone else changed the review meanwhile, saving is refused with "changed by someone else, refresh".
+
+**Highlights.** While reviewing (or editing), the reviewer taps a sentence of the lesson plan or written after-class reflection to mark it yellow, and taps again to remove it.
+- On the weekly screen, taps go to the weekly review unless a period's own review is open.
+- Highlights are saved with the review and must be on the lessons it covers.
+- Teachers see each highlighted sentence quoted under the review in Feedback ("Highlighted in your plan"), and in yellow when they open the plan.
+- Photos, videos and audio cannot be highlighted.
+
+Code:
+- `lib/school-success/highlights.js`, `lesson-reviews.js` (schemas, `mayEditReview`), `lesson-review-store.js` (`latestVersions`, `readReviewVersions`), `live.js` (`editReview`);
+- the `edit` action of `/api/school-success/lesson-reviews`;
+- `ui/review-screens.jsx`, `teacher-summary.jsx`, `teacher-app.jsx`.
+
+Tests: `tests/success-review-edit.test.cjs`, `tests/success-review-highlights.test.mjs`.
+
 ## 24 November 2026: sign-in fixes (owner decision)
 - **Passwords:** every Vision and School Success account uses one rule, 6 to 128 characters (6 digits are fine), with no uppercase, number or symbol requirement. It covers:
   - first sign-in;

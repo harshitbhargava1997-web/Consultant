@@ -1,8 +1,8 @@
 import { actor, assertSchool } from './server';
 import {hasLessonRecord,LEGACY_MEDIA_BASES} from './live-mapping.js';
-import {readRubricRows,appendRubric,appendWeeklyReview} from './lesson-review-store.js';
+import {readRubricRows,appendRubric,appendWeeklyReview,readReviewVersions} from './lesson-review-store.js';
 import {readNotes,appendNote,feedbackKey} from './feedback-notes.js';
-import {lessonRecordId,reviewerRole,reviewerName} from './lesson-reviews.js';
+import {lessonRecordId,reviewerRole,reviewerName,mayEditReview,weeklyReview,rubricReview} from './lesson-reviews.js';
 import { service, checked } from './database';
 import { prepareUsageImport } from './usage-import.js';
 import {readScope,recordQuery,readAllPages} from './read-query.js';
@@ -41,11 +41,42 @@ export async function weekLessonRows({school,teacher='',from,to}) {
     }
     return {records,reviews,notes};
 }
+// Highlights may only mark sentences of the lessons a review covers.
+function checkHighlights(review,covered){
+    if((review.highlights||[]).some(h=>!covered.includes(String(h.record))))throw Error('Highlights must be on the lessons this review covers.');
+}
 export async function saveWeeklyReview({school,teacher,grade,section,subject,weekStart,weekEnd,recordIds,requestId,review},a) {
+    checkHighlights(review,recordIds.map(String));
     return appendWeeklyReview({school,teacher,grade,section,subject,weekStart,weekEnd,recordIds,reviewer:a.email,reviewerName:reviewerName(a.name),reviewerRole:reviewerRole(a),requestId,review},request);
 }
 export async function saveLessonRubric(row,a,input) {
+    checkHighlights(input.review,[String(row.id)]);
     return appendRubric({recordId:String(row.id),school:row.Center || row.Institution,reviewer:a.email,reviewerName:reviewerName(a.name),reviewerRole:reviewerRole(a),requestId:input.requestId,review:input.review},request);
+}
+// Edit a saved review (owner decision, 27 November 2026): a new version is stored and the earlier versions are kept.
+// The caller has already checked the lesson with reviewerLesson (school access). Permission follows the first
+// version's reviewer (mayEditReview); an edit must start from the latest version, so two editors cannot overwrite
+// each other's change unseen.
+export async function editReview(row,a,input) {
+    const recordId=String(row.id),school=row.Center || row.Institution;
+    const versions=await readReviewVersions(recordId,school,request);
+    const target=versions.find(v=>v.review_id===input.reviewKey);
+    if(!target)throw Error('404:This review was not found. Refresh and try again.');
+    const root=target.root||target.review_id;
+    const family=versions.filter(v=>(v.root||v.review_id)===root).sort((x,y)=>String(x.updated_at).localeCompare(String(y.updated_at))||String(x.review_id).localeCompare(String(y.review_id)));
+    const original=family.find(v=>!v.root)||family[0];
+    if(family.at(-1).review_id!==target.review_id)throw Error('409:This review was changed by someone else. Refresh to see the latest version, then edit it.');
+    if(!mayEditReview(a,{by:original.by,owner:original.owner}))throw Error('403:You can edit reviews given by your school\'s principal, coordinator or management. Reviews from the School Success team can be changed by the reviewer or Super Admin.');
+    const who={reviewer:a.email,reviewerName:reviewerName(a.name),reviewerRole:reviewerRole(a),requestId:input.requestId,edits:root};
+    if(original.weekly){
+        const w=original.weekly,review=weeklyReview.parse(input.review);
+        checkHighlights(review,(w.recordIds||[]).map(String));
+        return {...await appendWeeklyReview({school,teacher:w.teacher,grade:w.grade,section:w.section,subject:w.subject,weekStart:w.weekStart,weekEnd:w.weekEnd,recordIds:w.recordIds,review,...who},request),edited:true};
+    }
+    if('focus' in input.review)throw Error('This is a period review; it has no focus for next week.');
+    const review=rubricReview.parse(input.review);
+    checkHighlights(review,[recordId]);
+    return {...await appendRubric({recordId,school,review,...who},request),edited:true};
 }
 // Re-read just the selected lessons when issuing file access. Older clients omit the row IDs.
 export async function reportLessonRows({school, from, to}, recordIds) {

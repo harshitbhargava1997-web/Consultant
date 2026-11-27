@@ -8,6 +8,7 @@ import {House,ClipboardList,Camera,MessageSquareText,ChevronRight,ArrowLeft,Circ
 import {dayLabel,hindiOptions} from './lesson-plan-form';
 import {monthStats} from './teacher-summary';
 import {parsePlanText,planSectionTitles} from '@/lib/school-success/plan-text';
+import {sentences} from '@/lib/school-success/highlights';
 import {planDays,periodsOn,planFilterOptions,filterPlanDays,chipRange,classOf} from '@/lib/school-success/day-periods';
 
 const addDays=(day,n)=>new Date(Date.parse(day+'T00:00:00Z')+n*86400000).toISOString().slice(0,10);
@@ -116,7 +117,12 @@ export function ProfileSheet({open,onClose,name,school,language,onLanguage,onCha
 
 const sectionIcons={objective:[Target,'c1'],materials:[Package,'c1'],teacher:[Presentation,'c2'],student:[Users,'c3'],practice:[PencilLine,'c4'],review:[ListChecks,'c2'],classwork:[NotebookPen,'c4'],notes:[StickyNote,'c1']};
 // The saved plan for one lesson, in large, easy-to-read sections, with "After class: add evidence".
-export function PlanReader({token,periodIndex=0,match,request,language,today,onBack,onEvidence}){
+// Sentences a reviewer highlighted in this plan show in yellow (owner decision, 27 November 2026).
+function Marked({text,marked}){
+ if(!marked.size)return text;
+ const list=sentences(text);return list.map((s,i)=><span key={i}>{marked.has(s)?<mark className="ta-hl">{s}</mark>:s}{i<list.length-1?' ':''}</span>);
+}
+export function PlanReader({token,periodIndex=0,match,request,language,today,onBack,onEvidence,marks=[]}){
  const t=(en,hi)=>language==='hi'?hi:en,o=v=>language==='hi'?(hindiOptions[v]||String(v).replace('Grade ','कक्षा ')):v;
  const [lesson,setLesson]=useState(null),[error,setError]=useState(''),[index,setIndex]=useState(periodIndex);
  const [large,setLarge]=useState(()=>{try{return localStorage.getItem('school-success:plan-large')==='1';}catch{return false;}});
@@ -127,6 +133,7 @@ export function PlanReader({token,periodIndex=0,match,request,language,today,onB
  useEffect(()=>{void load();},[token]);
  function toggleLarge(){setLarge(v=>{try{localStorage.setItem('school-success:plan-large',v?'0':'1');}catch{}return !v;});}
  const ps=lesson?.submission?.periods||[],p=ps[index],sections=p?parsePlanText(p.reflection):[];
+ const marked=new Set(p?marks.filter(m=>m.periodId&&m.periodId===p.id).map(m=>String(m.text).trim()):[]);
  const date=lesson?.submission?.date,when=date===today?t('Today','आज'):date===addDays(today,1)?t('Tomorrow','कल'):dayLabel(date,language);
  return <div className={'ta-reader'+(large?' large':'')}>
   <div className="ta-title"><button type="button" className="ta-back" aria-label={t('Back','वापस')} onClick={onBack}><ArrowLeft size={18}/></button><h2>{t('Lesson plan','पाठ योजना')}</h2><button type="button" className={'ta-chip'+(large?' on':'')} aria-pressed={large} onClick={toggleLarge}><Type size={13}/>A+</button></div>
@@ -134,8 +141,9 @@ export function PlanReader({token,periodIndex=0,match,request,language,today,onB
   {!lesson&&!error&&<div className="ts-skeleton" aria-busy="true"><span/><span/></div>}
   {p&&<>
    {ps.length>1&&<div className="ev-periods" role="tablist">{ps.map((q,i)=><button type="button" role="tab" aria-selected={i===index} key={q.id} className={'ev-period-chip'+(i===index?' on':'')} onClick={()=>setIndex(i)}><b>{t('Period','कालांश')} {i+1}</b><small>{classLabel(q,o)}</small></button>)}</div>}
+   {marked.size>0&&<p className="ta-hl-note"><mark className="ta-hl">{t('Yellow lines','पीली पंक्तियाँ')}</mark> {t('were highlighted by your reviewer. See the Feedback tab.','आपके समीक्षक ने चिह्नित की हैं। प्रतिक्रिया टैब देखें।')}</p>}
    <div className="ta-plan-head"><span className="ta-day"><CalendarDays size={12}/>{when}{ps.length>1?' · '+t('Period','कालांश')+' '+(index+1):''}</span><h2>{p.topic||t('Lesson','पाठ')}</h2><p>{classLabel(p,o)}</p></div>
-   {sections.length?sections.map(s=>{const [Icon,c]=sectionIcons[s.key]||sectionIcons.notes;return <section className="ta-sec" key={s.key}><h4><span className={'ta-sec-icon '+c}><Icon size={14}/></span>{planSectionTitles[s.key][language==='hi'?1:0]}</h4><p>{s.text}</p></section>;})
+   {sections.length?sections.map(s=>{const [Icon,c]=sectionIcons[s.key]||sectionIcons.notes;return <section className="ta-sec" key={s.key}><h4><span className={'ta-sec-icon '+c}><Icon size={14}/></span>{planSectionTitles[s.key][language==='hi'?1:0]}</h4><p><Marked text={s.text} marked={marked}/></p></section>;})
    :<div className="ta-empty"><p>{t('No plan details were written for this period.','इस कालांश के लिए योजना का विवरण नहीं लिखा गया।')}</p></div>}
    {date<=today?<div className="ev-submit-bar"><button type="button" className="button primary ev-submit" onClick={()=>onEvidence(token,index)}><Camera size={18}/>{t('After class: add evidence','कक्षा के बाद: प्रमाण जोड़ें')}</button></div>
    :<p className="ta-note center">{t('You can add evidence after you teach this lesson.','यह पाठ पढ़ाने के बाद प्रमाण जोड़ सकते हैं।')}</p>}
