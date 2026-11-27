@@ -16,3 +16,9 @@ test('real report component always renders tables and hours with minutes, ignori
   assert.match(html,/Teacher PDF/);assert.match(html,/Combined PDF/);assert.match(html,/School PDFs/);
  }
 });
+test('Teacher 360° export offers lesson reports with or without reviewer highlights (27 November 2026)',()=>{
+ const html=render('tables','hours'),src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../app/school-success/ui/report-workspace.jsx'),'utf8');
+ assert.match(html,/With highlights/);assert.match(html,/Without highlights/);
+ assert.match(html,/name="report-highlights" checked=""/,'with highlights is chosen first');
+ assert.match(src,/sections: \{ \.\.\.defaultLessonSections, highlights: reportHighlights \}/,'the choice reaches every lesson report PDF');
+});

@@ -116,7 +116,8 @@ The 24 November dashboard showed the same lessons in four lists. It is replaced 
 **Highlights in the lesson documentation PDF** (owner decision, 27 November 2026):
 - Sentences highlighted by any reviewer (latest version of each review) are drawn on a yellow band in the lesson plan and written reflections, with the note "Highlighted lines were marked by a reviewer." The Academic Review panel does not list them.
 - The option "Reviewer highlights" (Lesson records, on by default) turns this off.
-- The shareable copy never shows highlights.
+- The older reduced "shareable copy" variant never shows highlights.
+- **Teacher 360° export:** next to "Who can open the lesson reports", choose **With highlights** (default) or **Without highlights**. This sets the consolidated lesson reports for that export, including those opened by "Anyone with the link" without sign-in.
 
 Code:
 - `lib/school-success/highlights.js`, `lesson-reviews.js` (schemas, `mayEditReview`), `lesson-review-store.js` (`latestVersions`, `readReviewVersions`), `live.js` (`editReview`);
