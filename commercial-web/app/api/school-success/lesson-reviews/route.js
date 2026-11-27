@@ -2,7 +2,7 @@ import {withRequest,actor,checkOrigin,failure,database} from '@/lib/school-succe
 import {env} from '@/lib/school-success/environment';
 import {loadR2Config,r2UploadsConfigured,r2Request} from '@/lib/school-success/r2-evidence';
 import {attachReflectionText,reflectionFetcher} from '@/lib/school-success/reflection-text';
-import {reviewerLesson,saveLessonRubric,gateway,publicBase} from '@/lib/school-success/live';
+import {reviewerLesson,saveLessonRubric,editReview,gateway,publicBase} from '@/lib/school-success/live';
 import {mapLive} from '@/lib/school-success/live-mapping';
 import {reviewRequest} from '@/lib/school-success/lesson-reviews';
 import {buildLessonRecords} from '@/lib/school-success/lesson-records';
@@ -17,6 +17,7 @@ export async function POST(req) {
    const row=await reviewerLesson(input.recordId,a);
    const headers={'Cache-Control':'no-store'};
    if(input.action==='save')return Response.json(await saveLessonRubric(row,a,input),{headers});
+   if(input.action==='edit')return Response.json(await editReview(row,a,input),{headers});
    const {rows:reviews,notes}=await gateway({action:'readLessonReviews',ids:[input.recordId]});
    const {entries}=await mapLive({records:[row],reviews,notes},publicBase());
    // Written after-class reflections: show the teacher's answers, not the saved file.

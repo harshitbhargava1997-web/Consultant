@@ -461,3 +461,8 @@
 .success-app .la-kind{flex:none;font-size:10.5px;font-weight:800;border-radius:999px;padding:2px 8px;background:var(--mint);color:var(--green);height:fit-content}.success-app .la-kind.period{background:#e9f0fa;color:#3d6aa6}
 .success-app .la-feed-by{font-size:11.5px}
 @media(max-width:520px){.success-app .la-subs{margin-left:0;grid-template-columns:1fr 1fr}}
+/* Review highlights and updates for teachers (27 November 2026). */
+.success-app .ta-hl{background:#fff09a;color:inherit;border-radius:3px;padding:0 2px;box-shadow:0 0 0 1px #f1d64a inset}
+.success-app .ta-hl-note{font-size:12.5px;color:var(--muted);margin:4px 0 10px}
+.success-app .ts-updated{display:inline-block;background:#eef2ff;color:#3b5ba5;border-radius:999px;padding:0 7px;font-weight:700;font-size:10.5px;margin-left:6px}
+.success-app .ts-hl{background:#fffbe6;border-left:3px solid #f1c40f;border-radius:8px;padding:6px 9px;margin:6px 0;font-size:13px;line-height:1.45}.success-app .ts-hl small{display:block;color:#8a7a2a;font-size:11px;font-weight:700}

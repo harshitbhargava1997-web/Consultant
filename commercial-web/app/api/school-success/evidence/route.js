@@ -65,7 +65,7 @@ async function handlerPOST(req, timing = {}) {
                     lesson = { id: row.submission_id, plannedOn: row.planned_lesson_on, order: Number(row.id) || 0, periods: [], resumeToken: await seal({ kind: 'lesson-resume', id: row.submission_id, school, teacher, email: a.email, exp: Date.now() + 365 * 86400000 }, signer) };
                     grouped.set(row.submission_id, lesson);
                 }
-                const period = { grade: row.Grade || '', section: row.Section || '', subject: row.Subject || '', topic: row.Book || '', evidence: row.lesson_stage === 'evidence_submitted' };
+                const period = { id: row.lesson_period_id || '', grade: row.Grade || '', section: row.Section || '', subject: row.Subject || '', topic: row.Book || '', evidence: row.lesson_stage === 'evidence_submitted' };
                 lesson.periods.push(period);
                 byRecord.set(String(row.id), { lesson, period });
             }
@@ -74,7 +74,10 @@ async function handlerPOST(req, timing = {}) {
             const items = (data.reviews || []).filter(r => byRecord.has(String(r.record_id))).map(r => {
                 const { lesson, period } = byRecord.get(String(r.record_id)), key = feedbackKey(r);
                 const weekly = r.weekly ? { weekStart: r.weekly.weekStart, weekEnd: r.weekly.weekEnd, periods: r.weekly.periods } : null;
-                return { lessonId: lesson.id, recordId: String(r.record_id), key, notedAt: noted.get(String(r.record_id) + '|' + key) || '', plannedOn: lesson.plannedOn, grade: period.grade, section: period.section, subject: period.subject, topic: weekly ? 'Weekly review · ' + weekLabel(weekly.weekStart, weekly.weekEnd) : period.topic, text: weekly ? String(r.feedback).split('\n\n').slice(1).join('\n\n') : String(r.feedback), by: reviewerLabel(r.by || reviewerFromSignIn(r.reviewer)), date: r.updated_at || '', resumeToken: lesson.resumeToken, ...(weekly ? { weekly } : {}) };
+                return { lessonId: lesson.id, recordId: String(r.record_id), key, notedAt: noted.get(String(r.record_id) + '|' + key) || '', plannedOn: lesson.plannedOn, grade: period.grade, section: period.section, subject: period.subject, topic: weekly ? 'Weekly review · ' + weekLabel(weekly.weekStart, weekly.weekEnd) : period.topic, text: weekly ? String(r.feedback).split('\n\n').slice(1).join('\n\n') : String(r.feedback), by: reviewerLabel(r.by || reviewerFromSignIn(r.reviewer)), date: r.updated_at || '', resumeToken: lesson.resumeToken, ...(weekly ? { weekly } : {}),
+                    // Edited reviews show "Updated"; highlighted sentences of the teacher's own plan or reflection are listed and shown in yellow.
+                    ...(r.edited ? { updated: true, editedBy: reviewerLabel(r.edited.by) } : {}),
+                    highlights: (r.highlights || []).filter(h => byRecord.has(String(h.record))).map(h => ({ periodId: byRecord.get(String(h.record)).period.id, field: h.field, text: h.text })) };
             });
             // A weekly review is stored once per covered period: the teacher sees it once, noted if any copy is noted.
             const once = new Map();

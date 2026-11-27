@@ -20,7 +20,8 @@ export function weekGroups(lessons,reviewRows,week){
  for(const r of reviewRows||[]){
   const w=r.weekly,key=groupOfRecord.get(String(r.record_id));if(!w||w.weekStart!==from||!key)continue;
   if(!weekly.has(key))weekly.set(key,new Map());
-  weekly.get(key).set(r.review_id,{id:r.review_id,date:r.updated_at,by:r.by||null,periods:w.periods,review:w.review,text:r.feedback});
+  weekly.get(key).set(r.review_id,{id:r.review_id,root:r.root||r.review_id,recordId:String(r.record_id),date:r.updated_at,by:r.by||null,periods:w.periods,review:w.review,text:r.feedback,highlights:r.highlights||[],
+   ...(r.edited?{editedBy:r.edited.by||null,givenAt:r.given_at||''}:{})});
  }
  return {from,to,groups:[...groups.values()].map(g=>({...g,periods:g.lessons.length,withEvidence:g.lessons.filter(l=>l.activities.length||l.writing.length||(l.remedial||[]).length||(l.portfolio||[]).length).length,
   reflections:g.lessons.filter(l=>l.reflections.length||(l.writtenReflections||[]).length).length,
