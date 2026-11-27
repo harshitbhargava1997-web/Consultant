@@ -73,8 +73,29 @@ Old `view=lesson-docs` links in earlier reports keep working.
 
 ## Limits and notes
 
-- Rotating `SCHOOL_SUCCESS_SIGNING_KEY` makes existing snapshot links unreadable; reports would need to be exported again.
-- The viewing ticket in the address bar is valid for 2 minutes and only for that snapshot.
+### Viewing tickets are two-minute bearer links
+- The `GET /api/school-success/report-snapshots/<id>?ticket=…` address that serves the PDF is a **bearer link**. Whoever holds it can open that one PDF, without signing in, until it expires.
+  - A browser navigation to a PDF cannot carry the reader's Supabase bearer token. The access check therefore happens when the ticket is issued (the signed-in `POST`, which checks the stored school against the reader's grant), not when it is used.
+  - The ticket records the reader's email but is not re-checked against a session on `GET`.
+- **Limits on exposure:**
+  - The ticket is HMAC-sealed and valid for **2 minutes**.
+  - It opens only the snapshot it was issued for; a different ID redirects to sign-in.
+  - Responses carry `Cache-Control: private, no-store` and `Referrer-Policy: no-referrer`.
+  - After expiry, the address redirects to `/school-success/report/<id>`, which requires sign-in and the school grant again.
+- **Residual risk:** a ticket URL copied, shared or captured (for example from browser history, a screen share or a proxy log) within those 2 minutes opens the PDF for anyone. The durable link printed in usage PDFs is `/school-success/report/<id>` and is **not** a bearer link.
+- **Possible hardening (not implemented):** a single-use ticket would need server-side state, such as a table or key-value store. Binding the ticket to a session cookie would need cookie-based authentication.
+
+### Rotating `SCHOOL_SUCCESS_SIGNING_KEY` currently makes existing snapshots unreadable
+- The snapshot encryption key, the snapshot IDs and the viewing tickets are all derived from `SCHOOL_SUCCESS_SIGNING_KEY` (exposed to routes as `SUPABASE_GATEWAY_TOKEN` in `lib/school-success/environment.js`).
+- **After a rotation:**
+  - Every stored snapshot fails decryption and answers "not found". Every lesson-documentation link in usage PDFs exported before the rotation stops opening.
+  - The encrypted objects remain in R2 but cannot be read without the old key.
+  - Teachers' evidence and lesson records are not affected. Re-exporting the usage reports creates new, readable snapshots.
+- The same secret also signs School Success evidence-upload plan tokens, so a rotation already interrupts in-flight submissions; teachers simply submit again.
+- **Before rotating,** expect to re-export and re-distribute affected usage reports.
+- **Possible remedy (not implemented):** a versioned key ring (for example `SCHOOL_SUCCESS_SNAPSHOT_KEYS` with a key ID stored in the envelope header) would let old snapshots stay readable after a rotation. This would need a new environment variable and owner approval.
+
+### Other notes
 - Snapshots are retained indefinitely; there is no deletion or retention policy yet.
 - The PDF content is rendered in the exporting administrator's browser, and the server validates the PDF format and the school grant, not the PDF's lesson content.
 
