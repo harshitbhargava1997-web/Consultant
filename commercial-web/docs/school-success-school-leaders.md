@@ -113,6 +113,11 @@ The 24 November dashboard showed the same lessons in four lists. It is replaced 
 - Teachers see each highlighted sentence quoted under the review in Feedback ("Highlighted in your plan"), and in yellow when they open the plan.
 - Photos, videos and audio cannot be highlighted.
 
+**Highlights in the lesson documentation PDF** (owner decision, 27 November 2026):
+- Sentences highlighted by any reviewer (latest version of each review) are drawn on a yellow band in the lesson plan and written reflections, with the note "Highlighted lines were marked by a reviewer." The Academic Review panel does not list them.
+- The option "Reviewer highlights" (Lesson records, on by default) turns this off.
+- The shareable copy never shows highlights.
+
 Code:
 - `lib/school-success/highlights.js`, `lesson-reviews.js` (schemas, `mayEditReview`), `lesson-review-store.js` (`latestVersions`, `readReviewVersions`), `live.js` (`editReview`);
 - the `edit` action of `/api/school-success/lesson-reviews`;

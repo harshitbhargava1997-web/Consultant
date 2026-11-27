@@ -6,7 +6,7 @@ import {jsPDF} from 'jspdf';
 import {regularFont,boldFont} from './report-fonts.js';
 import {visibleLessonSections,lessonSummary,groupLessons,classSubjectBreakdown,formatDay,formatStamp,classLine,defaultLessonSections,sectionOn,MAX_LESSONS_PER_PDF,isImageUrl} from './lesson-records.js';
 
-export const palette={navy:'#16323c',teal:'#127369',tealSoft:'#8fd3c8',ink:'#2b3d45',muted:'#66777e',faint:'#93a3a8',hair:'#dbe5e4',tint:'#f2f7f6',tealTint:'#e4f2ef',blue:'#2f5f8f',blueTint:'#e8eff7',plum:'#5d4a86',plumTint:'#eeebf6',amber:'#8a5a12',amberTint:'#f8f1e3'};
+export const palette={navy:'#16323c',teal:'#127369',tealSoft:'#8fd3c8',ink:'#2b3d45',muted:'#66777e',faint:'#93a3a8',hair:'#dbe5e4',tint:'#f2f7f6',tealTint:'#e4f2ef',blue:'#2f5f8f',blueTint:'#e8eff7',plum:'#5d4a86',plumTint:'#eeebf6',amber:'#8a5a12',amberTint:'#f8f1e3',highlight:'#fff09a'};
 export const hasDevanagari=s=>/[ऀ-ॿ꣠-ꣿ]/.test(String(s||''));
 const PT=0.3528,PAGE_W=210,PAGE_H=297,M=18,W=PAGE_W-2*M,TOP=24,BOTTOM=276;
 const lineHeight=size=>size*PT*1.45;
@@ -82,10 +82,25 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   state.y=withHeader?TOP:M;
  }
  const ensure=h=>{if(state.y+h>BOTTOM)newPage();};
- function paragraph(value,{x=M,width=W,size=9.8,bold=false,color=palette.ink,after=1.8}={}){
-  const h=lineHeight(size);
-  for(const line of wrap(value,width,size,bold)){ensure(h);drawLine(line,x,state.y,size,{bold,color});state.y+=line?h:h*0.55;}
+ function paragraph(value,{x=M,width=W,size=9.8,bold=false,color=palette.ink,after=1.8,marked=[]}={}){
+  const h=lineHeight(size),lines=wrap(value,width,size,bold),spans=markSpans(value,lines,marked);
+  lines.forEach((line,i)=>{ensure(h);markLine(line,spans[i],x,state.y,size,bold);drawLine(line,x,state.y,size,{bold,color});state.y+=line?h:h*0.55;});
   state.y+=after;
+ }
+ // Reviewer highlights (owner decision, 27 November 2026): sentences a reviewer marked are drawn on a yellow band.
+ // spans: for each wrapped line, the [start,end) character ranges inside it that fall in a marked sentence.
+ function markSpans(value,lines,marked){
+  const text=String(value??'').replace(/\r\n?/g,'\n'),ranges=[];
+  for(const m of marked||[]){const t=String(m||'').trim();if(!t)continue;let at=text.indexOf(t);while(at>=0){ranges.push([at,at+t.length]);at=text.indexOf(t,at+t.length);}}
+  if(!ranges.length)return lines.map(()=>[]);
+  let cursor=0;
+  return lines.map(line=>{if(!line)return [];const at=text.indexOf(line,cursor);if(at<0)return [];cursor=at+line.length;
+   return ranges.filter(([a,b])=>a<at+line.length&&b>at).map(([a,b])=>[Math.max(a,at)-at,Math.min(b,at+line.length)-at]);});
+ }
+ function markLine(line,spans,x,top,size,bold=false){
+  if(state.dry||!spans?.length)return;
+  const h=lineHeight(size);
+  for(const [a,b] of spans){const left=x+(a?textWidth(line.slice(0,a),size,bold):0),w=textWidth(line.slice(a,b),size,bold);if(w>0)rect(left-0.4,top+0.15,w+0.8,h*0.92,palette.highlight,0.5);}
  }
  function rule(y=state.y,color=palette.hair,width=0.2){if(state.dry)return;doc.setDrawColor(color);doc.setLineWidth(width);doc.line(M,y,PAGE_W-M,y);}
  function rect(x,y,w,h,fill,r=1.6){if(state.dry)return;doc.setFillColor(fill);r?doc.roundedRect(x,y,w,h,r,r,'F'):doc.rect(x,y,w,h,'F');}
@@ -121,16 +136,16 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   state.y+=lineHeight(8.6)+1.2;rule(state.y);state.y+=3.2;
  }
  // A label/value row that flows across pages line by line.
- function fieldRow(label,value){
+ function fieldRow(label,value,marked=[]){
   const labelW=43,valueX=M+labelW+4,valueW=W-labelW-4,size=9.8,h=lineHeight(size);
-  const lines=wrap(value,valueW,size),labelLines=wrap(label,labelW,8.2,true);
+  const lines=wrap(value,valueW,size),labelLines=wrap(label,labelW,8.2,true),spans=markSpans(value,lines,marked);
   ensure(Math.max(labelLines.length*lineHeight(8.2),Math.min(lines.length,3)*h)+2);
   let labelDrawn=false,labelEnd=0;
-  for(const line of lines){
+  lines.forEach((line,i)=>{
    if(state.y+h>BOTTOM){newPage();labelDrawn=false;}
    if(!labelDrawn){labelLines.forEach((l,k)=>drawLine(l,M,state.y+0.5+k*lineHeight(8.2),8.2,{bold:true,color:palette.muted}));labelDrawn=true;labelEnd=state.y+0.5+labelLines.length*lineHeight(8.2);}
-   drawLine(line,valueX,state.y,size);state.y+=line?h:h*0.55;
-  }
+   markLine(line,spans[i],valueX,state.y,size);drawLine(line,valueX,state.y,size);state.y+=line?h:h*0.55;
+  });
   // A label longer than its answer (e.g. "Student activity and participation (We do)") keeps its own space.
   if(state.y<labelEnd)state.y=labelEnd;
   state.y+=2.2;rule(state.y-1.1,palette.hair,0.15);state.y+=1.4;
@@ -199,7 +214,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   }
  }
  // Written after-class reflections (text) inline; earlier PDF-only reflections and recordings as links.
- function reflectionSection(lesson){
+ function reflectionSection(lesson,marks=markedFor(lesson)){
   const written=lesson.writtenReflections||[],files=lesson.reflections;
   if(shareable){const days=[...new Set([...written,...files].map(r=>r.date||r.addedOn).filter(Boolean))].sort().map(formatDay);sectionHeading('After-class reflections',written.length+files.length,sectionStyle.reflections,18);paragraph(`${plural(written.length+files.length,'reflection')} recorded${days.length?' ('+days.join(', ')+')':''}. Reflection text and recordings are left out of this shareable copy because they can identify students. ${FULL_VERSION}`,{size:8.6,color:palette.muted,after:2});state.y+=2;return;}
   sectionHeading('After-class reflections',written.length+files.length,sectionStyle.reflections,written.length?30:11);
@@ -213,7 +228,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
     const question=(r.prompts||[]).find(p=>p.key===key)?.label||reflectionQuestions[key];
     ensure(lineHeight(8.2)*2+lineHeight(9.8)*2);
     for(const line of wrap(question,W-3,8.2,true)){drawLine(line,M+3,state.y,8.2,{bold:true,color:palette.muted});state.y+=lineHeight(8.2);}
-    state.y+=0.6;paragraph(text,{x:M+3,width:W-3,size:9.8,after:2});
+    state.y+=0.6;paragraph(text,{x:M+3,width:W-3,size:9.8,after:2,marked:marks('reflection.'+key)});
    }
    rule(state.y,palette.hair,0.15);state.y+=3;
   }
@@ -239,13 +254,21 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
    paragraph(`Outside this reporting period: ${parts} for this lesson ${lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'was':'were'} recorded outside ${periodText(from,to)} and ${lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'is':'are'} not shown. The complete lesson history PDF includes ${lesson.outsidePeriodFiles+(lesson.reviewOutsidePeriod?1:0)===1?'it':'them'}.`,{size:8.2,color:palette.amber,after:2});
   }
  }
+ // The sentences reviewers highlighted on this lesson (latest version of every review, any reviewer), by field.
+ // Left out of the shareable copy, which carries no review content, and when "Reviewer highlights" is off.
+ function markedFor(lesson){
+  const list=shareable||!sectionOn(sections,'highlights')?[]:(lesson.reviews||[]).flatMap(r=>r.highlights||[]).filter(h=>String(h.record)===String(lesson.recordId));
+  const of=field=>list.filter(h=>h.field===field).map(h=>h.text);of.any=list.length>0;return of;
+ }
  function lessonBody(lesson){
   const visible=visibleLessonSections(lesson,sections);
   if(visible.plan){
    sectionHeading('Lesson plan',undefined,sectionStyle.plan,20);
    if(lesson.planFiles.length){if(shareable)paragraph(`${plural(lesson.planFiles.length,'uploaded plan file')} left out of this shareable copy. ${FULL_VERSION}`,{size:8.6,color:palette.muted,after:2});else for(const file of lesson.planFiles)linkRow(file,{style:sectionStyle.plan});state.y+=3;}
-   for(const field of lesson.plan.fields)fieldRow(field.label,field.text);
-   if(lesson.plan.notes)fieldRow('Lesson notes',lesson.plan.notes);
+   const marks=markedFor(lesson);
+   if(marks.any&&(lesson.plan.fields.length||lesson.plan.notes))paragraph('Highlighted lines were marked by a reviewer.',{size:8,color:palette.muted,after:1.5});
+   for(const field of lesson.plan.fields)fieldRow(field.label,field.text,marks(field.key));
+   if(lesson.plan.notes)fieldRow('Lesson notes',lesson.plan.notes,marks('notes'));
   }
   if(visible.activities)evidenceSection('Classroom activities',lesson.activities,sectionStyle.activities);
   if(visible.writing)evidenceSection('Student written work',lesson.writing,sectionStyle.writing);

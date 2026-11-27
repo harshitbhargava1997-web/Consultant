@@ -71,7 +71,7 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
    </div>
    <details><summary className="text-button">PDF sections</summary>
     <p className="hint">The lesson plan is always included. Unchecked sections are left out of the PDF only; no records change.</p>
-    <div className="lr-options">{optionalLessonSections.map(([key,label])=><label className="check-line" key={key}><input type="checkbox" checked={sectionOn(sections,key)} onChange={e=>setSections(s=>({...s,[key]:e.target.checked}))}/>{label}</label>)}<label className="check-line"><input type="checkbox" checked={embed} onChange={e=>setEmbed(e.target.checked)}/>Embed photo thumbnails</label></div>
+    <div className="lr-options">{optionalLessonSections.map(([key,label])=><label className="check-line" key={key}><input type="checkbox" checked={sectionOn(sections,key)} onChange={e=>setSections(s=>({...s,[key]:e.target.checked}))}/>{label}</label>)}<label className="check-line"><input type="checkbox" checked={sectionOn(sections,'highlights')} onChange={e=>setSections(s=>({...s,highlights:e.target.checked}))}/>Reviewer highlights</label><label className="check-line"><input type="checkbox" checked={embed} onChange={e=>setEmbed(e.target.checked)}/>Embed photo thumbnails</label></div>
    </details>
    <div className="lr-downloads"><p>{lessons.length} lesson{lessons.length===1?'':'s'} · {formatDay(from)} to {formatDay(to)}</p><button className="button primary" disabled={!!busy||!lessons.length||(consolidatedKind==='teacher'&&new Set(lessons.map(l=>l.teacherKey)).size!==1)} onClick={()=>download(consolidatedKind,lessons)}><Download size={16}/>{consolidatedKind==='school'?'School lesson PDF':'Teacher lesson PDF'}</button></div>
   </section>
