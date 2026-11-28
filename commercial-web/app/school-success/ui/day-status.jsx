@@ -40,7 +40,8 @@ export default function DayStatus({language='en',date,api,saved,onSaved,leader=f
   finally{setBusy(false);}
  }
  const off=disabled||busy;
- return <div className={'ds'+(leader?' leader':'')}>
+ // Enter in a text box must not submit the lesson plan form this control sits in.
+ return <div className={'ds'+(leader?' leader':'')} onKeyDown={e=>{if(e.key==='Enter'&&e.target.tagName==='INPUT')e.preventDefault();}}>
   {leader&&saved?.teacherMark&&<p className="ds-mark">{t('Marked by teacher','शिक्षक ने चिह्नित किया')}: <b>{statusLabel(saved.teacherMark,language)}</b></p>}
   {leader&&saved&&!saved.changedByLeader&&<p className="ds-mark">{t('Marked by','चिह्नित')} {teacherName||t('the teacher','शिक्षक')}: <b>{statusLabel(saved,language)}</b></p>}
   <span className="ds-label">{t('This day','यह दिन')}</span>
@@ -72,4 +73,27 @@ export default function DayStatus({language='en',date,api,saved,onSaved,leader=f
    <div className="ds-tiles">{tiles.map(([k,icon])=><button key={k} type="button" className={'ds-tile'+(draft.status===k?' on':'')} onClick={()=>choose(k)}><i aria-hidden="true">{icon}</i>{name(k)}</button>)}</div>
   </div></>}
  </div>;
+}
+
+// The teacher's day statuses for [from, to] as a Map date → status (owner decision, 28 November 2026: Home and the
+// weekly subject plan show and change the same day status as the daily plan). reload() reads them again.
+export function useDayStatuses(api,from,to){
+ const key=from+'|'+to,[state,setState]=useState({key:'',map:new Map(),loaded:false}),[tick,setTick]=useState(0);
+ useEffect(()=>{
+  if(!api||!from||!to)return;let live=true;
+  api({action:'read',from,to}).then(r=>{if(live)setState({key,map:new Map((r.statuses||[]).map(s=>[s.date,s])),loaded:true});})
+   .catch(()=>{if(live)setState({key,map:new Map(),loaded:true});});
+  return ()=>{live=false;};
+ },[key,tick,!!api]);
+ return {map:state.key===key?state.map:new Map(),loaded:state.key===key&&state.loaded,reload:()=>setTick(n=>n+1)};
+}
+// The day-status control in a bottom sheet, for one date (Home "Today", a day of the weekly plan's strip).
+export function DaySheet({language='en',date,title,api,saved,onClose,onSaved}){
+ const t=(en,hn)=>language==='hi'?hn:en;
+ useEffect(()=>{const k=e=>{if(e.key==='Escape')onClose();};addEventListener('keydown',k);return ()=>removeEventListener('keydown',k);},[]);
+ return <><div className="ta-sheet-bg" onClick={onClose}/><div className="ta-sheet ds-day-sheet" role="dialog" aria-modal="true" aria-label={title}>
+  <div className="ta-grab"/><button type="button" className="ta-sheet-x icon" aria-label={t('Close','बंद करें')} onClick={onClose}><X size={18}/></button>
+  <h3 className="ds-day-title">{title}</h3>
+  <DayStatus language={language} date={date} api={api} saved={saved||null} onSaved={s=>onSaved?.(s)}/>
+ </div></>;
 }

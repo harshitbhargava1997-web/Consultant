@@ -126,6 +126,18 @@ Code:
 
 Tests: `tests/success-review-edit.test.cjs`, `tests/success-review-highlights.test.mjs`.
 
+## 28 November 2026: weekly subject plan first; day status from Home and the weekly plan (owner decision)
+- **Plan order:** the Weekly subject plan is the first box and is selected for teachers who have not chosen yet. Daily plan is second. The phone remembers each teacher's last choice.
+- **"This week" strip in the weekly plan:** Mon–Sat of the plan's week, each showing that day's status (Present by default).
+  - Tapping a day opens the same day-status control as the daily plan: Present, Half day, Absent, or Exam or holiday.
+  - Days that need no plan (absent, exam, holiday, vacation) are **skipped** when the plan fills in its days or a day is added.
+  - A day not yet written that falls on one moves to the next free day.
+  - A written day on such a date shows "No lesson plan needed: …" with **Remove this day**, and cannot be submitted until it is removed or its date changed.
+- **Home:** the Today card ends with **"Today: Present · Change"**.
+  - Change opens the same control for today, including exams and holidays with From–To dates.
+  - Days in Recent lessons that have a status show a small tag next to the date (display only).
+- **One record per teacher per day:** Home, the daily plan, the weekly strip and the principal's Week overview all read and write the same day status. It is stored as append-only `day-status` rows, with no new storage. Saved lessons are never changed.
+
 ## 28 November 2026: real period number (owner decision)
 **What the teacher chooses.** Every lesson has a **"Which period?"** choice of **1–7 or Extra**, so P-numbers match the school timetable instead of the order plans were saved.
 - **Extra:** zero period, before or after school, or a revision or extra class. It never clashes and a day can have several. It is shown as "Extra", after Period 7, on teacher screens, in lesson reviews, in the Week overview and in the Teacher 360° lesson PDFs.

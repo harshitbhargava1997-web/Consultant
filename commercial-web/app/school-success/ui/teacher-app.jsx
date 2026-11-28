@@ -6,6 +6,8 @@
 import {useEffect,useState} from 'react';
 import {House,ClipboardList,Camera,MessageSquareText,ChevronRight,ArrowLeft,CircleCheck,BookOpen,CalendarDays,KeyRound,LogOut,Languages,Target,Package,Presentation,Users,PencilLine,ListChecks,NotebookPen,StickyNote,X,RefreshCw,Type,PlayCircle} from 'lucide-react';
 import {dayLabel,hindiOptions} from './lesson-plan-form';
+import {useDayStatuses,DaySheet} from './day-status';
+import {statusLabel,shortLabel,dayStatusNames} from '@/lib/school-success/day-status';
 import {monthStats} from './teacher-summary';
 import {parsePlanText,planSectionTitles} from '@/lib/school-success/plan-text';
 import {sentences} from '@/lib/school-success/highlights';
@@ -30,10 +32,14 @@ function savedFilters(){try{const v=JSON.parse(localStorage.getItem(FILTER_KEY)|
 // period with its number (Period 1, 2, 3, 4) in the order it was saved, whatever save it came from. Recent lessons
 // can be narrowed by Tomorrow / This week (Monday–Sunday) / This month / a date, and by class and subject; each
 // period opens its own plan. The choice is remembered on this phone.
-export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,onEvidence,onPlan,loading,error,onRetry,notice}){
+// dayApi (optional): the teacher's day status (owner decision, 28 November 2026): "Today: Present · Change" in the
+// Today card, and a small tag on marked days in Recent lessons. The same day status as the planners.
+export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,onEvidence,onPlan,loading,error,onRetry,notice,dayApi}){
  const t=(en,hi)=>language==='hi'?hi:en,o=v=>language==='hi'?(hindiOptions[v]||String(v).replace('Grade ','कक्षा ')):v;
  const [prefs,setPrefs]=useState(savedFilters),[range,setRange]=useState({from:'',to:''}),[all,setAll]=useState(false);
  const {filter,cls,subject}=prefs;
+ const todayKey=summary?.today||'',marks=useDayStatuses(dayApi&&todayKey?dayApi:null,todayKey?addDays(todayKey,-60):'',todayKey?addDays(todayKey,30):''),[daySheet,setDaySheet]=useState(false);
+ const todayMark=marks.map.get(todayKey),markName=s=>language==='hi'?dayStatusNames[s.status][1]:shortLabel(s);
  function choose(change){setPrefs(p=>{const next={...p,...change};try{localStorage.setItem(FILTER_KEY,JSON.stringify(next));}catch{}return next;});setAll(false);}
  const lessons=summary?.lessons||[],todayDate=summary?.today||'';
  const periodsToday=summary?periodsOn(lessons,todayDate):[];
@@ -62,6 +68,7 @@ export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,
     <div className="ta-today-chips">{periodsToday.map(x=><button type="button" key={x.key} className="ta-today-chip" onClick={()=>onRead(x.lesson.resumeToken,x.index,x.period)}><BookOpen size={14}/><span>{periodName(x.number)} · {classLabel(x.period,o)}</span></button>)}</div>
     {periodsToday[0]&&<button type="button" className="ta-cta" onClick={()=>onEvidence(periodsToday[0].lesson.resumeToken,0)}><Camera size={18}/>{t('Add evidence for today','आज के प्रमाण जोड़ें')}</button>}
    </>}
+     {dayApi&&summary&&<div className="ta-dayline"><span>{t('Today','आज')}: <b>{todayMark?statusLabel(todayMark,language):t('Present','उपस्थित')}</b></span><button type="button" onClick={()=>setDaySheet(true)}>{t('Change','बदलें')}</button></div>}
   </section>
   <div className="ta-stats">
    <div className="ta-stat"><b>{summary?s.planned:'–'}</b><span>{t('Lessons planned in ','योजना बनाई — ')+month}</span></div>
@@ -82,7 +89,7 @@ export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,
    :!days.length?<div className="ta-empty"><p>{filter==='range'&&!range.from&&!range.to?t('Choose a date or a range.','कोई तिथि या अवधि चुनें।'):filter==='tomorrow'&&!useCls&&!useSubject?t('Nothing planned for tomorrow yet.','कल के लिए अभी कोई योजना नहीं।'):t('No lessons in this period.','इस अवधि में कोई पाठ नहीं।')}</p>{filter==='tomorrow'&&<button type="button" className="button" onClick={onPlan}><ClipboardList size={15}/>{t('Plan tomorrow','कल की योजना बनाएँ')}</button>}</div>
    :<ul className="ta-days">{shown.map(d=>{const m=/^\d{4}-(\d{2})-(\d{2})$/.exec(d.date),past=d.date<=todayDate;
     return <li key={d.date} className="ta-dayrow">
-     <div className="ta-day-head"><span className="ta-date"><b>{m?Number(m[2]):''}</b><small>{dayLabel(d.date,language).split(',')[0]}</small></span><span className="ta-day-title"><b>{d.date===todayDate?t('Today','आज'):dayLabel(d.date,language)}</b><small>{d.periods.length} {t(d.periods.length===1?'period':'periods','कालांश')}</small></span></div>
+     <div className="ta-day-head"><span className="ta-date"><b>{m?Number(m[2]):''}</b><small>{dayLabel(d.date,language).split(',')[0]}</small></span><span className="ta-day-title"><b>{d.date===todayDate?t('Today','आज'):dayLabel(d.date,language)}{marks.map.get(d.date)&&<em className={'ta-daytag '+marks.map.get(d.date).status}>{markName(marks.map.get(d.date))}</em>}</b><small>{d.periods.length} {t(d.periods.length===1?'period':'periods','कालांश')}</small></span></div>
      <ul className="ta-periods">{d.periods.map(x=><li key={x.key}>
       <button type="button" className="ta-period" onClick={()=>onRead(x.lesson.resumeToken,x.index,x.period)}><span className="ta-pnum">{periodName(x.number)}</span><span className="ta-lesson-text"><b>{classLabel(x.period,o)}</b><small>{x.period.topic}</small>{x.period.evidence&&<em><CircleCheck size={11}/>{t('Evidence added','प्रमाण जोड़ा गया')}</em>}</span></button>
       {past&&<button type="button" className="ta-cam" aria-label={t('Add evidence','प्रमाण जोड़ें')+' · '+periodName(x.number)+' · '+classLabel(x.period)} onClick={()=>onEvidence(x.lesson.resumeToken,x.index)}><Camera size={19}/></button>}
@@ -91,6 +98,7 @@ export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,
    {days.length>5&&!all&&<button type="button" className="text-button" onClick={()=>setAll(true)}>{t('Show all','सभी देखें')} ({days.length} {t('days','दिन')})<ChevronRight size={14}/></button>}
    {summary&&<p className="ta-note">{t('Lessons from the last 60 days and the next 30 days.','पिछले 60 और अगले 30 दिनों के पाठ।')}</p>}
   </section>
+  {daySheet&&<DaySheet language={language} date={todayKey} title={t('Today','आज')+' · '+dayLabel(todayKey,language)} api={dayApi} saved={todayMark} onClose={()=>setDaySheet(false)} onSaved={()=>{setDaySheet(false);marks.reload();}}/>}
  </div>;
 }
 
