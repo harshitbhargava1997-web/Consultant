@@ -1,5 +1,6 @@
 import {reflectionPrompts} from './teacher-flow.js';
 import {PERIOD_TYPE_HEADING,periodTypeHeadings} from './period-types.js';
+import {PERIOD_NUMBER_HEADING} from './period-number.js';
 // Splits a saved lesson plan (the preparation text saved by the lesson plan form under the six standard headings)
 // back into readable sections, for the teacher's "Read plan" screen. Classwork and homework, saved inside the review
 // section, become their own section. Text that does not use the headings (older or free-form notes) is returned as
@@ -22,7 +23,7 @@ export const planSectionTitles = {
 export function parsePlanText(text) {
  const raw = String(text || '').replace(/\r\n?/g, '\n').trim();
  if (!raw) return [];
- const labels = new Map([...reflectionPrompts.map(([key, label]) => [label, key]), [PERIOD_TYPE_HEADING, 'periodType'], ...Object.entries(periodTypeHeadings).map(([key, label]) => [label, key])]);
+ const labels = new Map([...reflectionPrompts.map(([key, label]) => [label, key]), [PERIOD_TYPE_HEADING, 'periodType'], [PERIOD_NUMBER_HEADING, 'periodNumber'], ...Object.entries(periodTypeHeadings).map(([key, label]) => [label, key])]);
  const sections = [];
  let current = null;
  const before = [];
@@ -34,6 +35,8 @@ export function parsePlanText(text) {
  const out = [];
  if (before.join('\n').trim()) out.push({ key: 'notes', text: before.join('\n').trim() });
  for (const s of sections) {
+  // The period number is shown in the title ("Period 4"), not as a section.
+  if (s.key === 'periodNumber') continue;
   const body = s.lines.join('\n').trim();
   if (s.key === 'review' && CLASSWORK.test(body)) {
    const [review, classwork] = body.split(CLASSWORK).filter((_, i) => i !== 1);

@@ -516,3 +516,13 @@
 .success-app .lp-setup .ds{max-width:440px}
 .success-app .ta-sheet-bg.ds-sheet-bg{z-index:70}.success-app .ta-sheet.ds-sheet{z-index:71}
 .success-app .ds-notice.other{background:#f1ecf7;border-color:#e2d8ee}.success-app .ds-notice.other h3,.success-app .ds-notice.other p{color:#4d3868}
+/* Real period number (owner decision, 28 November 2026) */
+.success-app .lp-pnum{margin:10px 0 6px}
+.success-app .lp-pnum-label{display:block;font-size:12px;font-weight:650;color:#6c7a75;margin-bottom:6px}
+.success-app .lp-pnum-row{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:5px;max-width:440px}
+.success-app .lp-pnum-btn{border:1px solid #d6dfda;border-radius:10px;min-height:42px;font-size:15px;font-weight:800;color:#4d5c57;background:#fff}
+.success-app .lp-pnum-btn.on{border:2px solid var(--green);background:var(--mint);color:var(--green)}
+.success-app .lp-pnum-btn.taken{background:#eef2ef;color:#aab5b0;border-style:dashed}
+.success-app .lp-pnum-btn.clash{border:2px solid #c0574b;background:#fbecea;color:#9a3a30}
+.success-app .lp-pnum-hint{margin-top:5px}
+.success-app .lp-pnum.invalid .lp-field-error{display:block;margin-top:6px;background:#fbecea;color:#9a3a30;border-radius:8px;padding:6px 9px;font-size:12px}

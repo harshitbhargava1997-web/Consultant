@@ -2,6 +2,7 @@
 // Monday–Sunday, grouped by class and subject. Every period keeps the number it has on the teacher's own day
 // (Period 1, 2, 3… in save order), and each group lists the weekly reviews already given for it.
 import {weekRange} from './day-periods.js';
+import {assignPeriodNumbers} from './period-number.js';
 const sectionOf=s=>s&&s!=='Not Applicable'?s:'';
 export const groupKey=l=>JSON.stringify([l.grade||'',sectionOf(l.section),l.subject||'']);
 const numeric=id=>/^\d+$/.test(String(id))?Number(id):Number.MAX_SAFE_INTEGER;
@@ -10,8 +11,11 @@ export function weekGroups(lessons,reviewRows,week){
  const {from,to}=weekRange(week);
  const inWeek=(lessons||[]).filter(l=>l.plannedDate>=from&&l.plannedDate<=to)
   .sort((a,b)=>a.plannedDate.localeCompare(b.plannedDate)||numeric(a.recordId)-numeric(b.recordId));
+ // The chosen period number (1–8) when the plan has one; older plans keep save order (28 November 2026).
  const perDay=new Map();
- const numbered=inWeek.map(l=>{const n=(perDay.get(l.plannedDate)||0)+1;perDay.set(l.plannedDate,n);return {...l,dayNumber:n};});
+ for(const l of inWeek){if(!perDay.has(l.plannedDate))perDay.set(l.plannedDate,[]);perDay.get(l.plannedDate).push(l);}
+ const numbers=new Map([...perDay.values()].flatMap(list=>[...assignPeriodNumbers(list,l=>l.periodNumber||0)]));
+ const numbered=inWeek.map(l=>({...l,dayNumber:numbers.get(l)})).sort((a,b)=>a.plannedDate.localeCompare(b.plannedDate)||a.dayNumber-b.dayNumber||numeric(a.recordId)-numeric(b.recordId));
  const groups=new Map();
  for(const l of numbered){const key=groupKey(l);if(!groups.has(key))groups.set(key,{key,grade:l.grade,section:sectionOf(l.section),subject:l.subject,lessons:[]});groups.get(key).lessons.push(l);}
  // A weekly review belongs to a group only through the periods it covers (never by class and subject alone, which

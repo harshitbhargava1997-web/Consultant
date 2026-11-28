@@ -4,6 +4,7 @@
 // the Plan screen (saved periods with a green tick, new periods continue from the next number) and on Add evidence.
 // Input: the teacher summary's lessons ({id, plannedOn, order, resumeToken, evidence, periods:[{grade, section,
 // subject, topic, evidence}]}); `order` is the first saved record of the lesson (server), else the list order.
+import {assignPeriodNumbers} from './period-number.js';
 const addDays=(day,n)=>new Date(Date.parse(day+'T00:00:00Z')+n*86400000).toISOString().slice(0,10);
 export function weekRange(today){const d=new Date(today+'T00:00:00Z').getUTCDay(),from=addDays(today,-((d+6)%7));return {from,to:addDays(from,6)};}
 export function monthRange(today){const [y,m]=today.split('-').map(Number);return {from:today.slice(0,8)+'01',to:new Date(Date.UTC(y,m,0)).toISOString().slice(0,10)};}
@@ -15,8 +16,10 @@ export function planDays(lessons){
  (lessons||[]).forEach((lesson,position)=>{if(!lesson?.plannedOn)return;if(!byDay.has(lesson.plannedOn))byDay.set(lesson.plannedOn,[]);byDay.get(lesson.plannedOn).push({lesson,position});});
  return [...byDay.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([date,items])=>{
   items.sort((a,b)=>(Number.isFinite(a.lesson.order)&&Number.isFinite(b.lesson.order)?a.lesson.order-b.lesson.order:0)||a.position-b.position);
-  let number=0;
-  return {date,periods:items.flatMap(({lesson})=>(lesson.periods||[]).map((period,index)=>({number:++number,key:lesson.id+':'+index,lesson,index,period})))};
+  // A period's chosen number (period.number, 1–8) when it has one; older plans keep save order (28 November 2026).
+  const list=items.flatMap(({lesson})=>(lesson.periods||[]).map((period,index)=>({key:lesson.id+':'+index,lesson,index,period})));
+  const numbers=assignPeriodNumbers(list,x=>x.period.number||0);
+  return {date,periods:list.map((x,i)=>({...x,number:numbers.get(x),order:i})).sort((a,b)=>a.number-b.number||a.order-b.order).map(({order,...x})=>x)};
  });
 }
 export const periodsOn=(lessons,date)=>planDays(lessons).find(d=>d.date===date)?.periods||[];
