@@ -9,6 +9,7 @@ import {dayLabel,hindiOptions} from './lesson-plan-form';
 import {monthStats} from './teacher-summary';
 import {parsePlanText,planSectionTitles} from '@/lib/school-success/plan-text';
 import {sentences} from '@/lib/school-success/highlights';
+import {periodNumberOf,periodName as periodLabelOf} from '@/lib/school-success/period-number';
 import {planDays,periodsOn,planFilterOptions,filterPlanDays,chipRange,classOf} from '@/lib/school-success/day-periods';
 
 const addDays=(day,n)=>new Date(Date.parse(day+'T00:00:00Z')+n*86400000).toISOString().slice(0,10);
@@ -47,7 +48,7 @@ export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,
  const s=monthStats(narrowed),month=summary?new Date(summary.today+'T00:00:00Z').toLocaleDateString(language==='hi'?'hi-IN':'en-IN',{month:'long',timeZone:'UTC'}):'';
  const first=String(teacher||'').split(' ')[0];
  const dateLine=summary?new Date(summary.today+'T00:00:00Z').toLocaleDateString(language==='hi'?'hi-IN':'en-IN',{weekday:'long',day:'numeric',month:'long',timeZone:'UTC'}):'';
- const periodName=n=>t('Period','कालांश')+' '+n;
+ const periodName=n=>periodLabelOf(n,{hi:language==='hi'});
  return <div className="ta-home">
   <div className="ta-hello"><small>{dateLine}</small><h1>{greeting(istHour(),language)}, {first}</h1><p>{school}</p></div>
   {notice}
@@ -140,9 +141,9 @@ export function PlanReader({token,periodIndex=0,match,request,language,today,onB
   {error&&<div className="alert error" role="alert">{error} <button type="button" className="text-button" onClick={()=>void load()}>{t('Try again','फिर कोशिश करें')}</button></div>}
   {!lesson&&!error&&<div className="ts-skeleton" aria-busy="true"><span/><span/></div>}
   {p&&<>
-   {ps.length>1&&<div className="ev-periods" role="tablist">{ps.map((q,i)=><button type="button" role="tab" aria-selected={i===index} key={q.id} className={'ev-period-chip'+(i===index?' on':'')} onClick={()=>setIndex(i)}><b>{t('Period','कालांश')} {i+1}</b><small>{classLabel(q,o)}</small></button>)}</div>}
+   {ps.length>1&&<div className="ev-periods" role="tablist">{ps.map((q,i)=><button type="button" role="tab" aria-selected={i===index} key={q.id} className={'ev-period-chip'+(i===index?' on':'')} onClick={()=>setIndex(i)}><b>{periodLabelOf(periodNumberOf(q.reflection),{hi:language==='hi',choice:true})||t('Period','कालांश')+' '+(i+1)}</b><small>{classLabel(q,o)}</small></button>)}</div>}
    {marked.size>0&&<p className="ta-hl-note"><mark className="ta-hl">{t('Yellow lines','पीली पंक्तियाँ')}</mark> {t('were highlighted by your reviewer. See the Feedback tab.','आपके समीक्षक ने चिह्नित की हैं। प्रतिक्रिया टैब देखें।')}</p>}
-   <div className="ta-plan-head"><span className="ta-day"><CalendarDays size={12}/>{when}{ps.length>1?' · '+t('Period','कालांश')+' '+(index+1):''}</span><h2>{p.topic||t('Lesson','पाठ')}</h2><p>{classLabel(p,o)}</p></div>
+   <div className="ta-plan-head"><span className="ta-day"><CalendarDays size={12}/>{when}{ps.length>1||periodNumberOf(p.reflection)?' · '+(periodLabelOf(periodNumberOf(p.reflection),{hi:language==='hi',choice:true})||t('Period','कालांश')+' '+(index+1)):''}</span><h2>{p.topic||t('Lesson','पाठ')}</h2><p>{classLabel(p,o)}</p></div>
    {sections.length?sections.map(s=>{const [Icon,c]=sectionIcons[s.key]||sectionIcons.notes;return <section className="ta-sec" key={s.key}><h4><span className={'ta-sec-icon '+c}><Icon size={14}/></span>{planSectionTitles[s.key][language==='hi'?1:0]}</h4><p><Marked text={s.text} marked={marked}/></p></section>;})
    :<div className="ta-empty"><p>{t('No plan details were written for this period.','इस कालांश के लिए योजना का विवरण नहीं लिखा गया।')}</p></div>}
    {date<=today?<div className="ev-submit-bar"><button type="button" className="button primary ev-submit" onClick={()=>onEvidence(token,index)}><Camera size={18}/>{t('After class: add evidence','कक्षा के बाद: प्रमाण जोड़ें')}</button></div>

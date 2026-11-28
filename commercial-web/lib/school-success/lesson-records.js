@@ -14,6 +14,7 @@ import {isReflectionTextUrl} from './reflection-text.js';
 // The generated preparation PDF of older lessons (see lesson-plan-items.js).
 import {isGeneratedPreparationPdf} from './lesson-plan-items.js';
 import {PERIOD_TYPE_HEADING,periodTypeOf} from './period-types.js';
+import {PERIOD_NUMBER_HEADING,periodNumberOf,assignPeriodNumbers} from './period-number.js';
 export {isGeneratedPreparationPdf};
 
 // [key, heading saved by formatReflection() in teacher-flow.js, label shown in reviews and lesson PDFs]. Only the
@@ -66,7 +67,7 @@ export const isPdfUrl=url=>extension(url)==='pdf';
 export const mediaKind=url=>isImageUrl(url)?'Photo':isAudioUrl(url)?'Audio':isVideoUrl(url)?'Video':isPdfUrl(url)?'PDF':'File';
 
 export function parseLessonPlan(reflection='',materials=''){
- const text=clean(reflection).replace(/\r\n?/g,'\n'),byHeading=new Map([...lessonPlanFields.map(([key,heading])=>[heading,key]),[PERIOD_TYPE_HEADING,'periodType']]);
+ const text=clean(reflection).replace(/\r\n?/g,'\n'),byHeading=new Map([...lessonPlanFields.map(([key,heading])=>[heading,key]),[PERIOD_TYPE_HEADING,'periodType'],[PERIOD_NUMBER_HEADING,'periodNumber']]);
  const values={},notes=[];let current=null;
  for(const line of text.split('\n')){
   const key=byHeading.get(line.trim());
@@ -83,7 +84,7 @@ export function parseLessonPlan(reflection='',materials=''){
  const extra=clean(materials);
  // Mirrors the preparation PDF: separate materials are shown unless already written in the plan.
  if(extra&&!fields.some(f=>f.key==='materials')&&!text.includes(extra))fields.splice(Math.min(1,fields.length),0,{key:'materials',label:'Teaching-learning materials',text:extra});
- return {fields,notes:join(notes),periodType:periodTypeOf(text)};
+ return {fields,notes:join(notes),periodType:periodTypeOf(text),periodNumber:periodNumberOf(text)};
 }
 
 const numericId=id=>/^\d+$/.test(id)?Number(id):Number.MAX_SAFE_INTEGER;
@@ -157,7 +158,7 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
   grade:clean(first.grade),section:clean(first.section),subject:clean(first.subject),topic:clean(first.topic)||'Classroom practice',
   plannedDate:clean(first.plannedDate),conductedOn:conducted,submittedAt:prepared||submitted,firstDate,
   hasPreparation:rows.some(r=>r.stage==='preparation_saved'||r.feedStage==='Lesson preparation'),
-  scope,period:{from,to},plan,periodType:plan.periodType,
+  scope,period:{from,to},plan,periodType:plan.periodType,periodNumber:plan.periodNumber,
   ...Object.fromEntries(Object.entries(sections).map(([key,list])=>[key,scoped(list)])),
   outsidePeriodFiles:whole?0:all.filter(f=>!keep(f)).length,
   reviewOutsidePeriod:visibleReviews.length<history.length,
@@ -186,7 +187,8 @@ export function comparePlanned(a,b){
 function numberPeriods(lessons){
  const days=new Map();
  for(const l of lessons){const d=lessonDay(l);if(!d)continue;const k=l.teacherKey+'|'+d;if(!days.has(k))days.set(k,[]);days.get(k).push(l);}
- for(const list of days.values())list.sort((a,b)=>numericId(a.recordId)-numericId(b.recordId)||a.key.localeCompare(b.key)).forEach((l,i)=>{l.dayNumber=i+1;});
+ // The chosen period number when the plan has one; otherwise save order (period numbers, 28 November 2026).
+ for(const list of days.values()){list.sort((a,b)=>numericId(a.recordId)-numericId(b.recordId)||a.key.localeCompare(b.key));const n=assignPeriodNumbers(list,l=>l.periodNumber||0);list.forEach(l=>{l.dayNumber=n.get(l);});}
 }
 
 // entries: mapLive entries already limited by server access scope and the report directory source.

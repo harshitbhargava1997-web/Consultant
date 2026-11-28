@@ -1,5 +1,6 @@
 import {formatReflection,subjectsFor} from './teacher-flow.js';
 import {PERIOD_TYPE_HEADING,periodTypeNames,periodTypeHeadings} from './period-types.js';
+import {periodNumberText} from './period-number.js';
 // One-page lesson planning. Every field is visible at once; its guiding question and sentence starter are shown
 // as faded placeholder text inside the box (never inserted into the answer).
 // Entry: [key, [English title, Hindi title], [English placeholder, Hindi placeholder], max length, required]
@@ -38,7 +39,12 @@ export function planningParts(p){
  return {...rest,practice:a.practice?.trim()||'',review:[a.review?.trim()||'',classwork?(hi?'कक्षा कार्य और गृहकार्य:\n':'Classwork and homework:\n')+classwork:''].filter(Boolean).join('\n')};
 }
 // A remedial or substitute period is saved with a "Period type" heading and its own short answers.
+// The real period number (1–8), when chosen, comes first (owner decision, 28 November 2026).
 export function planText(p){
+ const number=periodNumberText(Number(p.periodNumber)),body=planBody(p);
+ return number?number+(body?'\n\n'+body:''):body;
+}
+function planBody(p){
  const type=p.periodType||'regular';
  if(type==='regular')return formatReflection(planningParts(p));
  const a=p.answers||{};
@@ -69,11 +75,14 @@ export function schoolDays(start,count){const out=[];let d=start;while(isSunday(
 // (one date, several periods). A weekly subject plan is one submission per day (one period each), so every saved
 // lesson keeps its own planned date and existing records, reports and evidence work unchanged.
 export function planSubmissions({type,date,shared,blocks,school,teacher}){
- const strip=({answers,answerLanguage,submissionId,date:_d,savedReceipt,...rest})=>rest;
+ const strip=({answers,answerLanguage,submissionId,date:_d,savedReceipt,periodNumber,autoNumber,...rest})=>rest;
+ // The saved plan text carries the chosen period number; on a weekly plan a day without its own number takes the
+ // plan's "Usually period".
+ const numbered=(b,n)=>({...b,reflection:planText({...b,periodNumber:n})});
  if(type==='weekly'){
-  return blocks.map(b=>({id:b.submissionId,school,teacher,date:b.date,periods:[strip({...b,grade:shared.grade,section:shared.section,subject:shared.subject})],block:b.id}));
+  return blocks.map(b=>({id:b.submissionId,school,teacher,date:b.date,periods:[strip(numbered({...b,grade:shared.grade,section:shared.section,subject:shared.subject},b.periodNumber||shared.periodNumber))],block:b.id}));
  }
- return [{id:shared.submissionId,school,teacher,date,periods:blocks.map(strip),block:null}];
+ return [{id:shared.submissionId,school,teacher,date,periods:blocks.map(b=>strip(numbered(b,b.periodNumber))),block:null}];
 }
 // Problems that apply across blocks (shown at the top of the form).
 export function planProblem({type,date,shared,blocks}){

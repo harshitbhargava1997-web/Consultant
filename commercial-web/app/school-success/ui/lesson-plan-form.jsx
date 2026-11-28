@@ -6,6 +6,7 @@ import {guide,guideFor,withPlanning,planningIssue,planProblem,MAX_DAILY_PERIODS,
 import {teacherGrades,teacherSections,subjectsFor} from '@/lib/school-success/teacher-flow';
 import {NO_PLAN,statusLabel,halfNames} from '@/lib/school-success/day-status';
 import DayStatus,{rangeText} from './day-status';
+import {PERIOD_CHOICES,EXTRA,nextFreePeriod,freePeriods,periodName} from '@/lib/school-success/period-number';
 
 export const hindiOptions={'Nursery':'नर्सरी','LKG':'एलकेजी','UKG':'यूकेजी','Not Applicable':'लागू नहीं','All Subjects Together':'सभी विषय एक साथ','Phonics / Literacy':'ध्वनि एवं साक्षरता','Mathematics':'गणित','Numeracy':'संख्या ज्ञान','English':'अंग्रेज़ी','Hindi':'हिन्दी','Environmental Studies (EVS)':'पर्यावरण अध्ययन','Science':'विज्ञान','Social Science':'सामाजिक विज्ञान','General Knowledge (GK)':'सामान्य ज्ञान','English Grammar':'अंग्रेज़ी व्याकरण','Computer':'कंप्यूटर','Play Activity':'खेल गतिविधि','Gross and fine motor activities':'स्थूल और सूक्ष्म गतिक गतिविधियाँ','Playtime':'खेल का समय','Extracurricular / co-curricular':'पाठ्येतर / सह-पाठ्यचर्या गतिविधियाँ','Stories and rhymes':'कहानियाँ और कविताएँ','Art and craft':'कला और शिल्प','Play Time':'खेल का समय','Play Based':'खेल आधारित'};
 const icons={objective:Target,materials:Package,teacher:Presentation,student:Users,practice:PencilLine,review:ListChecks,classwork:House,children:Users,support:PencilLine,done:ListChecks};
@@ -39,11 +40,37 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
  useEffect(()=>{setOpen(s=>plan.blocks.some(b=>s.has(b.id))?s:new Set(plan.blocks.slice(0,1).map(b=>b.id)));},[plan.blocks.map(b=>b.id).join()]);
  const weekly=plan.type==='weekly',option=v=>hi?(hindiOptions[v]||v.replace('Grade ','कक्षा ')):v;
  const merged=b=>weekly?{...b,grade:plan.shared.grade,section:plan.shared.section,subject:plan.shared.subject}:b;
- const issue=b=>planningIssue(merged(b),{needsDate:weekly});
+ // Which period of the day (1–8) each lesson is taught in (owner decision, 28 November 2026). Daily plan: the next
+ // free number is filled in and the teacher can change it. Weekly plan: "Usually period" for every day, which a day
+ // can change. A number already planned on that day is flagged before saving.
+ const numberOf=b=>weekly?b.periodNumber||plan.shared.periodNumber||0:b.periodNumber||0;
+ // Only periods a teacher chose block a number; Extra never clashes and can be used many times a day.
+ const takenOn=date=>new Map(periodsOn(savedLessons,date).filter(x=>x.chosen&&x.number<EXTRA).map(x=>[x.number,x]));
+ function clashOf(b){
+  const n=numberOf(b);if(!n||n===EXTRA)return null;
+  const taken=takenOn(weekly?b.date:plan.date),saved=taken.get(n),others=weekly?[]:plan.blocks.filter(x=>x.id!==b.id).map(numberOf);
+  const free=freePeriods([...taken.keys(),...others]).map(f=>f===EXTRA?t('Extra','अतिरिक्त'):f).join(' · ');
+  if(saved)return {n,free,what:[saved.period.subject,classOf(saved.period)].filter(Boolean).map(option).join(' · ')};
+  if(others.includes(n))return {n,free,what:''};
+  return null;
+ }
+ const issue=b=>planningIssue(merged(b),{needsDate:weekly})||(!numberOf(b)||clashOf(b)?'period':'');
  const savedFor=b=>!!(weekly?plan.saved?.[b.submissionId]:plan.saved?.[plan.shared.submissionId]);
  const done=plan.blocks.filter(b=>!issue(b)).length;
  const dayNow=!weekly&&day.date===plan.date?day.status:null,noPlan=Boolean(dayNow&&NO_PLAN.has(dayNow.status)&&!(dayNow.status==='exam'&&classAnyway));
  const savedToday=!weekly&&plan.date?periodsOn(savedLessons,plan.date):[],maxNew=weekly?MAX_WEEKLY_DAYS:Math.max(0,MAX_DAILY_PERIODS-savedToday.length);
+ const savedKey=savedToday.map(x=>x.chosen?x.number:0).join(',');
+ useEffect(()=>{
+  if(weekly)return;
+  // New periods get the lowest free numbers until the teacher picks one; a picked number is kept.
+  setPlan(p=>{
+   const used=new Set(periodsOn(savedLessons,p.date).filter(x=>x.chosen).map(x=>x.number));
+   p.blocks.forEach(b=>{if(b.periodNumber&&!b.autoNumber)used.add(b.periodNumber);});
+   let changed=false;
+   const blocks=p.blocks.map(b=>{if(b.periodNumber&&!b.autoNumber)return b;const n=nextFreePeriod(used);used.add(n);if((b.periodNumber||0)===n&&b.autoNumber)return b;changed=true;return withPlanning(b,{periodNumber:n||undefined,autoNumber:true,answerLanguage:b.answerLanguage||language});});
+   return changed?{...p,blocks}:p;
+  });
+ },[weekly,plan.date,savedKey,plan.blocks.map(b=>b.id+':'+(b.autoNumber?'a':b.periodNumber||0)).join()]);
  const alreadyPlanned=b=>weekly&&b.date&&periodsOn(savedLessons,b.date).some(x=>classOf(x.period)===classOf(plan.shared)&&x.period.subject===plan.shared.subject);
  function update(changes){setPlan(p=>({...p,...changes}));setWarning(null);}
  function updateBlock(id,changes){setPlan(p=>({...p,blocks:p.blocks.map(b=>b.id===id?withPlanning(b,{...changes,answerLanguage:language}):b)}));setWarning(null);}
@@ -52,10 +79,11 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
  function chooseType(type){
   if(type===plan.type)return;
   // Answers are kept. Shared class/subject moves between the top of the form and the blocks.
+  // Period numbers start again: a daily plan fills in free numbers, a weekly plan uses "Usually period".
   if(type==='weekly'){const first=plan.blocks[0]||{};const days=[];let d=plan.date||nextSchoolDay(today);
-   const blocks=plan.blocks.map(b=>{const day=days.length?nextSchoolDay(days[days.length-1]):d;days.push(day);return {...b,date:day};});
+   const blocks=plan.blocks.map(b=>{const day=days.length?nextSchoolDay(days[days.length-1]):d;days.push(day);return {...b,date:day,periodNumber:undefined,autoNumber:undefined};});
    setPlan(p=>({...p,type,shared:{...p.shared,grade:p.shared.grade||first.grade||'',section:p.shared.section||first.section||'A',subject:p.shared.subject||first.subject||''},blocks:blocks.slice(0,MAX_WEEKLY_DAYS)}));}
-  else setPlan(p=>({...p,type,date:p.blocks[0]?.date||p.date,blocks:p.blocks.map(b=>({...b,grade:b.grade||p.shared.grade,section:b.section||p.shared.section||'A',subject:b.subject||p.shared.subject}))}));
+  else setPlan(p=>({...p,type,date:p.blocks[0]?.date||p.date,blocks:p.blocks.map(b=>({...b,grade:b.grade||p.shared.grade,section:b.section||p.shared.section||'A',subject:b.subject||p.shared.subject,periodNumber:undefined,autoNumber:undefined}))}));
   setWarning(null);
   try{localStorage.setItem('school-success:plan-type',type);}catch{}
  }
@@ -80,7 +108,15 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
  const fieldMessage=t('Please complete this part.','कृपया यह भाग पूरा करें।');
  const missing=(b,key)=>warning?.block===b.id&&warning.key===key;
  const select=(label,value,options,onChange,id,invalid)=><label className={'field'+(invalid?' invalid':'')}><span>{label}</span><select id={id} value={options.includes(value)?value:''} onChange={e=>onChange(e.target.value)}><option value="">{t('Select','चुनें')}</option>{options.map(v=><option key={v} value={v}>{option(v)}</option>)}</select></label>;
- const blockTitle=(b,i)=>weekly?t('Day','दिन')+' '+(i+1)+(b.date?' · '+dayLabel(b.date,language):''):t('Period','कालांश')+' '+(savedToday.length+i+1);
+ const blockTitle=(b,i)=>weekly?t('Day','दिन')+' '+(i+1)+(b.date?' · '+dayLabel(b.date,language):''):(periodName(numberOf(b),{hi,choice:true})||t('Period','कालांश')+' ?');
+ const pickPeriod=(b,n)=>updateBlock(b.id,{periodNumber:n,autoNumber:false});
+ function periodPicker(b,{label,value,taken,onPick,clash,hint,id}){
+  const invalid=!clash&&missing(b,'period')&&!value;
+  return <div className={'lp-pnum'+(clash||invalid?' invalid':'')}><span className="lp-pnum-label">{label}</span>
+   <div className="lp-pnum-row" role="radiogroup" aria-label={label}>{PERIOD_CHOICES.map(n=><button key={n} type="button" role="radio" aria-checked={value===n} aria-label={n===EXTRA?t('Extra period','अतिरिक्त कालांश'):undefined} id={n===1?id:undefined} className={'lp-pnum-btn'+(n===EXTRA?' extra':'')+(value===n?(clash?' clash':' on'):'')+(taken.has(n)&&value!==n?' taken':'')} onClick={()=>onPick(n)}>{n===EXTRA?t('Extra','अति.'):n}</button>)}</div>
+   {clash?<small className="lp-field-error">{t('Period '+clash.n+' is already planned for this day'+(clash.what?' ('+clash.what+')':' in this plan')+'. Free on this day: '+clash.free+'.','कालांश '+clash.n+' की योजना इस दिन पहले से है'+(clash.what?' ('+clash.what+')':'')+'। इस दिन खाली: '+clash.free+'।')}</small>
+   :invalid?<small className="lp-field-error">{t('Choose the period.','कालांश चुनें।')}</small>:hint?<small className="lp-pnum-hint">{hint}</small>:null}</div>;
+ }
  const typeTag=b=>b.periodType==='remedial'?t('Remedial','उपचारात्मक'):b.periodType==='substitute'?t('Substitute','स्थानापन्न'):'';
  const blockSummary=b=>{const m=merged(b);return [typeTag(b),m.grade&&option(m.grade)+(m.section&&m.section!=='Not Applicable'?' '+m.section:''),m.subject&&option(m.subject),b.topic].filter(Boolean).join(' · ');};
 
@@ -99,14 +135,16 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
     </div>
     :<div className="lp-shared single"><label className={'field'+(warning?.key==='date'?' invalid':'')}><span>{t('Lesson date','पाठ की तिथि')}</span><input type="date" value={plan.date} onChange={e=>update({date:e.target.value})}/><small>{plan.date?dayLabel(plan.date,language):''}</small></label></div>}
    {!weekly&&dayApi&&plan.date&&<DayStatus language={language} date={plan.date} api={dayApi} saved={dayNow} disabled={!day.loaded||!!busy} onSaved={s=>{setDay({date:plan.date,status:s,loaded:true});setClassAnyway(false);}}/>}
+   {weekly&&periodPicker({id:'shared'},{label:t('Usually period','सामान्य कालांश'),value:plan.shared.periodNumber||0,taken:new Set(),onPick:n=>update({shared:{...plan.shared,periodNumber:n}}),clash:null,id:'plan-shared-period',
+     hint:t('Every day of this plan takes this period; you can change a day below.','इस योजना के हर दिन यही कालांश होगा; नीचे किसी दिन को बदल सकते हैं।')})}
    {warning&&!warning.block&&<p className="lp-error" role="alert"><CircleAlert size={16}/>{topMessages[warning.key]||fieldMessage}</p>}
   </section>
 
   {savedToday.length>0&&<section className="lp-card lp-saved" aria-label={t('Already planned','पहले से योजना')}>
    <h3>{t('Already planned for ','पहले से योजना — ')+dayLabel(plan.date,language)}</h3>
    <ul>{savedToday.map(x=><li key={x.key}><button type="button" className="lp-saved-row" disabled={!onReadSaved} onClick={()=>onReadSaved?.(x.lesson.resumeToken,x.index,x.period)}>
-    <CircleCheck size={20} className="lp-saved-tick" aria-hidden="true"/><span><b>{t('Period','कालांश')} {x.number} · {[x.period.grade&&option(x.period.grade)+(x.period.section&&x.period.section!=='Not Applicable'?' '+x.period.section:''),x.period.subject&&option(x.period.subject)].filter(Boolean).join(' · ')}</b><small>{x.period.topic}</small></span><span className="pill green">{t('Saved','सहेजा गया')}</span></button></li>)}</ul>
-   {maxNew>0?<p className="hint">{t('Add the next periods below, starting with Period '+(savedToday.length+1)+'.','नीचे अगले कालांश जोड़ें — कालांश '+(savedToday.length+1)+' से।')}</p>:<p className="hint">{t('All '+MAX_DAILY_PERIODS+' periods of this day are planned. Choose another date to plan more.','इस दिन के सभी '+MAX_DAILY_PERIODS+' कालांश की योजना बन चुकी है। और योजना के लिए दूसरी तिथि चुनें।')}</p>}
+    <CircleCheck size={20} className="lp-saved-tick" aria-hidden="true"/><span><b>{x.chosen?periodName(x.number,{hi})+' · ':''}{[x.period.grade&&option(x.period.grade)+(x.period.section&&x.period.section!=='Not Applicable'?' '+x.period.section:''),x.period.subject&&option(x.period.subject)].filter(Boolean).join(' · ')}</b><small>{x.period.topic}</small></span><span className="pill green">{t('Saved','सहेजा गया')}</span></button></li>)}</ul>
+   {maxNew>0?<p className="hint">{t('Add more periods below and choose which period each one is.','नीचे और कालांश जोड़ें और हर एक का कालांश क्रमांक चुनें।')}</p>:<p className="hint">{t('All '+MAX_DAILY_PERIODS+' periods of this day are planned. Choose another date to plan more.','इस दिन के सभी '+MAX_DAILY_PERIODS+' कालांश की योजना बन चुकी है। और योजना के लिए दूसरी तिथि चुनें।')}</p>}
   </section>}
 
   {noPlan&&<section className={'lp-card ds-notice '+dayNow.status} role="status">
@@ -120,7 +158,7 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
    return <section key={b.id} data-block={b.id} ref={el=>{refs.current[b.id]=el;}} className={'lp-card lp-block'+(complete?' complete':'')+(isOpen?' open':'')}>
     <header className="lp-block-head">
      <button type="button" className="lp-block-toggle" aria-expanded={isOpen} onClick={()=>toggle(b.id)}>
-      <span className="lp-num">{complete?<Check size={16}/>:weekly?i+1:savedToday.length+i+1}</span>
+      <span className="lp-num">{complete?<Check size={16}/>:weekly?i+1:numberOf(b)===EXTRA?'X':numberOf(b)||'?'}</span>
       <span className="lp-block-title"><b>{blockTitle(b,i)}</b><small>{blockSummary(b)||t('Add class details and your plan','कक्षा का विवरण और योजना भरें')}</small>{!locked&&alreadyPlanned(b)&&<small className="lp-already">{t('A plan for this class and subject is already saved on this day.','इस दिन इस कक्षा और विषय की योजना पहले से सहेजी गई है।')}</small>}</span>
       {locked?<span className="pill green">{t('Saved','सहेजा गया')}</span>:<span className="lp-progress" aria-label={filled+' / '+fields.length}><span style={{width:(filled/fields.length*100)+'%'}}/></span>}
       <ChevronDown size={18} className="lp-chevron"/>
@@ -128,6 +166,10 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
      {plan.blocks.length>1&&!locked&&<button type="button" className="icon lp-remove" aria-label={t('Remove','हटाएँ')+' '+blockTitle(b,i)} onClick={()=>removeBlock(b.id)}><Trash2 size={16}/></button>}
     </header>
     {isOpen&&<div className="lp-block-body">
+     {weekly?periodPicker(b,{label:t('Period on this day','इस दिन का कालांश'),value:numberOf(b),taken:new Set(takenOn(b.date).keys()),onPick:n=>updateBlock(b.id,{periodNumber:n===plan.shared.periodNumber?undefined:n}),clash:clashOf(b),id:'plan-'+b.id+'-period',
+       hint:b.periodNumber&&b.periodNumber!==plan.shared.periodNumber?t('Changed for this day only','केवल इस दिन के लिए बदला गया'):plan.shared.periodNumber?t('Same as “Usually period”','“सामान्य कालांश” के समान'):t('Choose “Usually period” above, or a period for this day','ऊपर “सामान्य कालांश” चुनें या इस दिन का कालांश')})
+     :periodPicker(b,{label:t('Which period?','कौन-सा कालांश?'),value:numberOf(b),taken:new Set(takenOn(plan.date).keys()),onPick:n=>pickPeriod(b,n),clash:clashOf(b),id:'plan-'+b.id+'-period',
+       hint:takenOn(plan.date).size?t('Grey: already planned for this day','धूसर: इस दिन पहले से नियोजित'):''})}
      <div className="lp-ptype" role="radiogroup" aria-label={t('Type of period','कालांश का प्रकार')}>{periodTypeOptions.map(([v,en,hn])=>{const on=(b.periodType||'regular')===v;return <button key={v} type="button" role="radio" aria-checked={on} className={'lp-ptype-option '+v+(on?' on':'')} onClick={()=>updateBlock(b.id,{periodType:v})}>{hi?hn:en}</button>;})}</div>
      <div className={'lp-details'+(weekly?' weekly':'')}>
       {weekly?<label className={'field'+(missing(b,'date')?' invalid':'')}><span>{t('Date','तिथि')}</span><input id={'plan-'+b.id+'-date'} type="date" value={b.date||''} onChange={e=>setPlan(p=>({...p,blocks:p.blocks.map(x=>x.id===b.id?{...x,date:e.target.value}:x)}))}/></label>
