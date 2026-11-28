@@ -126,6 +126,40 @@ Code:
 
 Tests: `tests/success-review-edit.test.cjs`, `tests/success-review-highlights.test.mjs`.
 
+## 28 November 2026: day status in the Planner (owner decision, option B)
+**What the teacher sees.** On a daily plan, under the lesson date:
+- Three one-tap buttons: **Present · Half day · Absent**. Present is the default and needs no tap.
+- An **"Exam or holiday? Mark it"** link opens big tiles for School examination, Summer vacation, Winter vacation, Festival vacation and National holiday.
+
+**What each status asks for.**
+- **Half day:** which half the teacher was in school.
+- **Absent:** an optional note.
+- **Examination:** the type (Unit test, Periodic test, Term exam, Half-yearly or Annual) and From–To dates.
+- **Vacations:** From–To dates. A festival or national holiday can also have an optional name.
+
+**Effect on planning.**
+- On an absent, exam, holiday or vacation day the period forms are hidden, with "No lesson plan needed for this day".
+- Periods already planned for that day stay saved.
+- On an exam day the teacher can still add a period for a class they take.
+- On a half day the teacher is reminded to plan only that half's periods.
+
+**Principal correction.**
+- The Week overview has a **"This day"** row under each teacher.
+- Principals, coordinators and the School Success team click a day to mark or correct it, with an optional reason.
+- The teacher's planner shows "Changed by <name, role> · you marked: …".
+
+**Storage.**
+- Append-only `success_entries` rows of kind `day-status`. There is no new table, column or migration.
+- Row id: `day-status-<from>-<to>-<teacher hash>-<request id>`.
+- The latest row covering a date is that day's status. Earlier rows, such as the teacher's own mark before a correction, are kept.
+- Teachers save only their own day; the school and name come from the PIN session.
+- Staff and leaders save only for teachers on their school's list.
+- Sign-ins are never returned. Who saved a status is shown by name and role.
+
+**Not included.** Moving already-planned periods to another date, the weekly subject plan, the teacher Home screen, the principal Home and the 360° PDFs are unchanged.
+
+Code: `lib/school-success/day-status.js`, `app/api/school-success/day-status/route.js`, `app/school-success/ui/day-status.jsx`. Tests: `tests/success-day-status.test.mjs`.
+
 ## 28 November 2026: type of class period — regular, remedial, substitute (owner decision)
 **Plan form.** Each period has a switch: **Regular · Remedial · Substitute**. Regular is chosen first and keeps the full plan.
 - **Remedial** asks: what you will help with (the topic), how many children (a number or group, no names), and what you will do.
