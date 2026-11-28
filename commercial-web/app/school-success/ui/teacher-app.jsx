@@ -6,7 +6,7 @@
 import {useEffect,useState} from 'react';
 import {House,ClipboardList,Camera,MessageSquareText,ChevronRight,ArrowLeft,CircleCheck,BookOpen,CalendarDays,KeyRound,LogOut,Languages,Target,Package,Presentation,Users,PencilLine,ListChecks,NotebookPen,StickyNote,X,RefreshCw,Type,PlayCircle} from 'lucide-react';
 import {dayLabel,hindiOptions} from './lesson-plan-form';
-import {useDayStatuses,DaySheet} from './day-status';
+import {useDayStatuses,WeekSheet} from './day-status';
 import {statusLabel,shortLabel,dayStatusNames} from '@/lib/school-success/day-status';
 import {nextSchoolDay} from '@/lib/school-success/planning-guide';
 import {monthStats} from './teacher-summary';
@@ -41,7 +41,7 @@ export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,
  const {filter,cls,subject}=prefs;
  const todayKey=summary?.today||'',marks=useDayStatuses(dayApi&&todayKey?dayApi:null,todayKey?addDays(todayKey,-60):'',todayKey?addDays(todayKey,30):''),[daySheet,setDaySheet]=useState(false);
  const todayMark=marks.map.get(todayKey),markName=s=>language==='hi'?dayStatusNames[s.status][1]:shortLabel(s);
- // Home marks today or tomorrow (the next school day; owner decision, 28 November 2026).
+ // The Today line also shows the next school day's mark; Change opens the whole week (28 November 2026).
  const nextDay=todayKey?nextSchoolDay(todayKey):'',nextName=nextDay&&nextDay===addDays(todayKey,1)?t('Tomorrow','कल'):dayLabel(nextDay,language),nextMark=marks.map.get(nextDay);
  function choose(change){setPrefs(p=>{const next={...p,...change};try{localStorage.setItem(FILTER_KEY,JSON.stringify(next));}catch{}return next;});setAll(false);}
  const lessons=summary?.lessons||[],todayDate=summary?.today||'';
@@ -101,7 +101,7 @@ export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,
    {days.length>5&&!all&&<button type="button" className="text-button" onClick={()=>setAll(true)}>{t('Show all','सभी देखें')} ({days.length} {t('days','दिन')})<ChevronRight size={14}/></button>}
    {summary&&<p className="ta-note">{t('Lessons from the last 60 days and the next 30 days.','पिछले 60 और अगले 30 दिनों के पाठ।')}</p>}
   </section>
-  {daySheet&&<DaySheet language={language} title={t('Mark your day','अपना दिन चिह्नित करें')} choices={[{date:todayKey,label:t('Today','आज')+' · '+dayLabel(todayKey,language).split(',')[1]},{date:nextDay,label:nextName+(nextName===t('Tomorrow','कल')?' ·'+dayLabel(nextDay,language).split(',')[1]:'')}]} savedFor={d=>marks.map.get(d)} api={dayApi} onClose={()=>setDaySheet(false)} onSaved={()=>{setDaySheet(false);marks.reload();}}/>}
+  {daySheet&&<WeekSheet language={language} today={todayKey} savedFor={d=>marks.map.get(d)} api={dayApi} onClose={()=>setDaySheet(false)} onSaved={()=>marks.reload()}/>}
  </div>;
 }
 
