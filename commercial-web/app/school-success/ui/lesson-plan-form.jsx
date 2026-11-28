@@ -2,11 +2,13 @@
 import {useState,useRef,useEffect} from 'react';
 import {CalendarDays,CalendarRange,ChevronDown,Check,CircleCheck,Plus,Trash2,Target,Package,Presentation,Users,PencilLine,ListChecks,House,CircleAlert} from 'lucide-react';
 import {periodsOn,classOf} from '@/lib/school-success/day-periods';
-import {guide,withPlanning,planningIssue,planProblem,MAX_DAILY_PERIODS,MAX_WEEKLY_DAYS,nextSchoolDay} from '@/lib/school-success/planning-guide';
+import {guide,guideFor,withPlanning,planningIssue,planProblem,MAX_DAILY_PERIODS,MAX_WEEKLY_DAYS,nextSchoolDay} from '@/lib/school-success/planning-guide';
 import {teacherGrades,teacherSections,subjectsFor} from '@/lib/school-success/teacher-flow';
 
 export const hindiOptions={'Nursery':'नर्सरी','LKG':'एलकेजी','UKG':'यूकेजी','Not Applicable':'लागू नहीं','All Subjects Together':'सभी विषय एक साथ','Phonics / Literacy':'ध्वनि एवं साक्षरता','Mathematics':'गणित','Numeracy':'संख्या ज्ञान','English':'अंग्रेज़ी','Hindi':'हिन्दी','Environmental Studies (EVS)':'पर्यावरण अध्ययन','Science':'विज्ञान','Social Science':'सामाजिक विज्ञान','General Knowledge (GK)':'सामान्य ज्ञान','English Grammar':'अंग्रेज़ी व्याकरण','Computer':'कंप्यूटर','Play Activity':'खेल गतिविधि','Gross and fine motor activities':'स्थूल और सूक्ष्म गतिक गतिविधियाँ','Playtime':'खेल का समय','Extracurricular / co-curricular':'पाठ्येतर / सह-पाठ्यचर्या गतिविधियाँ','Stories and rhymes':'कहानियाँ और कविताएँ','Art and craft':'कला और शिल्प','Play Time':'खेल का समय','Play Based':'खेल आधारित'};
-const icons={objective:Target,materials:Package,teacher:Presentation,student:Users,practice:PencilLine,review:ListChecks,classwork:House};
+const icons={objective:Target,materials:Package,teacher:Presentation,student:Users,practice:PencilLine,review:ListChecks,classwork:House,children:Users,support:PencilLine,done:ListChecks};
+// Type of class period (owner decision, 28 November 2026); Regular is chosen first.
+const periodTypeOptions=[['regular','Regular','नियमित'],['remedial','Remedial','उपचारात्मक'],['substitute','Substitute','स्थानापन्न']];
 const months={en:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],hi:['जन','फ़र','मार्च','अप्रै','मई','जून','जुल','अग','सित','अक्टू','नव','दिस']};
 const weekdays={en:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],hi:['रवि','सोम','मंगल','बुध','गुरु','शुक्र','शनि']};
 export function dayLabel(day,language='en'){const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(day||'');if(!m)return '';const d=new Date(day+'T00:00:00Z');return weekdays[language][d.getUTCDay()]+', '+Number(m[3])+' '+months[language][Number(m[2])-1];}
@@ -65,7 +67,8 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
  const missing=(b,key)=>warning?.block===b.id&&warning.key===key;
  const select=(label,value,options,onChange,id,invalid)=><label className={'field'+(invalid?' invalid':'')}><span>{label}</span><select id={id} value={options.includes(value)?value:''} onChange={e=>onChange(e.target.value)}><option value="">{t('Select','चुनें')}</option>{options.map(v=><option key={v} value={v}>{option(v)}</option>)}</select></label>;
  const blockTitle=(b,i)=>weekly?t('Day','दिन')+' '+(i+1)+(b.date?' · '+dayLabel(b.date,language):''):t('Period','कालांश')+' '+(savedToday.length+i+1);
- const blockSummary=b=>{const m=merged(b);return [m.grade&&option(m.grade)+(m.section&&m.section!=='Not Applicable'?' '+m.section:''),m.subject&&option(m.subject),b.topic].filter(Boolean).join(' · ');};
+ const typeTag=b=>b.periodType==='remedial'?t('Remedial','उपचारात्मक'):b.periodType==='substitute'?t('Substitute','स्थानापन्न'):'';
+ const blockSummary=b=>{const m=merged(b);return [typeTag(b),m.grade&&option(m.grade)+(m.section&&m.section!=='Not Applicable'?' '+m.section:''),m.subject&&option(m.subject),b.topic].filter(Boolean).join(' · ');};
 
  return <form className="lp-form" id="teacher-submission-form" onSubmit={save} noValidate><fieldset disabled={!!busy} className="teacher-fields">
   <section className="lp-card lp-setup" ref={el=>{refs.current.top=el;}}>
@@ -91,30 +94,31 @@ export default function LessonPlanForm({language,plan,setPlan,identity,submit,bu
    {maxNew>0?<p className="hint">{t('Add the next periods below, starting with Period '+(savedToday.length+1)+'.','नीचे अगले कालांश जोड़ें — कालांश '+(savedToday.length+1)+' से।')}</p>:<p className="hint">{t('All '+MAX_DAILY_PERIODS+' periods of this day are planned. Choose another date to plan more.','इस दिन के सभी '+MAX_DAILY_PERIODS+' कालांश की योजना बन चुकी है। और योजना के लिए दूसरी तिथि चुनें।')}</p>}
   </section>}
 
-  {plan.blocks.map((b,i)=>{const locked=savedFor(b),isOpen=open.has(b.id)&&!locked,complete=!issue(b),filled=guide.filter(([k])=>b.answers?.[k]?.trim()).length;
+  {plan.blocks.map((b,i)=>{const locked=savedFor(b),isOpen=open.has(b.id)&&!locked,complete=!issue(b),fields=guideFor(b.periodType),filled=fields.filter(([k])=>b.answers?.[k]?.trim()).length;
    return <section key={b.id} data-block={b.id} ref={el=>{refs.current[b.id]=el;}} className={'lp-card lp-block'+(complete?' complete':'')+(isOpen?' open':'')}>
     <header className="lp-block-head">
      <button type="button" className="lp-block-toggle" aria-expanded={isOpen} onClick={()=>toggle(b.id)}>
       <span className="lp-num">{complete?<Check size={16}/>:weekly?i+1:savedToday.length+i+1}</span>
       <span className="lp-block-title"><b>{blockTitle(b,i)}</b><small>{blockSummary(b)||t('Add class details and your plan','कक्षा का विवरण और योजना भरें')}</small>{!locked&&alreadyPlanned(b)&&<small className="lp-already">{t('A plan for this class and subject is already saved on this day.','इस दिन इस कक्षा और विषय की योजना पहले से सहेजी गई है।')}</small>}</span>
-      {locked?<span className="pill green">{t('Saved','सहेजा गया')}</span>:<span className="lp-progress" aria-label={filled+' / '+guide.length}><span style={{width:(filled/guide.length*100)+'%'}}/></span>}
+      {locked?<span className="pill green">{t('Saved','सहेजा गया')}</span>:<span className="lp-progress" aria-label={filled+' / '+fields.length}><span style={{width:(filled/fields.length*100)+'%'}}/></span>}
       <ChevronDown size={18} className="lp-chevron"/>
      </button>
      {plan.blocks.length>1&&!locked&&<button type="button" className="icon lp-remove" aria-label={t('Remove','हटाएँ')+' '+blockTitle(b,i)} onClick={()=>removeBlock(b.id)}><Trash2 size={16}/></button>}
     </header>
     {isOpen&&<div className="lp-block-body">
+     <div className="lp-ptype" role="radiogroup" aria-label={t('Type of period','कालांश का प्रकार')}>{periodTypeOptions.map(([v,en,hn])=>{const on=(b.periodType||'regular')===v;return <button key={v} type="button" role="radio" aria-checked={on} className={'lp-ptype-option '+v+(on?' on':'')} onClick={()=>updateBlock(b.id,{periodType:v})}>{hi?hn:en}</button>;})}</div>
      <div className={'lp-details'+(weekly?' weekly':'')}>
       {weekly?<label className={'field'+(missing(b,'date')?' invalid':'')}><span>{t('Date','तिथि')}</span><input id={'plan-'+b.id+'-date'} type="date" value={b.date||''} onChange={e=>setPlan(p=>({...p,blocks:p.blocks.map(x=>x.id===b.id?{...x,date:e.target.value}:x)}))}/></label>
       :<>{select(t('Class','कक्षा'),b.grade,teacherGrades,v=>updateBlock(b.id,{grade:v}),'plan-'+b.id+'-details',missing(b,'details')&&!b.grade)}
         {select(t('Section','वर्ग'),b.section,teacherSections,v=>updateBlock(b.id,{section:v}))}
         {select(t('Subject','विषय'),b.subject,subjectsFor(b.grade),v=>updateBlock(b.id,{subject:v}),undefined,missing(b,'details')&&!subjectsFor(b.grade).includes(b.subject))}</>}
-      <label className={'field lp-topic'+(missing(b,'details')&&!b.topic?.trim()?' invalid':'')}><span>{t('Lesson number and topic','पाठ क्रमांक और विषयवस्तु')}</span><input id={weekly?'plan-'+b.id+'-details':undefined} maxLength={1000} value={b.topic} placeholder={t('Example: LP 12 — Plants around us','उदाहरण: पाठ 12 — हमारे आस-पास के पौधे')} onChange={e=>updateBlock(b.id,{topic:e.target.value})}/></label>
+      <label className={'field lp-topic'+(missing(b,'details')&&!b.topic?.trim()?' invalid':'')}><span>{b.periodType==='remedial'?t('What will you help with?','आप किसमें मदद करेंगे?'):b.periodType==='substitute'?t('Topic','विषयवस्तु'):t('Lesson number and topic','पाठ क्रमांक और विषयवस्तु')}</span><input id={weekly?'plan-'+b.id+'-details':undefined} maxLength={1000} value={b.topic} placeholder={b.periodType==='remedial'?t('Example: Carrying in 2-digit addition','उदाहरण: दो अंकों के जोड़ में हासिल'):t('Example: LP 12 — Plants around us','उदाहरण: पाठ 12 — हमारे आस-पास के पौधे')} onChange={e=>updateBlock(b.id,{topic:e.target.value})}/></label>
      </div>
      <div className="lp-fields">
-      {guide.map(([key,titles,placeholders,max])=>{const Icon=icons[key],value=b.answers?.[key]||'';
+      {fields.map(([key,titles,placeholders,max])=>{const Icon=icons[key],value=b.answers?.[key]||'';
        return <label key={key} className={'lp-field'+(key==='classwork'?' wide':'')+(missing(b,key)?' invalid':'')+(value.trim()?' filled':'')}>
         <span className="lp-field-label"><span className="lp-field-icon"><Icon size={16}/></span>{titles[hi?1:0]}{value.trim()&&<Check size={14} className="lp-tick"/>}</span>
-        <textarea id={'plan-'+b.id+'-'+key} rows={3} maxLength={max} value={value} placeholder={placeholders[hi?1:0]} onChange={e=>answer(b,key,e.target.value)}/>
+        <textarea id={'plan-'+b.id+'-'+key} rows={key==='children'?1:3} maxLength={max} value={value} placeholder={placeholders[hi?1:0]} onChange={e=>answer(b,key,e.target.value)}/>
         {missing(b,key)?<small className="lp-field-error">{fieldMessage}</small>:value.length>max*.8&&<small className="lp-count">{value.length}/{max}</small>}
        </label>;})}
      </div>

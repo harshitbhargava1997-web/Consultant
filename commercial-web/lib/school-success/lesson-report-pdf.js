@@ -6,6 +6,7 @@ import {jsPDF} from 'jspdf';
 import {regularFont,boldFont} from './report-fonts.js';
 import {visibleLessonSections,lessonSummary,groupLessons,classSubjectBreakdown,formatDay,formatStamp,classLine,defaultLessonSections,sectionOn,MAX_LESSONS_PER_PDF,isImageUrl,lessonDay} from './lesson-records.js';
 import {reviewLevels,weekLabel,weekClass} from './lesson-reviews.js';
+import {periodTypeNames} from './period-types.js';
 
 export const palette={navy:'#16323c',teal:'#127369',tealSoft:'#8fd3c8',ink:'#2b3d45',muted:'#66777e',faint:'#93a3a8',hair:'#dbe5e4',tint:'#f2f7f6',tealTint:'#e4f2ef',blue:'#2f5f8f',blueTint:'#e8eff7',plum:'#5d4a86',plumTint:'#eeebf6',amber:'#8a5a12',amberTint:'#f8f1e3',highlight:'#fff09a'};
 export const hasDevanagari=s=>/[ऀ-ॿ꣠-ꣿ]/.test(String(s||''));
@@ -245,7 +246,10 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  }
  function lessonHeader(lesson,index,total,teacherShown=false){
   const standalone=kind==='lesson';
-  if(!standalone)kicker(`Lesson ${index+1} of ${total}`+(planned&&lessonDay(lesson)?'  ·  '+shortDay(lessonDay(lesson))+(lesson.dayNumber?'  ·  Period '+lesson.dayNumber:''):''));
+  // Remedial and substitute periods are named on every lesson (period types, 28 November 2026).
+  const typeName=lesson.periodType&&lesson.periodType!=='regular'?periodTypeNames[lesson.periodType]:'';
+  if(!standalone)kicker(`Lesson ${index+1} of ${total}`+(planned&&lessonDay(lesson)?'  ·  '+shortDay(lessonDay(lesson))+(lesson.dayNumber?'  ·  Period '+lesson.dayNumber:''):'')+(typeName?'  ·  '+typeName:''));
+  else if(typeName)kicker(typeName);
   const titleLines=wrap(lesson.topic,W,standalone?20:16.5,true);
   for(const line of titleLines){drawLine(line,M,state.y,standalone?20:16.5,{bold:true,color:palette.navy});state.y+=lineHeight(standalone?20:16.5);}
   state.y+=1;
@@ -274,8 +278,8 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  // one line pointing to it. Period reviews stay with their own lesson.
  const weeklyLast=new Map(),weeklyPages=new Map(),weeklyRefs=[],weeklyCovered=new Map();
  const reviewsOf=l=>l.reviews||[];
- const reviewKind=l=>{const r=reviewsOf(l),w=r.some(x=>x.weekly),p=r.some(x=>!x.weekly)||(!r.length&&Boolean(l.feedback));return w&&p?'Weekly + Period':w?'Weekly':p?'Period':'—';};
- const reviewColor={'Weekly':palette.teal,'Period':palette.blue,'Weekly + Period':palette.navy,'—':palette.faint};
+ const reviewKind=l=>{const r=reviewsOf(l),w=r.some(x=>x.weekly),p=r.some(x=>!x.weekly)||(!r.length&&Boolean(l.feedback));return w&&p?'Weekly + Period':w?'Weekly':p?'Period':l.periodType==='substitute'?'Substitute':'—';};
+ const reviewColor={'Weekly':palette.teal,'Period':palette.blue,'Weekly + Period':palette.navy,'Substitute':palette.amber,'—':palette.faint};
  const weeklyTitle=r=>weekClass(r.weekly)+'  ·  '+weekLabel(r.weekly.weekStart,r.weekly.weekEnd);
  const whoLine=r=>[r.by,r.editedBy&&r.editedBy!==r.by?'updated by '+r.editedBy:r.editedBy?'updated':''].filter(Boolean).join(' · ');
  function refLine(text,key){
@@ -371,7 +375,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   for(const group of groups){
    if(group.label){ensure(16);if(state.page!==headPage){head();headPage=state.page;}rect(M,state.y,W,lineHeight(8)+2.4,'#fafcfb',0);drawLine(group.label,M+1.5,state.y+1.2,8,{bold:true,color:palette.navy,spacing:0.2});state.y+=lineHeight(8)+3;}
    for(const lesson of group.lessons){
-    const topic=wrap(lesson.topic,cols[1].w,8.6,true),detail=wrap(classLine(lesson)+(kind==='school'?'':''),cols[1].w,7.4);
+    const topic=wrap(lesson.topic,cols[1].w,8.6,true),detail=wrap(classLine(lesson)+(lesson.periodType&&lesson.periodType!=='regular'?'  ·  '+periodTypeNames[lesson.periodType]:''),cols[1].w,7.4);
     const when=formatStamp(lesson.submittedAt).replace(/ \d{4},/,',').replace(/ IST$/,'');
     const h=Math.max(topic.length*lineHeight(8.6)+detail.length*lineHeight(7.4),lineHeight(8.4)*(when?1:1))+3.2;
     if(state.y+h>BOTTOM){newPage();head();headPage=state.page;}

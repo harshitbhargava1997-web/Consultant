@@ -13,6 +13,7 @@ import {isReflectionTextUrl} from './reflection-text.js';
 
 // The generated preparation PDF of older lessons (see lesson-plan-items.js).
 import {isGeneratedPreparationPdf} from './lesson-plan-items.js';
+import {PERIOD_TYPE_HEADING,periodTypeOf} from './period-types.js';
 export {isGeneratedPreparationPdf};
 
 // [key, heading saved by formatReflection() in teacher-flow.js, label shown in reviews and lesson PDFs]. Only the
@@ -26,7 +27,11 @@ export const lessonPlanFields=[
  ['teacher','Teacher activity — how','Teacher activity (I do)'],
  ['student','Student activity','Student activity and participation (We do)'],
  ['practice','Practice & apply','Practice and apply (You do)'],
- ['review','Review / next step','Check learning and next steps']
+ ['review','Review / next step','Check learning and next steps'],
+ // Remedial and substitute periods (owner decision, 28 November 2026).
+ ['children','Children in this group','Children in this group'],
+ ['support','Support activity','Support activity'],
+ ['done','What was done in this class','What was done in this class']
 ];
 const CLASSWORK_LINE=/^(Classwork and homework:|कक्षा कार्य और गृहकार्य:)\s*$/m;
 // Same evidence categories, in the same order, as Teacher 360° "Teacher evidence", then the Academic Review
@@ -61,7 +66,7 @@ export const isPdfUrl=url=>extension(url)==='pdf';
 export const mediaKind=url=>isImageUrl(url)?'Photo':isAudioUrl(url)?'Audio':isVideoUrl(url)?'Video':isPdfUrl(url)?'PDF':'File';
 
 export function parseLessonPlan(reflection='',materials=''){
- const text=clean(reflection).replace(/\r\n?/g,'\n'),byHeading=new Map(lessonPlanFields.map(([key,heading])=>[heading,key]));
+ const text=clean(reflection).replace(/\r\n?/g,'\n'),byHeading=new Map([...lessonPlanFields.map(([key,heading])=>[heading,key]),[PERIOD_TYPE_HEADING,'periodType']]);
  const values={},notes=[];let current=null;
  for(const line of text.split('\n')){
   const key=byHeading.get(line.trim());
@@ -78,7 +83,7 @@ export function parseLessonPlan(reflection='',materials=''){
  const extra=clean(materials);
  // Mirrors the preparation PDF: separate materials are shown unless already written in the plan.
  if(extra&&!fields.some(f=>f.key==='materials')&&!text.includes(extra))fields.splice(Math.min(1,fields.length),0,{key:'materials',label:'Teaching-learning materials',text:extra});
- return {fields,notes:join(notes)};
+ return {fields,notes:join(notes),periodType:periodTypeOf(text)};
 }
 
 const numericId=id=>/^\d+$/.test(id)?Number(id):Number.MAX_SAFE_INTEGER;
@@ -152,7 +157,7 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
   grade:clean(first.grade),section:clean(first.section),subject:clean(first.subject),topic:clean(first.topic)||'Classroom practice',
   plannedDate:clean(first.plannedDate),conductedOn:conducted,submittedAt:prepared||submitted,firstDate,
   hasPreparation:rows.some(r=>r.stage==='preparation_saved'||r.feedStage==='Lesson preparation'),
-  scope,period:{from,to},plan,
+  scope,period:{from,to},plan,periodType:plan.periodType,
   ...Object.fromEntries(Object.entries(sections).map(([key,list])=>[key,scoped(list)])),
   outsidePeriodFiles:whole?0:all.filter(f=>!keep(f)).length,
   reviewOutsidePeriod:visibleReviews.length<history.length,

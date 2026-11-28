@@ -47,7 +47,7 @@ export async function POST(req){
    const key=JSON.stringify([input.grade,input.section&&input.section!=='Not Applicable'?input.section:'',input.subject]);
    const group=week.groups.find(g=>g.key===key);
    if(!group)throw Error('There are no lessons in this week for this class and subject.');
-   const result=await saveWeeklyReview({school:input.school,teacher:input.teacher,grade:group.grade,section:group.section,subject:group.subject,weekStart:week.from,weekEnd:week.to,recordIds:group.lessons.map(l=>l.recordId),requestId:input.requestId,review:input.review},a);
+   const result=await saveWeeklyReview({school:input.school,teacher:input.teacher,grade:group.grade,section:group.section,subject:group.subject,weekStart:week.from,weekEnd:week.to,recordIds:group.lessons.filter(l=>l.periodType!=='substitute').map(l=>l.recordId),requestId:input.requestId,review:input.review},a);
    return Response.json(result,{headers});
   }catch(e){return failure(e);}
  });

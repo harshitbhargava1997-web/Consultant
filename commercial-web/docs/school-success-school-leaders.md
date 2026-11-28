@@ -126,6 +126,24 @@ Code:
 
 Tests: `tests/success-review-edit.test.cjs`, `tests/success-review-highlights.test.mjs`.
 
+## 28 November 2026: type of class period — regular, remedial, substitute (owner decision)
+**Plan form.** Each period has a switch: **Regular · Remedial · Substitute**. Regular is chosen first and keeps the full plan.
+- **Remedial** asks: what you will help with (the topic), how many children (a number or group, no names), and what you will do.
+- **Substitute** asks: class, subject, topic, and what was done in the class.
+
+**Storage.** The type is saved inside the plan text as a "Period type" heading, followed by the short answers. There is no database change, and plans without the heading are regular lessons. See `lib/school-success/period-types.js`.
+
+**Counts.**
+- A remedial class's plan counts under **Remedial support** in Teacher 360° and School 360°, not as a lesson plan.
+- A substitute class is not a lesson plan and is not counted. It is never awaiting review, not part of the academic review counts, not covered by a weekly review, and not on the principal's "This week" chips.
+
+**Labels.**
+- Week overview cells show the period number and type: "P1 ✓ ahead", "P4 Remedial ✓", "P1 Substitute · not for review". Hovering gives the period, day, type, topic, submission time and review status.
+- Day-wise and weekly period cards show a Remedial or Substitute tag.
+- Lesson PDFs name the type on each lesson and in the index. A substitute class shows "Substitute" in the Review column.
+
+The teacher's Home screen is unchanged. Tests: `tests/success-period-types.test.mjs`.
+
 ## 28 November 2026: lesson PDFs by planned date, Week overview planning grid, principal lesson PDF (owner decision)
 **Lesson PDFs follow the planned date.**
 - Applies to the Teacher 360° report's "Open lesson documentation" PDFs, Lesson records, and the principal's download.

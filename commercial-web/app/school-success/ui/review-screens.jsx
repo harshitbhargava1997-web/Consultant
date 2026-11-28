@@ -69,7 +69,7 @@ function PeriodCard({l,showClass,open,onOpen,onClose,onSaved,actor,outside,onEdi
    else await lessonApi({action:'save',recordId:l.recordId,requestId:d.requestId.current,review});
    const was=editing;d.reset();setEditing(null);onSaved?.(was?'updated':'saved');}catch(e){setError(e.message);}finally{setSaving(false);}}
  return <article className={'wr-period'+(formOpen?' open':'')}>
-  <div className="wr-period-head"><span className="ta-pnum">Period {l.dayNumber}</span><b>{showClass?classOf(l)+' — ':''}{l.topic}</b>{l.feedback?<span className="pill green">{l.feedback.weekly?'Weekly review':'Reviewed'}</span>:<span className="pill amber">Awaiting review</span>}{!formOpen&&onOpen&&<button type="button" className="button" onClick={onOpen}><ClipboardCheck size={15}/>{l.feedback?'Add a review':'Review this period'}</button>}</div>
+  <div className="wr-period-head"><span className="ta-pnum">Period {l.dayNumber}</span>{typeName[l.periodType]&&<span className={'wr-ptype '+l.periodType}>{typeName[l.periodType]}</span>}<b>{showClass?classOf(l)+' — ':''}{l.topic}</b>{l.feedback?<span className="pill green">{l.feedback.weekly?'Weekly review':'Reviewed'}</span>:l.periodType==='substitute'?<span className="pill">Substitute · not for review</span>:<span className="pill amber">Awaiting review</span>}{!formOpen&&onOpen&&<button type="button" className="button" onClick={onOpen}><ClipboardCheck size={15}/>{l.feedback?'Add a review':'Review this period'}</button>}</div>
   {reviews.map(r=>{const can=mayEditReview(actor,{by:r.author});return <div className={'wr-done'+(editing?.key===r.key?' editing':'')} key={r.key||r.date}>
    <b>{reviewLabel(r)}</b>{r.editedBy&&<small className="wr-edited"><em>Updated</em>{r.editedBy!==r.by?'by '+r.editedBy:''}</small>}<p>{r.weekly?String(r.text).split('\n\n').slice(1).join('\n\n'):r.text}</p>
    {r.highlights?.filter(h=>String(h.record)===String(l.recordId)).length>0&&<small className="wr-hl-count"><Highlighter size={12}/>{r.highlights.filter(h=>String(h.record)===String(l.recordId)).length} highlighted in this period</small>}
@@ -180,6 +180,10 @@ function WeeklySubject({sel,set,schools,teachers,reloadKey,onSaved,actor}){
 
 // When a plan was submitted against its planned day: ✓ ahead, = same day, +n days late.
 const timingLabel=x=>x.timing==='ahead'?'✓ ahead':x.timing==='same'?'= same day':x.timing==='late'?'+'+x.daysLate+(x.daysLate===1?' day late':' days late'):'—';
+// Period number and type on every lesson (owner request, 28 November 2026): "P1 ✓ ahead", "P3 Remedial ✓", "P5 Substitute".
+const typeName={remedial:'Remedial',substitute:'Substitute'};
+const shortTiming=x=>x.timing==='ahead'?'✓':x.timing==='same'?'=':x.timing==='late'?'+'+x.daysLate:'';
+const cellLabel=x=>(x.period?'P'+x.period+' ':'')+(x.periodType==='substitute'?'Substitute':x.periodType==='remedial'?('Remedial '+shortTiming(x)).trim():timingLabel(x));
 function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
  const range=weekRange(sel.week),[view,setView]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[subject,setSubject]=useState(''),[show,setShow]=useState('all');
  useEffect(()=>{if(!sel.school){setView(null);return;}let live=true;setLoading(true);setError('');
@@ -188,7 +192,9 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
  const names=[...new Set([...roster.filter(r=>r.school===sel.school).map(r=>r.name),...planned.keys()])].sort((a,b)=>a.localeCompare(b));
  const subjects=[...new Set((view?.teachers||[]).flatMap(t=>t.groups.map(g=>g.subject)))].sort();
  const rows=names.map(name=>({name,groups:(planned.get(name)||[]).filter(g=>!subject||g.subject===subject)})).filter(r=>show==='all'||r.groups.some(g=>!g.weeklyReviewed));
- const lessons=rows.flatMap(r=>r.groups.flatMap(g=>g.lessons||[])),count=t=>lessons.filter(x=>x.timing===t).length;
+ // Substitute classes are shown but not counted (period types, 28 November 2026).
+ const shown=rows.flatMap(r=>r.groups.flatMap(g=>g.lessons||[])),lessons=shown.filter(x=>x.periodType!=='substitute'),count=t=>lessons.filter(x=>x.timing===t).length;
+ const substitutes=shown.length-lessons.length,remedial=lessons.filter(x=>x.periodType==='remedial').length;
  // Monday to Saturday, and Sunday too when something is planned for it.
  const days=[0,1,2,3,4,5,6].map(i=>addDays(range.from,i)).filter((d,i)=>i<6||lessons.some(x=>x.day===d));
  const thisWeek=weekRange(istToday()).from,lastWeek=weekRange(addDays(istToday(),-7)).from;
@@ -202,15 +208,15 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
   <div className="ta-filters wr-weeks">{[[lastWeek,'Last week'],[thisWeek,'This week']].map(([w,l])=><button key={l} type="button" className={'ta-chip'+(range.from===w?' on':'')} onClick={()=>set({week:w})}>{l}</button>)}<button type="button" className="ta-chip" onClick={()=>set({week:addDays(range.from,-7)})}><ChevronLeft size={13}/>Earlier</button><button type="button" className="ta-chip" onClick={()=>set({week:addDays(range.from,7)})}>Later<ChevronRight size={13}/></button></div>
   {error&&<p className="alert error" role="alert">{error}</p>}
   {!sel.school?<p className="hint">Choose a school.</p>:loading&&!view?<p role="status">Opening the week…</p>:view&&<>
-   <Stats items={[[lessons.length,'Lessons planned this week'],[count('ahead'),'Planned ahead'],[count('same'),'Planned the same day'],[count('late'),'Written after the lesson'],[lessons.filter(x=>x.reviewed).length+' of '+lessons.length,'Lessons reviewed']]}/>
+   <Stats items={[[lessons.length,'Lessons planned this week'+(substitutes?' (+'+substitutes+' substitute)':'')],[count('ahead'),'Planned ahead'],[count('same'),'Planned the same day'],[count('late'),'Written after the lesson'],...(remedial?[[remedial,'Remedial classes']]:[]),[lessons.filter(x=>x.reviewed).length+' of '+lessons.length,'Lessons reviewed']]}/>
    <div className="table-scroll"><table className="wo-grid"><thead><tr><th>Class · subject</th>{days.map(d=><th key={d}>{weekday(d)}</th>)}<th>This week</th><th>Weekly review</th></tr></thead><tbody>
     {rows.map(r=>{const gs=planned.get(r.name)||[];return <Fragment key={r.name}>
      <tr className="wo-t"><td colSpan={days.length+3}><button type="button" className="text-button wo-name" onClick={()=>openDay(r.name)}><b>{r.name}</b></button><small>{gs.length?gs.filter(g=>g.weeklyReviewed).length+' of '+gs.length+(gs.length===1?' subject':' subjects')+' reviewed weekly':'No plans this week'}</small><button type="button" className="text-button wo-open" onClick={()=>openDay(r.name)}>Open day-wise ›</button></td></tr>
      {!r.groups.length?<tr><td colSpan={days.length+3} className="wo-none">{gs.length?'No plans for this subject':'No lesson plans for this week'}</td></tr>
-     :r.groups.map(g=>{const ls=g.lessons||[],n=ls.length;return <tr key={g.key}><td className="wo-cs">{subjectOf(g)}</td>
-      {days.map(d=>{const here=ls.filter(x=>x.day===d);return <td key={d}>{here.length?here.map(x=><button type="button" key={x.recordId} className={'wo-pl '+(x.timing||'none')} title={(x.period?'Period '+x.period+' · ':'')+x.topic+(x.submittedAt?' · plan submitted '+formatStamp(x.submittedAt):'')} onClick={()=>openDay(r.name,d)}><b>{timingLabel(x)}</b><small className={x.reviewed?'ok':''}>{x.reviewed?(x.weekly?'● Weekly':'● Reviewed'):'○ Awaiting'}</small></button>):<span className="wo-dot">·</span>}</td>;})}
-      <td className="wo-sum">{ls.filter(x=>x.timing==='ahead').length} of {n} ahead<br/>{ls.filter(x=>x.reviewed).length} of {n} reviewed</td>
-      <td><button type="button" className={'wo-wk '+(g.weeklyReviewed?'ok':'wait')} onClick={()=>openWeekly(r.name,g.key)}>{g.weeklyReviewed?'Weekly review done':'Awaiting weekly review'}</button></td></tr>;})}
+     :r.groups.map(g=>{const all=g.lessons||[],ls=all.filter(x=>x.periodType!=='substitute'),n=ls.length;return <tr key={g.key}><td className="wo-cs">{subjectOf(g)}</td>
+      {days.map(d=>{const here=all.filter(x=>x.day===d);return <td key={d}>{here.length?here.map(x=>{const sub=x.periodType==='substitute';return <button type="button" key={x.recordId} className={'wo-pl '+(sub?'sub':(x.timing||'none'))+(x.periodType==='remedial'?' rem':'')} title={[(x.period?'Period '+x.period:'')+' · '+weekday(x.day)+(typeName[x.periodType]?' · '+typeName[x.periodType]:''),x.topic,x.submittedAt?'Plan submitted '+formatStamp(x.submittedAt)+(x.timing&&!sub?' · '+timingLabel(x):''):'',sub?'Substitute class · not for review':x.reviewed?(x.weekly?'Reviewed in the weekly review':'Reviewed'):'Not reviewed yet — click to review'].filter(Boolean).join('\n')} onClick={()=>openDay(r.name,d)}><b>{cellLabel(x)}</b><small className={x.reviewed&&!sub?'ok':''}>{sub?'not for review':x.reviewed?(x.weekly?'● Weekly':'● Reviewed'):'○ Awaiting'}</small></button>;}):<span className="wo-dot">·</span>}</td>;})}
+      <td className="wo-sum">{n?<>{ls.filter(x=>x.timing==='ahead').length} of {n} ahead<br/>{ls.filter(x=>x.reviewed).length} of {n} reviewed</>:null}{all.length>n?<>{n?<br/>:null}{all.length-n} substitute</>:null}</td>
+      <td>{n?<button type="button" className={'wo-wk '+(g.weeklyReviewed?'ok':'wait')} onClick={()=>openWeekly(r.name,g.key)}>{g.weeklyReviewed?'Weekly review done':'Awaiting weekly review'}</button>:<span className="wo-dot">—</span>}</td></tr>;})}
     </Fragment>;})}
    </tbody></table></div>
    {!rows.length&&<p className="hint">No teacher matches these filters.</p>}

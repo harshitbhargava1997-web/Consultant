@@ -471,3 +471,9 @@
 .success-app .la-pdf .la-selects{margin:0}
 .success-app .la-pdf .la-pdf-btn{width:100%;margin-top:6px;min-height:48px;font-size:15px;border-radius:12px}
 .success-app .la-pdf-count{margin:4px 0 8px}
+/* Type of class period in the plan form (28 November 2026). */
+.success-app .lp-ptype{display:flex;background:#eef2ef;border-radius:12px;padding:3px;margin:12px 0 4px;gap:2px}
+.success-app .lp-ptype-option{flex:1;text-align:center;font-size:13.5px;font-weight:700;color:#7c8984;padding:9px 4px;border-radius:10px;min-height:40px}
+.success-app .lp-ptype-option.on{background:#fff;color:var(--ink);box-shadow:0 1px 4px #0000001a}
+.success-app .lp-ptype-option.remedial.on{color:#5d4a86}.success-app .lp-ptype-option.substitute.on{color:#8a5a12}
+.success-app .lp-ptype-option:focus-visible{outline:2px solid var(--green);outline-offset:1px}

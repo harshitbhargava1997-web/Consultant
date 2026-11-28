@@ -101,7 +101,7 @@ test('lesson plan uses the stored prompt structure and never invents fields',()=
  assert.deepEqual(parseLessonPlan('Review / next step\nकक्षा कार्य और गृहकार्य:\nपृष्ठ 4').fields.map(f=>[f.key,f.text]),[['classwork','पृष्ठ 4']],'Hindi heading, no review text');
  const free=parseLessonPlan('Children practise sounds. Why — learning objective appears mid-sentence.','');
  assert.deepEqual(free.fields,[]);assert.match(free.notes,/mid-sentence/);
- assert.deepEqual(parseLessonPlan('',''),{fields:[],notes:''});
+ assert.deepEqual(parseLessonPlan('',''),{fields:[],notes:'',periodType:'regular'},'a plan without a period type is a regular lesson');
 });
 
 test('optional sections can be hidden without changing the lesson record',async()=>{

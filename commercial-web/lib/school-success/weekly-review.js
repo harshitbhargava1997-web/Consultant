@@ -36,7 +36,7 @@ export function planningOf(l){
  const submitted=istDay(l.submittedAt),day=l.plannedDate;
  const gap=submitted&&day?Math.round((Date.parse(submitted+'T00:00:00Z')-Date.parse(day+'T00:00:00Z'))/86400000):null;
  return {recordId:l.recordId,day,period:l.dayNumber||0,topic:l.topic,submittedAt:l.submittedAt||'',timing:gap===null?null:gap<0?'ahead':gap===0?'same':'late',daysLate:gap>0?gap:0,
-  reviewed:Boolean(l.feedback),weekly:Boolean(l.feedback?.weekly)||(l.reviews||[]).some(r=>r.weekly)};
+  reviewed:Boolean(l.feedback),weekly:Boolean(l.feedback?.weekly)||(l.reviews||[]).some(r=>r.weekly),periodType:l.periodType||'regular'};
 }
 
 // Week overview (owner decision, 26 November 2026): every teacher's class-and-subject weeks in one school, with the
@@ -45,7 +45,7 @@ export function weekOverview(lessons,reviewRows,week){
  const teachers=[...new Set((lessons||[]).map(l=>l.teacher))].sort((a,b)=>a.localeCompare(b));
  let from='',to='';
  const rows=teachers.map(teacher=>{const v=weekGroups(lessons.filter(l=>l.teacher===teacher),reviewRows,week);from=v.from;to=v.to;
-  return {teacher,groups:v.groups.map(g=>({key:g.key,grade:g.grade,section:g.section,subject:g.subject,periods:g.periods,reviewedPeriods:g.lessons.filter(l=>l.feedback).length,weeklyReviewed:g.reviews.length>0,
+  return {teacher,groups:v.groups.map(g=>({key:g.key,grade:g.grade,section:g.section,subject:g.subject,periods:g.periods,reviewedPeriods:g.lessons.filter(l=>l.feedback).length,weeklyReviewed:g.reviews.length>0,substitutes:g.lessons.filter(l=>l.periodType==='substitute').length,
    lessons:g.lessons.map(l=>planningOf(l))}))};}).filter(t=>t.groups.length);
  if(!from)({from,to}=weekRange(week));
  return {from,to,teachers:rows};

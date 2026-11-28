@@ -1,4 +1,5 @@
 import {formatReflection,subjectsFor} from './teacher-flow.js';
+import {PERIOD_TYPE_HEADING,periodTypeNames,periodTypeHeadings} from './period-types.js';
 // One-page lesson planning. Every field is visible at once; its guiding question and sentence starter are shown
 // as faded placeholder text inside the box (never inserted into the answer).
 // Entry: [key, [English title, Hindi title], [English placeholder, Hindi placeholder], max length, required]
@@ -15,6 +16,15 @@ export const guide = [
  ['classwork',['Classwork and homework','कक्षा कार्य और गृहकार्य'],['Classwork: … (book / workbook pages). Homework: …','कक्षा कार्य: … (पुस्तक / कार्यपुस्तिका के पृष्ठ)। गृहकार्य: …'],500,false]
 ];
 export const requiredKeys = guide.filter(g=>g[4]).map(g=>g[0]);
+// Remedial and substitute periods ask much less (owner decision, 28 November 2026). Same entry shape as guide.
+export const periodTypeGuide = {
+ remedial:[
+  ['children',['How many children?','कितने बच्चे?'],['A number or a group name — no children’s names','संख्या या समूह का नाम — बच्चों के नाम नहीं'],80,false],
+  ['support',['What will you do?','आप क्या करेंगे?'],['I will help them … by … I will check their progress by …','मैं … करके उनकी मदद करूँगा/करूँगी। प्रगति की जाँच … से करूँगा/करूँगी।'],650,false]],
+ substitute:[
+  ['done',['What was done in this class','इस कक्षा में क्या किया गया'],['Example: Read the story aloud; children answered 5 questions.','उदाहरण: कहानी पढ़ी; बच्चों ने 5 प्रश्नों के उत्तर लिखे।'],500,false]]
+};
+export const guideFor = type => periodTypeGuide[type] || guide;
 export const PLAN_TYPES = ['daily','weekly'];
 export const MAX_DAILY_PERIODS = 10, MAX_WEEKLY_DAYS = 6;
 
@@ -27,7 +37,14 @@ export function planningParts(p){
  const {classwork:_c,homework:_h,...rest}=a;
  return {...rest,practice:a.practice?.trim()||'',review:[a.review?.trim()||'',classwork?(hi?'कक्षा कार्य और गृहकार्य:\n':'Classwork and homework:\n')+classwork:''].filter(Boolean).join('\n')};
 }
-export function withPlanning(p,changes){const n={...p,...changes};return {...n,reflection:formatReflection(planningParts(n)),materials:n.answers?.materials||''};}
+// A remedial or substitute period is saved with a "Period type" heading and its own short answers.
+export function planText(p){
+ const type=p.periodType||'regular';
+ if(type==='regular')return formatReflection(planningParts(p));
+ const a=p.answers||{};
+ return [PERIOD_TYPE_HEADING+'\n'+periodTypeNames[type],...periodTypeGuide[type].filter(([key])=>a[key]?.trim()).map(([key])=>periodTypeHeadings[key]+'\n'+a[key].trim())].join('\n\n');
+}
+export function withPlanning(p,changes){const n={...p,...changes},regular=(n.periodType||'regular')==='regular';return {...n,reflection:planText(n),materials:regular?n.answers?.materials||'':''};}
 // First incomplete part of one block: 'details', 'date', a guide key, or 'length'. Empty string when complete.
 export function planningIssue(p,{needsDate=false}={}){
  // The subject must be one offered for the class (an older draft may hold "All Subjects Together", or a primary

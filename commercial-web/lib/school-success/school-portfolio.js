@@ -38,7 +38,7 @@ export const PREVIOUS_PORTAL_CATEGORIES=new Set(['audio','phonics','events','oth
 export const isPortalEvidence=file=>!PREVIOUS_PORTAL_CATEGORIES.has(fileCategory(file));
 export const lessonIdentity=row=>JSON.stringify([row.school,row.teacher,row.recordId||row.id||[row.plannedDate||row.date,row.grade,row.section,row.subject,row.topic]]);
 export function submissionStats(rows){
- const lessons=new Map(),preparations=new Set(),classroomLessons=new Set(),files=new Map(),teachers=new Set(),savedPlans=new Set();
+ const lessons=new Map(),preparations=new Set(),classroomLessons=new Set(),files=new Map(),teachers=new Set(),savedPlans=new Set(),remedialPlans=new Set();
  for(const row of rows){
   const lesson=lessonIdentity(row),reviewed=Boolean(row.review?.trim());
   lessons.set(lesson,Boolean(lessons.get(lesson))||reviewed);
@@ -47,13 +47,15 @@ export function submissionStats(rows){
   // uploaded file, so it is not in the file totals.
   for(const file of evidenceFiles(row)){
    if(file.lessonPlan){savedPlans.add(JSON.stringify([row.school,row.teacher,evidenceKey(file)]));continue;}
+   // A remedial class's plan counts under Remedial support (period types, 28 November 2026); it is not an uploaded file.
+   if(file.remedialPlan){remedialPlans.add(JSON.stringify([row.school,row.teacher,file.key]));continue;}
    if(!file.url||!isPortalEvidence(file))continue;
    const key=JSON.stringify([row.school,row.teacher,file.url]),category=fileCategory(file);
    files.set(key,{...file,category,teacher:row.teacher,date:row.date});teachers.add(teacherKey(row.school,row.teacher));
    if(category!=='preparation')classroomLessons.add(lesson);
   }
  }
- const categories=Object.fromEntries(portfolioCategories.filter(([key])=>key!=='all').map(([key])=>[key,[...files.values()].filter(f=>f.category===key).length+(key==='preparation'?savedPlans.size:0)]));
+ const categories=Object.fromEntries(portfolioCategories.filter(([key])=>key!=='all').map(([key])=>[key,[...files.values()].filter(f=>f.category===key).length+(key==='preparation'?savedPlans.size:0)+(key==='remedial'?remedialPlans.size:0)]));
  return {preparations:preparations.size,classroomLessons:classroomLessons.size,files:files.size,teachersWithFiles:teachers.size,pendingReview:[...lessons.values()].filter(reviewed=>!reviewed).length,categories};
 }
 function aggregate(name,profiles,submissions,from,to,settings,calendars){
