@@ -12,6 +12,7 @@ import {formatDay,formatStamp} from '@/lib/school-success/lesson-records';
 import {reviewCriteria,reviewLevels,weekLabel,reviewerLabel,mayEditReview} from '@/lib/school-success/lesson-reviews';
 import {sentences,markKey,toggleMark,lessonMarks} from '@/lib/school-success/highlights';
 import {weekRange} from '@/lib/school-success/day-periods';
+import {periodName} from '@/lib/school-success/period-number';
 import {shortLabel,statusLabel} from '@/lib/school-success/day-status';
 import DayStatus from './day-status';
 import './lesson-records.css';
@@ -72,7 +73,7 @@ function PeriodCard({l,showClass,open,onOpen,onClose,onSaved,actor,outside,onEdi
    else await lessonApi({action:'save',recordId:l.recordId,requestId:d.requestId.current,review});
    const was=editing;d.reset();setEditing(null);onSaved?.(was?'updated':'saved');}catch(e){setError(e.message);}finally{setSaving(false);}}
  return <article className={'wr-period'+(formOpen?' open':'')}>
-  <div className="wr-period-head"><span className="ta-pnum">Period {l.dayNumber}</span>{typeName[l.periodType]&&<span className={'wr-ptype '+l.periodType}>{typeName[l.periodType]}</span>}<b>{showClass?classOf(l)+' — ':''}{l.topic}</b>{l.feedback?<span className="pill green">{l.feedback.weekly?'Weekly review':'Reviewed'}</span>:l.periodType==='substitute'?<span className="pill">Substitute · not for review</span>:<span className="pill amber">Awaiting review</span>}{!formOpen&&onOpen&&<button type="button" className="button" onClick={onOpen}><ClipboardCheck size={15}/>{l.feedback?'Add a review':'Review this period'}</button>}</div>
+  <div className="wr-period-head"><span className="ta-pnum">{periodName(l.dayNumber)}</span>{typeName[l.periodType]&&<span className={'wr-ptype '+l.periodType}>{typeName[l.periodType]}</span>}<b>{showClass?classOf(l)+' — ':''}{l.topic}</b>{l.feedback?<span className="pill green">{l.feedback.weekly?'Weekly review':'Reviewed'}</span>:l.periodType==='substitute'?<span className="pill">Substitute · not for review</span>:<span className="pill amber">Awaiting review</span>}{!formOpen&&onOpen&&<button type="button" className="button" onClick={onOpen}><ClipboardCheck size={15}/>{l.feedback?'Add a review':'Review this period'}</button>}</div>
   {reviews.map(r=>{const can=mayEditReview(actor,{by:r.author});return <div className={'wr-done'+(editing?.key===r.key?' editing':'')} key={r.key||r.date}>
    <b>{reviewLabel(r)}</b>{r.editedBy&&<small className="wr-edited"><em>Updated</em>{r.editedBy!==r.by?'by '+r.editedBy:''}</small>}<p>{r.weekly?String(r.text).split('\n\n').slice(1).join('\n\n'):r.text}</p>
    {r.highlights?.filter(h=>String(h.record)===String(l.recordId)).length>0&&<small className="wr-hl-count"><Highlighter size={12}/>{r.highlights.filter(h=>String(h.record)===String(l.recordId)).length} highlighted in this period</small>}
@@ -85,11 +86,11 @@ function PeriodCard({l,showClass,open,onOpen,onClose,onSaved,actor,outside,onEdi
   {(l.writtenReflections||[]).map(r=><div className="wr-reflection" key={r.url}><span>After-class reflection</span>{['achievement','nextStep'].filter(k=>r.answers?.[k]).map(k=><MarkText key={k} record={l.recordId} field={'reflection.'+k} text={r.answers[k]} {...marking}/>)}</div>)}
   <Files title="After-class reflection" files={l.reflections}/>
   {!hasEvidence(l)&&!hasReflection(l)&&<p className="hint">No classroom evidence or reflection yet.</p>}
-  {formOpen&&<form className="wr-inline" onSubmit={save}><h4>{editing?'Edit review · Period '+l.dayNumber:'Review Period '+l.dayNumber}</h4>{error&&<p className="alert error" role="alert">{error}</p>}
+  {formOpen&&<form className="wr-inline" onSubmit={save}><h4>{editing?'Edit review · '+periodName(l.dayNumber):'Review '+periodName(l.dayNumber)}</h4>{error&&<p className="alert error" role="alert">{error}</p>}
    {editing&&<p className="hint">The earlier version is kept. {l.teacher||'The teacher'} will see this review as updated{editing.notedAt?' and can mark it noted again':''}.</p>}
    <Ratings draft={d.draft} edit={d.edit} disabled={saving}/>
    <p className="wr-hl-count"><Highlighter size={12}/>{d.marks.length?d.marks.length+(d.marks.length===1?' line':' lines')+' highlighted':'No lines highlighted'}</p>
-   <div className="modal-actions"><button type="button" className="button" disabled={saving} onClick={close}>Cancel</button><button className="button primary" disabled={saving||!ratingsReady(d.draft)}>{saving?'Saving…':editing?'Save changes':'Save review for Period '+l.dayNumber}</button></div></form>}
+   <div className="modal-actions"><button type="button" className="button" disabled={saving} onClick={close}>Cancel</button><button className="button primary" disabled={saving||!ratingsReady(d.draft)}>{saving?'Saving…':editing?'Save changes':'Save review for '+periodName(l.dayNumber)}</button></div></form>}
  </article>;
 }
 function Stats({items}){return <div className="wr-stats">{items.map(([n,l])=><div key={l}><strong>{n}</strong><span>{l}</span></div>)}</div>;}
@@ -128,7 +129,7 @@ function DayWise({sel,set,schools,teachers,reloadKey,onSaved,actor}){
   :!day.length?<p className="hint">{sel.teacher} has no lesson plans for {longDay(sel.date)}.</p>
   :<>
    <Stats items={[[day.length,'Periods planned'],[day.filter(hasEvidence).length,'With classroom evidence'],[day.filter(hasReflection).length,'With after-class reflection'],[day.filter(l=>l.feedback).length,'Reviewed']]}/>
-   {shown.map(l=><PeriodCard key={l.key} l={l} showClass actor={actor} open={open===l.key} onOpen={()=>setOpen(l.key)} onClose={()=>setOpen('')} onSaved={how=>{setOpen('');reload();onSaved?.((how==='updated'?'Review updated for Period ':'Review saved for Period ')+l.dayNumber+'. '+sel.teacher+' will see it in their Feedback tab.');}}/>)}
+   {shown.map(l=><PeriodCard key={l.key} l={l} showClass actor={actor} open={open===l.key} onOpen={()=>setOpen(l.key)} onClose={()=>setOpen('')} onSaved={how=>{setOpen('');reload();onSaved?.((how==='updated'?'Review updated for ':'Review saved for ')+periodName(l.dayNumber)+'. '+sel.teacher+' will see it in their Feedback tab.');}}/>)}
    {!shown.length&&<p className="hint">Every period of this day has been reviewed.</p>}
   </>}
  </>;
@@ -164,7 +165,7 @@ function WeeklySubject({sel,set,schools,teachers,reloadKey,onSaved,actor}){
   :!groups.length?<p className="hint">{sel.teacher} has no lesson plans for {weekLabel(range.from,range.to)}.</p>
   :group&&<>
    <Stats items={[[group.periods,'Periods planned'],[group.withEvidence,'With classroom evidence'],[group.reflections,'With after-class reflection'],[group.lessons.filter(l=>l.feedback).length,'Reviewed']]}/>
-   {days.map(day=><div className="wr-day" key={day}><h3>{weekday(day)}</h3>{group.lessons.filter(l=>l.plannedDate===day).map(l=><PeriodCard key={l.key} l={l} actor={actor} outside={weeklyMarks} onEditWeekly={r=>{const w=group.reviews.find(x=>x.id===r.key);if(w)startEdit(w);}} open={open===l.key} onOpen={()=>setOpen(l.key)} onClose={()=>setOpen('')} onSaved={how=>{setOpen('');reload();onSaved?.((how==='updated'?'Review updated for Period ':'Review saved for Period ')+l.dayNumber+'.');}}/>)}</div>)}
+   {days.map(day=><div className="wr-day" key={day}><h3>{weekday(day)}</h3>{group.lessons.filter(l=>l.plannedDate===day).map(l=><PeriodCard key={l.key} l={l} actor={actor} outside={weeklyMarks} onEditWeekly={r=>{const w=group.reviews.find(x=>x.id===r.key);if(w)startEdit(w);}} open={open===l.key} onOpen={()=>setOpen(l.key)} onClose={()=>setOpen('')} onSaved={how=>{setOpen('');reload();onSaved?.((how==='updated'?'Review updated for ':'Review saved for ')+periodName(l.dayNumber)+'.');}}/>)}</div>)}
    {group.reviews.length>0&&<section className="wr-earlier"><h3>Weekly reviews for this week</h3>{group.reviews.map(r=><div className={'lr-review'+(editing?.id===r.id?' editing':'')} key={r.id}><b>{formatDay(String(r.date).slice(0,10))}{r.by?' · '+reviewerLabel(r.by):''}</b>
     {r.editedBy&&<small className="wr-edited"><em>Updated</em>{reviewerLabel(r.editedBy)!==reviewerLabel(r.by)?'by '+reviewerLabel(r.editedBy):''}</small>}<p>{String(r.text).split('\n\n').slice(1).join('\n\n')}</p>
     {r.highlights?.length>0&&<small className="wr-hl-count"><Highlighter size={12}/>{r.highlights.length} {r.highlights.length===1?'line':'lines'} highlighted</small>}
@@ -186,7 +187,7 @@ const timingLabel=x=>x.timing==='ahead'?'✓ ahead':x.timing==='same'?'= same da
 // Period number and type on every lesson (owner request, 28 November 2026): "P1 ✓ ahead", "P3 Remedial ✓", "P5 Substitute".
 const typeName={remedial:'Remedial',substitute:'Substitute'};
 const shortTiming=x=>x.timing==='ahead'?'✓':x.timing==='same'?'=':x.timing==='late'?'+'+x.daysLate:'';
-const cellLabel=x=>(x.period?'P'+x.period+' ':'')+(x.periodType==='substitute'?'Substitute':x.periodType==='remedial'?('Remedial '+shortTiming(x)).trim():timingLabel(x));
+const cellLabel=x=>(x.period?periodName(x.period,{short:true})+' ':'')+(x.periodType==='substitute'?'Substitute':x.periodType==='remedial'?('Remedial '+shortTiming(x)).trim():timingLabel(x));
 function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
  const range=weekRange(sel.week),[view,setView]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[subject,setSubject]=useState(''),[show,setShow]=useState('all');
  useEffect(()=>{if(!sel.school){setView(null);return;}let live=true;setLoading(true);setError('');
@@ -225,7 +226,7 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
        onClick={()=>{setDayNotice('');setDayEdit({teacher:r.name,date:d,saved:s||null});}}>{s?<>{shortLabel(s)}{s.changedByLeader&&<em>✎</em>}</>:<span aria-label="Present">·</span>}</button></td>;})}<td colSpan={2}/></tr>
      {!r.groups.length?<tr><td colSpan={days.length+3} className="wo-none">{gs.length?'No plans for this subject':'No lesson plans for this week'}</td></tr>
      :r.groups.map(g=>{const all=g.lessons||[],ls=all.filter(x=>x.periodType!=='substitute'),n=ls.length;return <tr key={g.key}><td className="wo-cs">{subjectOf(g)}</td>
-      {days.map(d=>{const here=all.filter(x=>x.day===d);return <td key={d}>{here.length?here.map(x=>{const sub=x.periodType==='substitute';return <button type="button" key={x.recordId} className={'wo-pl '+(sub?'sub':(x.timing||'none'))+(x.periodType==='remedial'?' rem':'')} title={[(x.period?'Period '+x.period:'')+' · '+weekday(x.day)+(typeName[x.periodType]?' · '+typeName[x.periodType]:''),x.topic,x.submittedAt?'Plan submitted '+formatStamp(x.submittedAt)+(x.timing&&!sub?' · '+timingLabel(x):''):'',sub?'Substitute class · not for review':x.reviewed?(x.weekly?'Reviewed in the weekly review':'Reviewed'):'Not reviewed yet — click to review'].filter(Boolean).join('\n')} onClick={()=>openDay(r.name,d)}><b>{cellLabel(x)}</b><small className={x.reviewed&&!sub?'ok':''}>{sub?'not for review':x.reviewed?(x.weekly?'● Weekly':'● Reviewed'):'○ Awaiting'}</small></button>;}):<span className="wo-dot">·</span>}</td>;})}
+      {days.map(d=>{const here=all.filter(x=>x.day===d);return <td key={d}>{here.length?here.map(x=>{const sub=x.periodType==='substitute';return <button type="button" key={x.recordId} className={'wo-pl '+(sub?'sub':(x.timing||'none'))+(x.periodType==='remedial'?' rem':'')} title={[(x.period?periodName(x.period):'')+' · '+weekday(x.day)+(typeName[x.periodType]?' · '+typeName[x.periodType]:''),x.topic,x.submittedAt?'Plan submitted '+formatStamp(x.submittedAt)+(x.timing&&!sub?' · '+timingLabel(x):''):'',sub?'Substitute class · not for review':x.reviewed?(x.weekly?'Reviewed in the weekly review':'Reviewed'):'Not reviewed yet — click to review'].filter(Boolean).join('\n')} onClick={()=>openDay(r.name,d)}><b>{cellLabel(x)}</b><small className={x.reviewed&&!sub?'ok':''}>{sub?'not for review':x.reviewed?(x.weekly?'● Weekly':'● Reviewed'):'○ Awaiting'}</small></button>;}):<span className="wo-dot">·</span>}</td>;})}
       <td className="wo-sum">{n?<>{ls.filter(x=>x.timing==='ahead').length} of {n} ahead<br/>{ls.filter(x=>x.reviewed).length} of {n} reviewed</>:null}{all.length>n?<>{n?<br/>:null}{all.length-n} substitute</>:null}</td>
       <td>{n?<button type="button" className={'wo-wk '+(g.weeklyReviewed?'ok':'wait')} onClick={()=>openWeekly(r.name,g.key)}>{g.weeklyReviewed?'Weekly review done':'Awaiting weekly review'}</button>:<span className="wo-dot">—</span>}</td></tr>;})}
     </Fragment>;})}

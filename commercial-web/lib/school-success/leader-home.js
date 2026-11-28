@@ -6,7 +6,7 @@ import {groupKey} from './weekly-review.js';
 import {weekRange} from './day-periods.js';
 import {istDay,formatDay} from './lesson-records.js';
 import {weekLabel,weekClass} from './lesson-reviews.js';
-import {assignPeriodNumbers} from './period-number.js';
+import {assignPeriodNumbers,periodName} from './period-number.js';
 
 const addDays=(day,n)=>new Date(Date.parse(day+'T00:00:00Z')+n*86400000).toISOString().slice(0,10);
 export const MAX_RANGE_DAYS=100;
@@ -85,7 +85,7 @@ export function feedbackItems(lessons,{from,to},{teacher='',subject='',type='all
      text:stripHeading(r.text),date:r.date,by:r.by,notedAt:r.notedAt,week:r.weekly.weekStart,group:groupKey(l),day:dayOf(l)});
    }else{
     const id='period|'+l.key+'|'+(r.key||r.date),n=numbers.get(l.key);
-    items.set(id,{id,type:'period',teacher:l.teacher,subject:l.subject,title:(n?'Period '+n:'Period review')+(dayOf(l)?' · '+formatDay(dayOf(l)):''),
+    items.set(id,{id,type:'period',teacher:l.teacher,subject:l.subject,title:(n?periodName(n):'Period review')+(dayOf(l)?' · '+formatDay(dayOf(l)):''),
      detail:classLabel(l)+' · '+l.topic,text:r.text,date:r.date,by:r.by,notedAt:r.notedAt,week:weekRange(dayOf(l)||day).from,group:groupKey(l),day:dayOf(l)});
    }
   }

@@ -526,3 +526,5 @@
 .success-app .lp-pnum-btn.clash{border:2px solid #c0574b;background:#fbecea;color:#9a3a30}
 .success-app .lp-pnum-hint{margin-top:5px}
 .success-app .lp-pnum.invalid .lp-field-error{display:block;margin-top:6px;background:#fbecea;color:#9a3a30;border-radius:8px;padding:6px 9px;font-size:12px}
+.success-app .lp-pnum-btn.extra{font-size:11.5px;padding:0;letter-spacing:-.2px}
+.success-app .lp-pnum-btn.extra.on{border-color:#b06a12;background:#fbf0de;color:#8a5a12}

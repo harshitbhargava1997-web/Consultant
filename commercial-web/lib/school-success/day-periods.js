@@ -19,7 +19,8 @@ export function planDays(lessons){
   // A period's chosen number (period.number, 1–8) when it has one; older plans keep save order (28 November 2026).
   const list=items.flatMap(({lesson})=>(lesson.periods||[]).map((period,index)=>({key:lesson.id+':'+index,lesson,index,period})));
   const numbers=assignPeriodNumbers(list,x=>x.period.number||0);
-  return {date,periods:list.map((x,i)=>({...x,number:numbers.get(x),order:i})).sort((a,b)=>a.number-b.number||a.order-b.order).map(({order,...x})=>x)};
+  // chosen: the teacher picked this period (older plans did not, and never block a number in the planner).
+  return {date,periods:list.map((x,i)=>({...x,number:numbers.get(x),chosen:Boolean(x.period.number),order:i})).sort((a,b)=>a.number-b.number||a.order-b.order).map(({order,...x})=>x)};
  });
 }
 export const periodsOn=(lessons,date)=>planDays(lessons).find(d=>d.date===date)?.periods||[];

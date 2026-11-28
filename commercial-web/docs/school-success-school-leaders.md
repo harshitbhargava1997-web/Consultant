@@ -127,10 +127,11 @@ Code:
 Tests: `tests/success-review-edit.test.cjs`, `tests/success-review-highlights.test.mjs`.
 
 ## 28 November 2026: real period number (owner decision)
-**What the teacher chooses.** Every lesson has a **"Which period?" 1–8** choice, so P-numbers match the school timetable instead of the order plans were saved.
-- **Daily plan:** the lowest free number for that date is filled in, and the teacher taps another number if needed. Numbers already planned that day are grey.
+**What the teacher chooses.** Every lesson has a **"Which period?"** choice of **1–7 or Extra**, so P-numbers match the school timetable instead of the order plans were saved.
+- **Extra:** zero period, before or after school, or a revision or extra class. It never clashes and a day can have several. It is shown as "Extra", after Period 7, on teacher screens, in lesson reviews, in the Week overview and in the Teacher 360° lesson PDFs.
+- **Daily plan:** the lowest free period for that date is filled in, or Extra when 1–7 are all planned. The teacher taps another number if needed. Numbers already chosen that day are grey.
 - **Weekly subject plan:** **"Usually period"** at the top applies to every day. A day can be changed on its own, shown as "Changed for this day only".
-- **Clashes:** choosing a number already planned on that day shows "Period N is already planned for this day (subject · class). Choose another period." The plan cannot be submitted until it is changed.
+- **Clashes:** choosing a number already planned on that day shows "Period N is already planned for this day (subject · class). Free on this day: 1 · 3 · 5 · Extra." On a weekly plan only that day is affected. The plan cannot be submitted until it is changed.
 - **Switching plan type:** moving between Daily and Weekly clears the chosen numbers. Daily fills free numbers again; Weekly asks for "Usually period".
 
 **Storage.** The number is stored as a "Period number" heading at the start of the saved plan text. There is no database change.
@@ -142,7 +143,7 @@ Tests: `tests/success-review-edit.test.cjs`, `tests/success-review-highlights.te
 - Principal Home feedback ("Period 4 · Tue 1 Dec").
 - Lesson PDFs, including the index and teaching order.
 
-**Older plans** have no number. On their day they keep save order and take the numbers the numbered lessons leave free, so existing days read as before.
+**Older plans** have no number. On their day they keep save order and take the numbers the numbered lessons leave free, so existing days read as before. In the planner they are listed without a period and **never block a number**.
 
 Code: `lib/school-success/period-number.js`. Tests: `tests/success-period-number.test.mjs`.
 

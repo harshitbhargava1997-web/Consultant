@@ -3,6 +3,7 @@
 // canvas rasteriser (jsPDF cannot shape Indic scripts); all other text stays selectable.
 // Evidence URLs are the existing stored links; nothing here creates or widens access.
 import {jsPDF} from 'jspdf';
+import {periodName} from './period-number.js';
 import {regularFont,boldFont} from './report-fonts.js';
 import {visibleLessonSections,lessonSummary,groupLessons,classSubjectBreakdown,formatDay,formatStamp,classLine,defaultLessonSections,sectionOn,MAX_LESSONS_PER_PDF,isImageUrl,lessonDay} from './lesson-records.js';
 import {reviewLevels,weekLabel,weekClass} from './lesson-reviews.js';
@@ -248,7 +249,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   const standalone=kind==='lesson';
   // Remedial and substitute periods are named on every lesson (period types, 28 November 2026).
   const typeName=lesson.periodType&&lesson.periodType!=='regular'?periodTypeNames[lesson.periodType]:'';
-  if(!standalone)kicker(`Lesson ${index+1} of ${total}`+(planned&&lessonDay(lesson)?'  ·  '+shortDay(lessonDay(lesson))+(lesson.dayNumber?'  ·  Period '+lesson.dayNumber:''):'')+(typeName?'  ·  '+typeName:''));
+  if(!standalone)kicker(`Lesson ${index+1} of ${total}`+(planned&&lessonDay(lesson)?'  ·  '+shortDay(lessonDay(lesson))+(lesson.dayNumber?'  ·  '+periodName(lesson.dayNumber):''):'')+(typeName?'  ·  '+typeName:''));
   else if(typeName)kicker(typeName);
   const titleLines=wrap(lesson.topic,W,standalone?20:16.5,true);
   for(const line of titleLines){drawLine(line,M,state.y,standalone?20:16.5,{bold:true,color:palette.navy});state.y+=lineHeight(standalone?20:16.5);}
@@ -380,7 +381,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
     const h=Math.max(topic.length*lineHeight(8.6)+detail.length*lineHeight(7.4),lineHeight(8.4)*(when?1:1))+3.2;
     if(state.y+h>BOTTOM){newPage();head();headPage=state.page;}
     const top=state.y+1.4;let x=M;
-    drawLine((kind==='school'?shortDay(lessonDay(lesson))+'  ':'')+(lesson.dayNumber?'P'+lesson.dayNumber:'—'),x,top,8.4,{bold:true,color:palette.ink});x+=cols[0].w+1.5;
+    drawLine((kind==='school'?shortDay(lessonDay(lesson))+'  ':'')+(lesson.dayNumber?periodName(lesson.dayNumber,{short:true}):'—'),x,top,8.4,{bold:true,color:palette.ink});x+=cols[0].w+1.5;
     topic.forEach((line,k)=>drawLine(line,x,top+k*lineHeight(8.6),8.6,{bold:true,color:palette.navy}));
     detail.forEach((line,k)=>drawLine(line,x,top+topic.length*lineHeight(8.6)+k*lineHeight(7.4),7.4,{color:palette.muted}));
     x+=cols[1].w+1.5;
