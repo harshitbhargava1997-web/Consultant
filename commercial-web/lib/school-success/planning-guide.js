@@ -82,7 +82,8 @@ export function planSubmissions({type,date,shared,blocks,school,teacher}){
  if(type==='weekly'){
   return blocks.map(b=>({id:b.submissionId,school,teacher,date:b.date,periods:[strip(numbered({...b,grade:shared.grade,section:shared.section,subject:shared.subject},b.periodNumber||shared.periodNumber))],block:b.id}));
  }
- return [{id:shared.submissionId,school,teacher,date,periods:blocks.map(b=>strip(numbered(b,b.periodNumber))),block:null}];
+ // Daily plans carry no chosen period (owner decision, 28 November 2026): the day's free numbers in save order.
+ return [{id:shared.submissionId,school,teacher,date,periods:blocks.map(b=>strip(numbered(b,0))),block:null}];
 }
 // Problems that apply across blocks (shown at the top of the form).
 export function planProblem({type,date,shared,blocks}){

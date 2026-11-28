@@ -549,3 +549,7 @@
 .success-app .ta-daytag{display:inline-block;font-style:normal;font-size:10.5px;font-weight:800;border-radius:6px;padding:2px 7px;margin-left:7px;vertical-align:1px;background:#eef2ef;color:#4d5c57}
 .success-app .ta-daytag.half-day{background:#fbf3d9;color:#7a6110}.success-app .ta-daytag.absent{background:#fbecea;color:#9a3a30}.success-app .ta-daytag.exam{background:#e9f0f9;color:#2b4c7a}
 .success-app .ta-daytag.summer,.success-app .ta-daytag.winter,.success-app .ta-daytag.festival,.success-app .ta-daytag.national,.success-app .ta-daytag.other{background:#f1ecf7;color:#4d3868}
+.success-app .ds-weekbar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0 8px}.success-app .ds-weekbar b{font-size:13px}.success-app .ds-weekbar button{color:var(--green);font-weight:800;font-size:13.5px;padding:4px 6px;min-width:28px}
+.success-app .ds-week-row{max-width:none}.success-app .lp-week-day.tdy{box-shadow:inset 0 -3px 0 var(--green)}.success-app .lp-week-day.picked{outline:2px solid var(--green);outline-offset:1px}
+.success-app .ds-week-day{font-weight:800;font-size:14px;margin:12px 0 0;color:var(--ink)}.success-app .ds-week-sheet .ds-label{display:none}
+.success-app .ds-notice-change{display:block;margin:0 0 8px;font-size:13px}

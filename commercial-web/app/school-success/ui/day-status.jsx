@@ -6,7 +6,8 @@
 // control to correct a teacher's day (leader mode); the teacher's own mark is kept.
 import {useEffect,useMemo,useState} from 'react';
 import {CalendarOff,Check,X} from 'lucide-react';
-import {dayStatusNames,examNames,halfNames,EXAM_TYPES,RANGE_STATUSES,statusLabel} from '@/lib/school-success/day-status';
+import {dayStatusNames,examNames,halfNames,EXAM_TYPES,RANGE_STATUSES,statusLabel,shortLabel,addDays} from '@/lib/school-success/day-status';
+import {weekRange} from '@/lib/school-success/day-periods';
 import {reviewerLabel} from '@/lib/school-success/lesson-reviews';
 
 const tiles=[['exam','📝'],['summer','☀️'],['winter','❄️'],['festival','🪔'],['national','🇮🇳'],['other','🗓️']];
@@ -87,13 +88,42 @@ export function useDayStatuses(api,from,to){
  },[key,tick,!!api]);
  return {map:state.key===key?state.map:new Map(),loaded:state.key===key&&state.loaded,reload:()=>setTick(n=>n+1)};
 }
-// The day-status control in a bottom sheet, for one date (Home "Today", a day of the weekly plan's strip).
+// The day-status control in a bottom sheet, for one date (a day of the weekly plan's strip, a marked day in the
+// daily plan).
 export function DaySheet({language='en',date,title,api,saved,onClose,onSaved}){
- const t=(en,hn)=>language==='hi'?hn:en;
+ const t=(en,hn)=>language==='hi'?hn:en,day=date;
  useEffect(()=>{const k=e=>{if(e.key==='Escape')onClose();};addEventListener('keydown',k);return ()=>removeEventListener('keydown',k);},[]);
  return <><div className="ta-sheet-bg" onClick={onClose}/><div className="ta-sheet ds-day-sheet" role="dialog" aria-modal="true" aria-label={title}>
   <div className="ta-grab"/><button type="button" className="ta-sheet-x icon" aria-label={t('Close','बंद करें')} onClick={onClose}><X size={18}/></button>
   <h3 className="ds-day-title">{title}</h3>
-  <DayStatus language={language} date={date} api={api} saved={saved||null} onSaved={s=>onSaved?.(s)}/>
+  <DayStatus key={day} language={language} date={day} api={api} saved={saved||null} onSaved={s=>onSaved?.(s,day)}/>
+ </div></>;
+}
+
+// Home "Mark your days" (owner decision, 28 November 2026): the same Mon–Sat strip as the weekly subject plan, today
+// underlined and picked; any day of this week (past days too), and earlier or later weeks, can be marked. The sheet
+// stays open after saving so several days can be marked. savedFor(date) → that day's status (or undefined).
+const weekdayNames={en:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],hi:['रवि','सोम','मंगल','बुध','गुरु','शुक्र','शनि']};
+const dayName=(d,hi)=>weekdayNames[hi?'hi':'en'][new Date(d+'T00:00:00Z').getUTCDay()]+', '+short(d);
+export function WeekSheet({language='en',today,api,savedFor,onClose,onSaved}){
+ const hi=language==='hi',t=(en,hn)=>hi?hn:en;
+ const isSunday=new Date(today+'T00:00:00Z').getUTCDay()===0,thisWeek=weekRange(today).from,home=isSunday?addDays(thisWeek,7):thisWeek;
+ const [start,setStart]=useState(home),[pick,setPick]=useState(isSunday?home:today),[msg,setMsg]=useState('');
+ useEffect(()=>{const k=e=>{if(e.key==='Escape')onClose();};addEventListener('keydown',k);return ()=>removeEventListener('keydown',k);},[]);
+ const days=[0,1,2,3,4,5].map(i=>addDays(start,i)),first=addDays(thisWeek,-56),last=addDays(thisWeek,21);
+ function move(n){const s=addDays(start,7*n);setStart(s);setPick(s<=today&&today<=addDays(s,5)?today:s);setMsg('');}
+ const label=start===thisWeek?t('This week','इस सप्ताह'):start===addDays(thisWeek,7)?t('Next week','अगला सप्ताह'):start===addDays(thisWeek,-7)?t('Last week','पिछला सप्ताह'):t('Week','सप्ताह');
+ const name=s=>hi?dayStatusNames[s.status][1]:shortLabel(s);
+ return <><div className="ta-sheet-bg" onClick={onClose}/><div className="ta-sheet ds-day-sheet ds-week-sheet" role="dialog" aria-modal="true" aria-label={t('Mark your days','अपने दिन चिह्नित करें')}>
+  <div className="ta-grab"/><button type="button" className="ta-sheet-x icon" aria-label={t('Close','बंद करें')} onClick={onClose}><X size={18}/></button>
+  <h3 className="ds-day-title">{t('Mark your days','अपने दिन चिह्नित करें')}</h3>
+  <div className="ds-weekbar"><button type="button" aria-label={t('Earlier week','पिछला सप्ताह')} disabled={start<=first} onClick={()=>move(-1)}>‹</button>
+   <b>{label} · {short(days[0])} – {short(days[5])}</b>
+   <button type="button" aria-label={t('Later week','अगला सप्ताह')} disabled={start>=last} onClick={()=>move(1)}>{start===thisWeek?t('Next week','अगला सप्ताह')+' ›':'›'}</button></div>
+  <div className="lp-week-row ds-week-row">{days.map(d=>{const s=savedFor(d);return <button type="button" key={d} aria-pressed={pick===d} className={'lp-week-day '+(s?s.status:'present')+(pick===d?' picked':'')+(d===today?' tdy':'')} onClick={()=>{setPick(d);setMsg('');}}>
+   <b>{dayName(d,hi).split(',')[0]} {Number(d.slice(8))}</b><small>{s?name(s):t('Present','उपस्थित')}</small></button>;})}</div>
+  {msg&&<p className="ds-done" role="status"><Check size={13}/> {msg}</p>}
+  <p className="ds-week-day">{dayName(pick,hi)}{pick===today?' · '+t('Today','आज'):''}</p>
+  <DayStatus key={pick} language={language} date={pick} api={api} saved={savedFor(pick)||null} onSaved={s=>{setMsg(t('Saved','सहेजा गया')+' · '+dayName(pick,hi)+': '+(s?statusLabel(s,language):t('Present','उपस्थित')));onSaved?.(s,pick);}}/>
  </div></>;
 }

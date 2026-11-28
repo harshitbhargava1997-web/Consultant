@@ -6,8 +6,9 @@
 import {useEffect,useState} from 'react';
 import {House,ClipboardList,Camera,MessageSquareText,ChevronRight,ArrowLeft,CircleCheck,BookOpen,CalendarDays,KeyRound,LogOut,Languages,Target,Package,Presentation,Users,PencilLine,ListChecks,NotebookPen,StickyNote,X,RefreshCw,Type,PlayCircle} from 'lucide-react';
 import {dayLabel,hindiOptions} from './lesson-plan-form';
-import {useDayStatuses,DaySheet} from './day-status';
+import {useDayStatuses,WeekSheet} from './day-status';
 import {statusLabel,shortLabel,dayStatusNames} from '@/lib/school-success/day-status';
+import {nextSchoolDay} from '@/lib/school-success/planning-guide';
 import {monthStats} from './teacher-summary';
 import {parsePlanText,planSectionTitles} from '@/lib/school-success/plan-text';
 import {sentences} from '@/lib/school-success/highlights';
@@ -40,6 +41,8 @@ export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,
  const {filter,cls,subject}=prefs;
  const todayKey=summary?.today||'',marks=useDayStatuses(dayApi&&todayKey?dayApi:null,todayKey?addDays(todayKey,-60):'',todayKey?addDays(todayKey,30):''),[daySheet,setDaySheet]=useState(false);
  const todayMark=marks.map.get(todayKey),markName=s=>language==='hi'?dayStatusNames[s.status][1]:shortLabel(s);
+ // The Today line also shows the next school day's mark; Change opens the whole week (28 November 2026).
+ const nextDay=todayKey?nextSchoolDay(todayKey):'',nextName=nextDay&&nextDay===addDays(todayKey,1)?t('Tomorrow','कल'):dayLabel(nextDay,language),nextMark=marks.map.get(nextDay);
  function choose(change){setPrefs(p=>{const next={...p,...change};try{localStorage.setItem(FILTER_KEY,JSON.stringify(next));}catch{}return next;});setAll(false);}
  const lessons=summary?.lessons||[],todayDate=summary?.today||'';
  const periodsToday=summary?periodsOn(lessons,todayDate):[];
@@ -68,7 +71,7 @@ export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,
     <div className="ta-today-chips">{periodsToday.map(x=><button type="button" key={x.key} className="ta-today-chip" onClick={()=>onRead(x.lesson.resumeToken,x.index,x.period)}><BookOpen size={14}/><span>{periodName(x.number)} · {classLabel(x.period,o)}</span></button>)}</div>
     {periodsToday[0]&&<button type="button" className="ta-cta" onClick={()=>onEvidence(periodsToday[0].lesson.resumeToken,0)}><Camera size={18}/>{t('Add evidence for today','आज के प्रमाण जोड़ें')}</button>}
    </>}
-     {dayApi&&summary&&<div className="ta-dayline"><span>{t('Today','आज')}: <b>{todayMark?statusLabel(todayMark,language):t('Present','उपस्थित')}</b></span><button type="button" onClick={()=>setDaySheet(true)}>{t('Change','बदलें')}</button></div>}
+     {dayApi&&summary&&<div className="ta-dayline"><span>{t('Today','आज')}: <b>{todayMark?statusLabel(todayMark,language):t('Present','उपस्थित')}</b>{nextMark&&<> · {nextName}: <b>{statusLabel(nextMark,language)}</b></>}</span><button type="button" onClick={()=>setDaySheet(true)}>{t('Change','बदलें')}</button></div>}
   </section>
   <div className="ta-stats">
    <div className="ta-stat"><b>{summary?s.planned:'–'}</b><span>{t('Lessons planned in ','योजना बनाई — ')+month}</span></div>
@@ -98,7 +101,7 @@ export function TeacherHome({summary,language,teacher,school,newFeedback,onRead,
    {days.length>5&&!all&&<button type="button" className="text-button" onClick={()=>setAll(true)}>{t('Show all','सभी देखें')} ({days.length} {t('days','दिन')})<ChevronRight size={14}/></button>}
    {summary&&<p className="ta-note">{t('Lessons from the last 60 days and the next 30 days.','पिछले 60 और अगले 30 दिनों के पाठ।')}</p>}
   </section>
-  {daySheet&&<DaySheet language={language} date={todayKey} title={t('Today','आज')+' · '+dayLabel(todayKey,language)} api={dayApi} saved={todayMark} onClose={()=>setDaySheet(false)} onSaved={()=>{setDaySheet(false);marks.reload();}}/>}
+  {daySheet&&<WeekSheet language={language} today={todayKey} savedFor={d=>marks.map.get(d)} api={dayApi} onClose={()=>setDaySheet(false)} onSaved={()=>marks.reload()}/>}
  </div>;
 }
 

@@ -45,13 +45,14 @@ test('numbering: chosen numbers kept, older plans take the free numbers in save 
  assert.deepEqual([periodName(101),periodName(102,{short:true}),periodName(3),periodName(3,{short:true}),periodName(EXTRA,{choice:true}),periodName(4,{hi:true})],['Extra','Extra','Period 3','P3','Extra','कालांश 4']);
 });
 
-test('weekly plan: each day takes "Usually period" unless changed; daily plan keeps each block\'s number', () => {
+test('weekly plan: each day takes "Usually period" unless changed; daily plan saves no period number', () => {
  const day=(date,extra={})=>withPlanning({id:crypto.randomUUID(),submissionId:crypto.randomUUID(),date,topic:'LP',answers:{objective:'O'},answerLanguage:'en',...extra},{});
  const subs=planSubmissions({type:'weekly',shared:{grade:'Grade 2',section:'A',subject:'English',periodNumber:4},blocks:[day('2026-11-30'),day('2026-12-04',{periodNumber:6})],school:S,teacher:A});
  assert.deepEqual(subs.map(s=>periodNumberOf(s.periods[0].reflection)),[4,6]);
  assert.ok(subs.every(s=>!('periodNumber' in s.periods[0])&&!('autoNumber' in s.periods[0])),'only the plan text carries the number');
  const daily=planSubmissions({type:'daily',date:'2026-12-01',shared:{submissionId:crypto.randomUUID()},blocks:[day('',{periodNumber:3,autoNumber:true,grade:'Grade 3',subject:'Hindi'}),day('',{periodNumber:1,grade:'Grade 3',subject:'English'})],school:S,teacher:A});
- assert.deepEqual(daily[0].periods.map(p=>periodNumberOf(p.reflection)),[3,1]);
+ assert.deepEqual(daily[0].periods.map(p=>periodNumberOf(p.reflection)),[0,0],'daily plans take the day\'s free numbers in save order (28 November 2026)');
+ assert.ok(daily[0].periods.every(p=>!/Period number/.test(p.reflection)));
 });
 
 test('lesson records, Week overview, day-wise review and principal feedback use the real period', async () => {
