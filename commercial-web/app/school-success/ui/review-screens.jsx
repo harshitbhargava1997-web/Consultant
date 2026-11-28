@@ -189,7 +189,8 @@ const typeName={remedial:'Remedial',substitute:'Substitute'};
 const shortTiming=x=>x.timing==='ahead'?'✓':x.timing==='same'?'=':x.timing==='late'?'+'+x.daysLate:'';
 const cellLabel=x=>(x.period?periodName(x.period,{short:true})+' ':'')+(x.periodType==='substitute'?'Substitute':x.periodType==='remedial'?('Remedial '+shortTiming(x)).trim():timingLabel(x));
 function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
- const range=weekRange(sel.week),[view,setView]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[subject,setSubject]=useState(''),[show,setShow]=useState('all');
+ const range=weekRange(sel.week),[view,setView]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[subject,setSubject]=useState(''),[show,setShow]=useState('all'),[who,setWho]=useState('');
+ useEffect(()=>{setWho('');},[sel.school]);
  useEffect(()=>{if(!sel.school){setView(null);return;}let live=true;setLoading(true);setError('');
   weeklyApi({action:'overview',school:sel.school,week:range.from}).then(d=>{if(live)setView(d);}).catch(e=>{if(live){setError(e.message);setView(null);}}).finally(()=>{if(live)setLoading(false);});return ()=>{live=false;};},[sel.school,range.from,reloadKey]);
  // Day status (owner decision, 28 November 2026): what each teacher marked each day; the principal can correct it.
@@ -200,7 +201,10 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
  const planned=new Map((view?.teachers||[]).map(t=>[t.teacher,t.groups]));
  const names=[...new Set([...roster.filter(r=>r.school===sel.school).map(r=>r.name),...planned.keys()])].sort((a,b)=>a.localeCompare(b));
  const subjects=[...new Set((view?.teachers||[]).flatMap(t=>t.groups.map(g=>g.subject)))].sort();
- const rows=names.map(name=>({name,groups:(planned.get(name)||[]).filter(g=>!subject||g.subject===subject)})).filter(r=>show==='all'||r.groups.some(g=>!g.weeklyReviewed));
+ // Filters (owner request, 28 November 2026): one teacher or all, one subject or all, and all subjects or only those
+ // still awaiting their weekly review (a class and subject with lessons to review and no weekly review yet).
+ const awaiting=g=>!g.weeklyReviewed&&(g.lessons||[]).some(x=>x.periodType!=='substitute');
+ const rows=names.filter(name=>!who||name===who).map(name=>({name,groups:(planned.get(name)||[]).filter(g=>(!subject||g.subject===subject)&&(show==='all'||awaiting(g)))})).filter(r=>show==='all'||r.groups.length);
  // Substitute classes are shown but not counted (period types, 28 November 2026).
  const shown=rows.flatMap(r=>r.groups.flatMap(g=>g.lessons||[])),lessons=shown.filter(x=>x.periodType!=='substitute'),count=t=>lessons.filter(x=>x.timing===t).length;
  const substitutes=shown.length-lessons.length,remedial=lessons.filter(x=>x.periodType==='remedial').length;
@@ -211,8 +215,9 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
   <p className="hint">Every teacher's lessons this week, by class and subject and by day: when each plan was submitted (✓ ahead, = same day, +n days late) and whether it is reviewed. Tap a lesson for the day-wise review; tap the weekly review to open it.</p>
   <Pickers schools={schools} school={sel.school} setSchool={v=>set({school:v})} teachers={[]}>
    <label className="field"><span>Week</span><input type="date" value={range.from} onChange={e=>e.target.value&&set({week:weekRange(e.target.value).from})}/><small>{weekLabel(range.from,range.to)}</small></label>
+   <label className="field"><span>Teacher</span><select value={who} onChange={e=>setWho(e.target.value)}><option value="">All teachers</option>{names.map(n=><option key={n}>{n}</option>)}</select></label>
    <label className="field"><span>Subject</span><select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">All subjects</option>{subjects.map(s=><option key={s}>{s}</option>)}</select></label>
-   <label className="field"><span>Show</span><select value={show} onChange={e=>setShow(e.target.value)}><option value="all">All teachers</option><option value="awaiting">With a subject awaiting review</option></select></label>
+   <label className="field"><span>Show</span><select value={show} onChange={e=>setShow(e.target.value)}><option value="all">All subjects</option><option value="awaiting">Subjects awaiting weekly review</option></select></label>
   </Pickers>
   <div className="ta-filters wr-weeks">{[[lastWeek,'Last week'],[thisWeek,'This week']].map(([w,l])=><button key={l} type="button" className={'ta-chip'+(range.from===w?' on':'')} onClick={()=>set({week:w})}>{l}</button>)}<button type="button" className="ta-chip" onClick={()=>set({week:addDays(range.from,-7)})}><ChevronLeft size={13}/>Earlier</button><button type="button" className="ta-chip" onClick={()=>set({week:addDays(range.from,7)})}>Later<ChevronRight size={13}/></button></div>
   {error&&<p className="alert error" role="alert">{error}</p>}
@@ -231,7 +236,7 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
       <td>{n?<button type="button" className={'wo-wk '+(g.weeklyReviewed?'ok':'wait')} onClick={()=>openWeekly(r.name,g.key)}>{g.weeklyReviewed?'Weekly review done':'Awaiting weekly review'}</button>:<span className="wo-dot">—</span>}</td></tr>;})}
     </Fragment>;})}
    </tbody></table></div>
-   {!rows.length&&<p className="hint">No teacher matches these filters.</p>}
+   {!rows.length&&<p className="hint">{show==='awaiting'?'Nothing is awaiting a weekly review for these filters.':'No teacher matches these filters.'}</p>}
   </>}
   {dayNotice&&<p className="alert success" role="status">{dayNotice}</p>}
   {dayEdit&&<div className="modal-backdrop" onClick={e=>{if(e.target===e.currentTarget)setDayEdit(null);}}><section role="dialog" aria-modal="true" aria-labelledby="ds-title" className="modal ds-modal">
