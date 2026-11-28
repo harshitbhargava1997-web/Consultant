@@ -126,6 +126,15 @@ Code:
 
 Tests: `tests/success-review-edit.test.cjs`, `tests/success-review-highlights.test.mjs`.
 
+## 28 November 2026: Week overview filters (owner request)
+The Week overview has a **Teacher** picker: All teachers, or one teacher.
+
+**Show** offers two choices:
+- **All subjects**
+- **Subjects awaiting weekly review:** only the class-and-subject rows that have lessons to review and no weekly review yet. Teachers with nothing awaiting are hidden, and substitute-only rows never count as awaiting.
+
+The stats above the grid follow the chosen filters. The Teacher choice resets when the school changes.
+
 ## 28 November 2026: real period number (owner decision)
 **What the teacher chooses.** Every lesson has a **"Which period?"** choice of **1–7 or Extra**, so P-numbers match the school timetable instead of the order plans were saved.
 - **Extra:** zero period, before or after school, or a revision or extra class. It never clashes and a day can have several. It is shown as "Extra", after Period 7, on teacher screens, in lesson reviews, in the Week overview and in the Teacher 360° lesson PDFs.
