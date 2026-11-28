@@ -126,6 +126,11 @@ Code:
 
 Tests: `tests/success-review-edit.test.cjs`, `tests/success-review-highlights.test.mjs`.
 
+## 28 November 2026: simpler daily plan; Home marks today or tomorrow (owner decision)
+- **Daily plan, period numbers:** there are no "Which period?" buttons. New periods show the day's next free numbers ("Period 1", "Period 3") and are saved without a chosen number, so they take the day's free numbers in save order. The weekly subject plan keeps "Usually period" and its per-day choice.
+- **Daily plan, day status:** there are no Present / Half day / Absent buttons. A date already marked (from Home, the weekly strip or the principal) still shows "No lesson plan needed…" or the half-day reminder, with a **Change** link.
+- **Home:** **Change** under "Today: …" offers **Today** and **Tomorrow**, where Tomorrow is the next school day (Monday when today is Saturday). The line also shows tomorrow's status when one is marked, for example "Today: Present · Mon, 30 Nov: Absent".
+
 ## 28 November 2026: weekly subject plan first; day status from Home and the weekly plan (owner decision)
 - **Plan order:** the Weekly subject plan is the first box and is selected for teachers who have not chosen yet. Daily plan is second. The phone remembers each teacher's last choice.
 - **"This week" strip in the weekly plan:** Mon–Sat of the plan's week, each showing that day's status (Present by default).

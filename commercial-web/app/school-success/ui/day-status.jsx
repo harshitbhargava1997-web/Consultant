@@ -87,13 +87,16 @@ export function useDayStatuses(api,from,to){
  },[key,tick,!!api]);
  return {map:state.key===key?state.map:new Map(),loaded:state.key===key&&state.loaded,reload:()=>setTick(n=>n+1)};
 }
-// The day-status control in a bottom sheet, for one date (Home "Today", a day of the weekly plan's strip).
-export function DaySheet({language='en',date,title,api,saved,onClose,onSaved}){
+// The day-status control in a bottom sheet, for one date (a day of the weekly plan's strip, a marked day in the
+// daily plan). choices (Home): [{date,label}] — Today and Tomorrow — with savedFor(date) giving each day's status.
+export function DaySheet({language='en',date,title,api,saved,savedFor,choices,onClose,onSaved}){
  const t=(en,hn)=>language==='hi'?hn:en;
+ const [pick,setPick]=useState(date||choices?.[0]?.date||''),day=choices?pick:date;
  useEffect(()=>{const k=e=>{if(e.key==='Escape')onClose();};addEventListener('keydown',k);return ()=>removeEventListener('keydown',k);},[]);
  return <><div className="ta-sheet-bg" onClick={onClose}/><div className="ta-sheet ds-day-sheet" role="dialog" aria-modal="true" aria-label={title}>
   <div className="ta-grab"/><button type="button" className="ta-sheet-x icon" aria-label={t('Close','बंद करें')} onClick={onClose}><X size={18}/></button>
   <h3 className="ds-day-title">{title}</h3>
-  <DayStatus language={language} date={date} api={api} saved={saved||null} onSaved={s=>onSaved?.(s)}/>
+  {choices&&<div className="ds-seg ds-when" role="radiogroup" aria-label={title}>{choices.map(c=><button key={c.date} type="button" role="radio" aria-checked={pick===c.date} className={pick===c.date?'on':''} onClick={()=>setPick(c.date)}>{c.label}</button>)}</div>}
+  <DayStatus key={day} language={language} date={day} api={api} saved={(savedFor?savedFor(day):saved)||null} onSaved={s=>onSaved?.(s,day)}/>
  </div></>;
 }
