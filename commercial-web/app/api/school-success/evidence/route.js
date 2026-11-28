@@ -4,6 +4,7 @@ import { actor, database, checkOrigin, failure, assertConsultant } from '@/lib/s
 import { gateway, publicBase } from '@/lib/school-success/live';
 import { currentMediaUrl } from '@/lib/school-success/live-mapping';
 import { feedbackKey } from '@/lib/school-success/feedback-notes';
+import { periodNumberOf } from '@/lib/school-success/period-number';
 import { reviewerLabel, reviewerFromSignIn, weekLabel } from '@/lib/school-success/lesson-reviews';
 import { scopedSubmission, evidencePlan, submissionRecords } from '@/lib/school-success/teacher-submissions';
 import { seal, unseal, r2UploadsConfigured, r2Request, loadR2Config } from '@/lib/school-success/r2-evidence';
@@ -65,7 +66,7 @@ async function handlerPOST(req, timing = {}) {
                     lesson = { id: row.submission_id, plannedOn: row.planned_lesson_on, order: Number(row.id) || 0, periods: [], resumeToken: await seal({ kind: 'lesson-resume', id: row.submission_id, school, teacher, email: a.email, exp: Date.now() + 365 * 86400000 }, signer) };
                     grouped.set(row.submission_id, lesson);
                 }
-                const period = { id: row.lesson_period_id || '', grade: row.Grade || '', section: row.Section || '', subject: row.Subject || '', topic: row.Book || '', evidence: row.lesson_stage === 'evidence_submitted' };
+                const period = { id: row.lesson_period_id || '', grade: row.Grade || '', section: row.Section || '', subject: row.Subject || '', topic: row.Book || '', number: periodNumberOf(row.lesson_reflection), evidence: row.lesson_stage === 'evidence_submitted' };
                 lesson.periods.push(period);
                 byRecord.set(String(row.id), { lesson, period });
             }

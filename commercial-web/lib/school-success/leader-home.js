@@ -6,6 +6,7 @@ import {groupKey} from './weekly-review.js';
 import {weekRange} from './day-periods.js';
 import {istDay,formatDay} from './lesson-records.js';
 import {weekLabel,weekClass} from './lesson-reviews.js';
+import {assignPeriodNumbers,periodName} from './period-number.js';
 
 const addDays=(day,n)=>new Date(Date.parse(day+'T00:00:00Z')+n*86400000).toISOString().slice(0,10);
 export const MAX_RANGE_DAYS=100;
@@ -31,7 +32,8 @@ export function dayNumbers(lessons){
  const days=new Map();
  for(const l of lessons){const d=dayOf(l);if(!d)continue;const k=l.teacher+'|'+d;if(!days.has(k))days.set(k,[]);days.get(k).push(l);}
  const out=new Map();
- for(const list of days.values())list.sort((a,b)=>numeric(a.recordId)-numeric(b.recordId)).forEach((l,i)=>out.set(l.key,i+1));
+ // The chosen period number when the plan has one; otherwise save order (28 November 2026).
+ for(const list of days.values()){list.sort((a,b)=>numeric(a.recordId)-numeric(b.recordId));for(const [l,n] of assignPeriodNumbers(list,l=>l.periodNumber||0))out.set(l.key,n);}
  return out;
 }
 
@@ -83,7 +85,7 @@ export function feedbackItems(lessons,{from,to},{teacher='',subject='',type='all
      text:stripHeading(r.text),date:r.date,by:r.by,notedAt:r.notedAt,week:r.weekly.weekStart,group:groupKey(l),day:dayOf(l)});
    }else{
     const id='period|'+l.key+'|'+(r.key||r.date),n=numbers.get(l.key);
-    items.set(id,{id,type:'period',teacher:l.teacher,subject:l.subject,title:(n?'Period '+n:'Period review')+(dayOf(l)?' · '+formatDay(dayOf(l)):''),
+    items.set(id,{id,type:'period',teacher:l.teacher,subject:l.subject,title:(n?periodName(n):'Period review')+(dayOf(l)?' · '+formatDay(dayOf(l)):''),
      detail:classLabel(l)+' · '+l.topic,text:r.text,date:r.date,by:r.by,notedAt:r.notedAt,week:weekRange(dayOf(l)||day).from,group:groupKey(l),day:dayOf(l)});
    }
   }
