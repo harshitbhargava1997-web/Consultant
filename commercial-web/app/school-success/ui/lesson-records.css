@@ -158,3 +158,9 @@
 .success-app .wo-wk{font-size:11px;font-weight:700;border-radius:8px;padding:4px 8px;white-space:nowrap;border:0;cursor:pointer}
 .success-app .wo-wk.ok{background:#e8f5ec;color:#1f6f45}.success-app .wo-wk.wait{background:#fff4df;color:#8a5a12}
 .success-app .wo-grid .wo-none{text-align:left;color:#a3aea9;font-size:12px}
+/* Period types (28 November 2026). */
+.success-app .wo-pl.rem b{background:#f2ecf8;color:#5d4a86}
+.success-app .wo-pl.sub b{background:#fbf1e3;color:#8a5a12;border:1px dashed #d9b77e}
+.success-app .wr-ptype{font-size:11px;font-weight:800;border-radius:999px;padding:2px 8px}.success-app .wr-ptype.remedial{background:#f2ecf8;color:#5d4a86}.success-app .wr-ptype.substitute{background:#fbf1e3;color:#8a5a12}
+.success-app .wo-grid .wo-wk{white-space:normal;max-width:120px;line-height:1.25}
+.success-app .wo-grid .wo-open{white-space:nowrap}

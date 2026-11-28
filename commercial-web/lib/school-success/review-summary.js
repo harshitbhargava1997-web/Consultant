@@ -3,12 +3,14 @@
 // a weekly review that covers it — whenever the review was given. Weekly reviews are listed once each, with their
 // ratings and focus for next week.
 import {reviewLevels,weekLabel,weekClass,reviewerLabel} from './lesson-reviews.js';
+import {isSubstitute} from './period-types.js';
 const recordOf=r=>String(r.recordId||String(r.id||'').split(':')[0]);
 // rows: report entries (kind 'submission') already limited to the school, teacher(s) and dates of the report.
 export function reviewSummary(rows){
  const lessons=new Map(),weekly=new Map();
  for(const r of rows||[]){
-  if(r.kind!=='submission'||!r.stage)continue;
+  // A substitute class is not reviewed and not counted (period types, 28 November 2026).
+  if(r.kind!=='submission'||!r.stage||isSubstitute(r.reflection))continue;
   const id=recordOf(r),history=r.reviewHistory||[];
   const l=lessons.get(id)||{teacher:r.teacher,school:r.school,reviewed:false,weekly:false,single:false};
   for(const h of history){

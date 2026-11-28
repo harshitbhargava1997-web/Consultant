@@ -1,4 +1,5 @@
 import {reflectionPrompts} from './teacher-flow.js';
+import {PERIOD_TYPE_HEADING,periodTypeHeadings} from './period-types.js';
 // Splits a saved lesson plan (the preparation text saved by the lesson plan form under the six standard headings)
 // back into readable sections, for the teacher's "Read plan" screen. Classwork and homework, saved inside the review
 // section, become their own section. Text that does not use the headings (older or free-form notes) is returned as
@@ -12,12 +13,16 @@ export const planSectionTitles = {
  practice: ['Practice and apply (You do)', 'अभ्यास और उपयोग (आप करें)'],
  review: ['Check learning and next steps', 'सीख की जाँच और आगे के कदम'],
  classwork: ['Classwork and homework', 'कक्षा कार्य और गृहकार्य'],
- notes: ['Your notes', 'आपके नोट्स']
+ notes: ['Your notes', 'आपके नोट्स'],
+ periodType: ['Type of period', 'कालांश का प्रकार'],
+ children: ['Children in this group', 'इस समूह के बच्चे'],
+ support: ['Support activity', 'सहायता गतिविधि'],
+ done: ['What was done in this class', 'इस कक्षा में क्या किया गया']
 };
 export function parsePlanText(text) {
  const raw = String(text || '').replace(/\r\n?/g, '\n').trim();
  if (!raw) return [];
- const labels = new Map(reflectionPrompts.map(([key, label]) => [label, key]));
+ const labels = new Map([...reflectionPrompts.map(([key, label]) => [label, key]), [PERIOD_TYPE_HEADING, 'periodType'], ...Object.entries(periodTypeHeadings).map(([key, label]) => [label, key])]);
  const sections = [];
  let current = null;
  const before = [];

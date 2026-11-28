@@ -37,7 +37,7 @@ export function buildProfiles(entries, roster, from, to, settings, calendars = {
         for (const r of submissions)
             for (const f of evidenceFiles(r)) {
                 const evidenceFile = { ...f, date:r.date, grade:r.grade, section:r.section || '', subject:r.subject, topic:r.topic };
-                if(isRemedialFile(f)){remedialMap.set(f.url,evidenceFile);continue;}
+                if(isRemedialFile(f)){remedialMap.set(f.url||f.key,evidenceFile);continue;}
                 if(isClosureFile(f)){closureMap.set(f.url,evidenceFile);continue;}
                 const column = f.column || String(f.key).split(':')[0];
                 if (!byColumn.has(column)) byColumn.set(column, new Map());

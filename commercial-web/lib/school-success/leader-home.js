@@ -38,7 +38,8 @@ export function dayNumbers(lessons){
 // lessons: lesson records for every loaded date; {from,to}: the chosen dates (by planned date).
 export function leaderHome(lessons,roster,{from,to},{teacher='',subject=''}={}){
  const keep=l=>(!teacher||l.teacher===teacher)&&(!subject||l.subject===subject);
- const inRange=(lessons||[]).filter(l=>{const d=dayOf(l);return d&&d>=from&&d<=to&&keep(l);});
+ // Substitute classes are not reviewed or counted here (period types, 28 November 2026).
+ const inRange=(lessons||[]).filter(l=>{const d=dayOf(l);return d&&d>=from&&d<=to&&keep(l)&&l.periodType!=='substitute';});
  const names=[...new Set((roster||[]).map(r=>r.name).concat(inRange.map(l=>l.teacher)))].filter(n=>n&&(!teacher||n===teacher));
  const rows=names.map(name=>{
   const mine=inRange.filter(l=>l.teacher===name),groups=new Map();
