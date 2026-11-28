@@ -129,13 +129,14 @@ Tests: `tests/success-review-edit.test.cjs`, `tests/success-review-highlights.te
 ## 28 November 2026: day status in the Planner (owner decision, option B)
 **What the teacher sees.** On a daily plan, under the lesson date:
 - Three one-tap buttons: **Present · Half day · Absent**. Present is the default and needs no tap.
-- An **"Exam or holiday? Mark it"** link opens big tiles for School examination, Summer vacation, Winter vacation, Festival vacation and National holiday.
+- An **"Exam or holiday? Mark it"** link opens big tiles for School examination, Summer vacation, Winter vacation, Festival vacation, National holiday and Additional holiday.
 
 **What each status asks for.**
 - **Half day:** which half the teacher was in school.
 - **Absent:** an optional note.
 - **Examination:** the type (Unit test, Periodic test, Term exam, Half-yearly or Annual) and From–To dates.
 - **Vacations:** From–To dates. A festival or national holiday can also have an optional name.
+- **Additional holiday:** for any other holiday the school gives, such as a sports day or a local fair. It needs a name, plus From–To dates.
 
 **Effect on planning.**
 - On an absent, exam, holiday or vacation day the period forms are hidden, with "No lesson plan needed for this day".

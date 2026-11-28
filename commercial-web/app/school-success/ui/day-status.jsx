@@ -9,7 +9,7 @@ import {CalendarOff,Check,X} from 'lucide-react';
 import {dayStatusNames,examNames,halfNames,EXAM_TYPES,RANGE_STATUSES,statusLabel} from '@/lib/school-success/day-status';
 import {reviewerLabel} from '@/lib/school-success/lesson-reviews';
 
-const tiles=[['exam','📝'],['summer','☀️'],['winter','❄️'],['festival','🪔'],['national','🇮🇳']];
+const tiles=[['exam','📝'],['summer','☀️'],['winter','❄️'],['festival','🪔'],['national','🇮🇳'],['other','🗓️']];
 const short=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(d||'');return m?Number(m[3])+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(m[2])-1]:'';};
 export const rangeText=s=>s.from===s.to?short(s.from):short(s.from)+' – '+short(s.to);
 const blank=date=>({status:'present',half:'',exam:'',name:'',note:'',from:date,to:date});
@@ -54,8 +54,8 @@ export default function DayStatus({language='en',date,api,saved,onSaved,leader=f
    <div className="ds-seg" role="radiogroup">{['first','second'].map(h=><button key={h} type="button" role="radio" aria-checked={draft.half===h} disabled={off} className={draft.half===h?'on':''} onClick={()=>change({half:h})}>{halfNames[h][hi?1:0]}</button>)}</div></div>}
   {draft.status==='exam'&&<div className="ds-detail"><span className="ds-sub">{t('Which examination?','कौन-सी परीक्षा?')}</span>
    <div className="ds-pills" role="radiogroup">{EXAM_TYPES.map(k=><button key={k} type="button" role="radio" aria-checked={draft.exam===k} disabled={off} className={draft.exam===k?'on':''} onClick={()=>change({exam:k})}>{examNames[k][hi?1:0]}</button>)}</div></div>}
-  {(draft.status==='festival'||draft.status==='national')&&<label className="ds-detail"><span className="ds-sub">{draft.status==='festival'?t('Festival (optional)','त्योहार (वैकल्पिक)'):t('Which holiday? (optional)','कौन-सा अवकाश? (वैकल्पिक)')}</span>
-   <input maxLength={60} disabled={off} value={draft.name} placeholder={draft.status==='festival'?t('Example: Diwali','उदाहरण: दीपावली'):t('Example: Republic Day','उदाहरण: गणतंत्र दिवस')} onChange={e=>change({name:e.target.value})}/></label>}
+  {(draft.status==='festival'||draft.status==='national'||draft.status==='other')&&<label className="ds-detail"><span className="ds-sub">{draft.status==='other'?t('Name of the holiday','अवकाश का नाम'):draft.status==='festival'?t('Festival (optional)','त्योहार (वैकल्पिक)'):t('Which holiday? (optional)','कौन-सा अवकाश? (वैकल्पिक)')}</span>
+   <input maxLength={60} disabled={off} value={draft.name} placeholder={draft.status==='other'?t('Example: Sports day, local fair','उदाहरण: खेल दिवस, स्थानीय मेला'):draft.status==='festival'?t('Example: Diwali','उदाहरण: दीपावली'):t('Example: Republic Day','उदाहरण: गणतंत्र दिवस')} onChange={e=>change({name:e.target.value})}/></label>}
   {ranged&&<div className="ds-range"><label><span className="ds-sub">{t('From','से')}</span><input type="date" disabled={off} value={draft.from} onChange={e=>e.target.value&&change({from:e.target.value,to:draft.to<e.target.value?e.target.value:draft.to})}/></label>
    <label><span className="ds-sub">{t('To','तक')}</span><input type="date" disabled={off} min={draft.from} value={draft.to} onChange={e=>e.target.value&&change({to:e.target.value})}/></label></div>}
   {leader||draft.status==='absent'?<label className="ds-detail"><span className="ds-sub">{leader?t('Reason (optional)','कारण (वैकल्पिक)'):t('Note (optional)','टिप्पणी (वैकल्पिक)')}</span>
@@ -64,13 +64,12 @@ export default function DayStatus({language='en',date,api,saved,onSaved,leader=f
   {saved&&!dirty&&!leader&&<p className="ds-saved"><Check size={14}/>{statusLabel(saved,language)}{saved.from!==saved.to?' · '+rangeText(saved):''}{saved.changedByLeader&&<em className="ds-changed">{t('Changed by','बदला गया —')} {reviewerLabel(saved.by)||t('your school','आपके विद्यालय')}{saved.teacherMark?' · '+t('you marked','आपने चिह्नित किया')+': '+statusLabel(saved.teacherMark,language):''}{saved.note?' · '+saved.note:''}</em>}</p>}
   {error&&<p className="lp-error" role="alert">{error}</p>}
   {done&&!dirty&&<p className="ds-done" role="status">{done}</p>}
-  {dirty&&<button type="button" className="button primary ds-save" disabled={off||(draft.status==='exam'&&!draft.exam)||(draft.status==='half-day'&&!draft.half)} onClick={()=>void save()}>{busy?t('Saving…','सहेजा जा रहा है…'):leader?t('Save change','बदलाव सहेजें'):draft.status==='present'?t('Save as Present','उपस्थित के रूप में सहेजें'):ranged&&draft.from!==draft.to?t('Save','सहेजें'):t('Save day','दिन सहेजें')}</button>}
+  {dirty&&<button type="button" className="button primary ds-save" disabled={off||(draft.status==='exam'&&!draft.exam)||(draft.status==='half-day'&&!draft.half)||(draft.status==='other'&&!draft.name.trim())} onClick={()=>void save()}>{busy?t('Saving…','सहेजा जा रहा है…'):leader?t('Save change','बदलाव सहेजें'):draft.status==='present'?t('Save as Present','उपस्थित के रूप में सहेजें'):ranged&&draft.from!==draft.to?t('Save','सहेजें'):t('Save day','दिन सहेजें')}</button>}
 
   {sheet&&<><div className="ta-sheet-bg ds-sheet-bg" onClick={()=>setSheet(false)}/><div className="ta-sheet ds-sheet" role="dialog" aria-modal="true" aria-label={t('Exam or holiday','परीक्षा या अवकाश')}>
    <div className="ta-grab"/><button type="button" className="ta-sheet-x icon" aria-label={t('Close','बंद करें')} onClick={()=>setSheet(false)}><X size={18}/></button>
    <h3>{t('Exam or holiday','परीक्षा या अवकाश')}</h3>
-   <div className="ds-tiles">{tiles.map(([k,icon])=><button key={k} type="button" className={'ds-tile'+(draft.status===k?' on':'')} onClick={()=>choose(k)}><i aria-hidden="true">{icon}</i>{name(k)}</button>)}
-    <button type="button" className="ds-tile cancel" onClick={()=>setSheet(false)}><i aria-hidden="true">✕</i>{t('Cancel','रद्द करें')}</button></div>
+   <div className="ds-tiles">{tiles.map(([k,icon])=><button key={k} type="button" className={'ds-tile'+(draft.status===k?' on':'')} onClick={()=>choose(k)}><i aria-hidden="true">{icon}</i>{name(k)}</button>)}</div>
   </div></>}
  </div>;
 }

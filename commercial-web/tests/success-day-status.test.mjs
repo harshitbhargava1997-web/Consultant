@@ -21,11 +21,13 @@ test('day status input: single days, ranges and required details', () => {
  assert.equal(ok({from:'2026-12-05',to:'2026-12-01',status:'winter'}).success,false,'From after To');
  assert.equal(ok({from:'2026-05-01',to:'2026-08-15',status:'summer'}).success,false,'more than '+MAX_RANGE_DAYS+' days');
  assert.equal(ok({from:'2026-11-09',to:'2026-11-13',status:'festival',name:'Diwali'}).success,true);
+ assert.equal(ok({from:'2026-12-18',to:'2026-12-18',status:'other'}).success,false,'an additional holiday needs a name');
+ assert.equal(ok({from:'2026-12-18',to:'2026-12-19',status:'other',name:'Sports day'}).success,true);
  assert.equal(ok({from:'2026-02-30',to:'2026-02-30',status:'absent'}).success,false,'not a real date');
  assert.equal(ok({from:'2026-12-01',to:'2026-12-01',status:'holiday'}).success,false,'unknown status');
  assert.equal(ok({from:'2026-12-01',to:'2026-12-01',status:'absent',extra:1}).success,false,'no unknown fields');
  assert.deepEqual(cleanStatus({from:'2026-12-01',to:'2026-12-01',status:'absent',half:'first',exam:'unit',name:'X',note:'Fever'}),{from:'2026-12-01',to:'2026-12-01',status:'absent',note:'Fever'});
- assert.deepEqual([...NO_PLAN].sort(),['absent','exam','festival','national','summer','winter']);
+ assert.deepEqual([...NO_PLAN].sort(),['absent','exam','festival','national','other','summer','winter']);
 });
 
 test('stored rows: only rows whose id matches their teacher and dates are read', () => {
@@ -99,6 +101,8 @@ test('labels for the planner and the week grid', () => {
  assert.equal(shortLabel({status:'exam',exam:'unit'}),'Exam · Unit test');
  assert.equal(shortLabel({status:'national'}),'National holiday');
  assert.equal(shortLabel({status:'festival',name:'Diwali'}),'Diwali');
+ assert.equal(shortLabel({status:'other',name:'Sports day'}),'Sports day');
+ assert.equal(statusLabel({status:'other',name:'Sports day'}),'Additional holiday · Sports day');
 });
 
 test('route: teachers save only their own day; staff and leaders only for teachers of their schools', () => {

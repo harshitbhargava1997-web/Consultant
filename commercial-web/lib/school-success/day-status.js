@@ -1,6 +1,7 @@
 // Day status in the Planner (owner decision, 28 November 2026): after choosing the lesson date the teacher marks
 // what the day is: Present (the default, never stored unless it replaces another status), Half day, Absent, School
-// examination, or a holiday or vacation (summer, winter, festival, national holiday). Exams and vacations cover a
+// examination, or a holiday or vacation (summer, winter, festival, national holiday, or an additional holiday the
+// teacher names). Exams and vacations cover a
 // From–To range. Principals, coordinators and the School Success team can correct any teacher's day.
 //
 // Stored as append-only success_entries rows (kind "day-status"); no new table or column. Nothing is overwritten:
@@ -13,15 +14,15 @@ import {z} from 'zod';
 
 export const DAY_STATUS_KIND='day-status';
 export const MAX_RANGE_DAYS=92;
-export const DAY_STATUSES=['present','half-day','absent','exam','summer','winter','festival','national'];
+export const DAY_STATUSES=['present','half-day','absent','exam','summer','winter','festival','national','other'];
 export const SINGLE_DAY=new Set(['present','half-day','absent']);
-export const RANGE_STATUSES=new Set(['exam','summer','winter','festival','national']);
+export const RANGE_STATUSES=new Set(['exam','summer','winter','festival','national','other']);
 export const EXAM_TYPES=['unit','periodic','term','half-yearly','annual'];
-export const dayStatusNames={present:['Present','उपस्थित'],'half-day':['Half day','आधा दिन'],absent:['Absent','अनुपस्थित'],exam:['School examination','विद्यालय परीक्षा'],summer:['Summer vacation','ग्रीष्मावकाश'],winter:['Winter vacation','शीतावकाश'],festival:['Festival vacation','त्योहार अवकाश'],national:['National holiday','राष्ट्रीय अवकाश']};
+export const dayStatusNames={present:['Present','उपस्थित'],'half-day':['Half day','आधा दिन'],absent:['Absent','अनुपस्थित'],exam:['School examination','विद्यालय परीक्षा'],summer:['Summer vacation','ग्रीष्मावकाश'],winter:['Winter vacation','शीतावकाश'],festival:['Festival vacation','त्योहार अवकाश'],national:['National holiday','राष्ट्रीय अवकाश'],other:['Additional holiday','अतिरिक्त अवकाश']};
 export const examNames={unit:['Unit test','इकाई परीक्षा'],periodic:['Periodic test','आवधिक परीक्षा'],term:['Term exam','सत्र परीक्षा'],'half-yearly':['Half-yearly','अर्धवार्षिक'],annual:['Annual','वार्षिक']};
 export const halfNames={first:['First half','पहली पाली'],second:['Second half','दूसरी पाली']};
 // Days that need no lesson plan. On a half day only the half the teacher was in school is planned.
-export const NO_PLAN=new Set(['absent','exam','summer','winter','festival','national']);
+export const NO_PLAN=new Set(['absent','exam','summer','winter','festival','national','other']);
 
 const day=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(d=>!Number.isNaN(Date.parse(d+'T00:00:00Z'))&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d,'Invalid date');
 const text=max=>z.string().trim().max(max).optional().default('');
@@ -37,11 +38,13 @@ export const dayStatusInput=z.object({
  if(daysBetween(v.from,v.to)+1>MAX_RANGE_DAYS)ctx.addIssue({code:'custom',message:'Choose at most '+MAX_RANGE_DAYS+' days.'});
  if(v.status==='half-day'&&!v.half)ctx.addIssue({code:'custom',message:'Choose which half you were in school.'});
  if(v.status==='exam'&&!v.exam)ctx.addIssue({code:'custom',message:'Choose the examination.'});
+ // An additional (custom) holiday is named, e.g. "Sports day" or "Local fair".
+ if(v.status==='other'&&!v.name)ctx.addIssue({code:'custom',message:'Give the holiday a name.'});
 });
 // Only the fields that belong to the chosen status are kept.
 export function cleanStatus(v){
  return {from:v.from,to:v.to,status:v.status,...(v.status==='half-day'?{half:v.half}:{}),...(v.status==='exam'?{exam:v.exam}:{}),
-  ...(['festival','national','exam'].includes(v.status)&&v.name?{name:v.name}:{}),...(v.note?{note:v.note}:{})};
+  ...(['festival','national','exam','other'].includes(v.status)&&v.name?{name:v.name}:{}),...(v.note?{note:v.note}:{})};
 }
 
 export const addDays=(d,n)=>new Date(Date.parse(d+'T00:00:00Z')+n*86400000).toISOString().slice(0,10);
@@ -95,7 +98,7 @@ export function shortLabel(s){
  if(!s)return '';
  if(s.status==='half-day')return 'Half day'+(s.half?' · '+(s.half==='first'?'1st':'2nd'):'');
  if(s.status==='exam')return 'Exam'+(s.exam?' · '+examNames[s.exam][0]:'');
- return {present:'Present',absent:'Absent',summer:'Summer vacation',winter:'Winter vacation',festival:s.name||'Festival vacation',national:s.name||'National holiday'}[s.status]||s.status;
+ return {present:'Present',absent:'Absent',summer:'Summer vacation',winter:'Winter vacation',festival:s.name||'Festival vacation',national:s.name||'National holiday',other:s.name||'Additional holiday'}[s.status]||s.status;
 }
 
 // Storage. `request` is the server's database request helper (service role); `all` its paged reader.
