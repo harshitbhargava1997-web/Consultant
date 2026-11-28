@@ -29,13 +29,24 @@ export function weekGroups(lessons,reviewRows,week){
   .sort((a,b)=>a.grade.localeCompare(b.grade,undefined,{numeric:true})||a.section.localeCompare(b.section)||a.subject.localeCompare(b.subject))};
 }
 
+// When a lesson's plan was submitted against the day it was planned for (owner decision, 28 November 2026):
+// timing 'ahead' (before that day), 'same' (on it) or 'late' (after it, with the number of days); null when unknown.
+const istDay=iso=>{const t=Date.parse(iso);return Number.isFinite(t)?new Date(t+330*60000).toISOString().slice(0,10):'';};
+export function planningOf(l){
+ const submitted=istDay(l.submittedAt),day=l.plannedDate;
+ const gap=submitted&&day?Math.round((Date.parse(submitted+'T00:00:00Z')-Date.parse(day+'T00:00:00Z'))/86400000):null;
+ return {recordId:l.recordId,day,period:l.dayNumber||0,topic:l.topic,submittedAt:l.submittedAt||'',timing:gap===null?null:gap<0?'ahead':gap===0?'same':'late',daysLate:gap>0?gap:0,
+  reviewed:Boolean(l.feedback),weekly:Boolean(l.feedback?.weekly)||(l.reviews||[]).some(r=>r.weekly)};
+}
+
 // Week overview (owner decision, 26 November 2026): every teacher's class-and-subject weeks in one school, with the
 // number of periods, how many have an Academic Review, and whether the weekly review is done.
 export function weekOverview(lessons,reviewRows,week){
  const teachers=[...new Set((lessons||[]).map(l=>l.teacher))].sort((a,b)=>a.localeCompare(b));
  let from='',to='';
  const rows=teachers.map(teacher=>{const v=weekGroups(lessons.filter(l=>l.teacher===teacher),reviewRows,week);from=v.from;to=v.to;
-  return {teacher,groups:v.groups.map(g=>({key:g.key,grade:g.grade,section:g.section,subject:g.subject,periods:g.periods,reviewedPeriods:g.lessons.filter(l=>l.feedback).length,weeklyReviewed:g.reviews.length>0}))};}).filter(t=>t.groups.length);
+  return {teacher,groups:v.groups.map(g=>({key:g.key,grade:g.grade,section:g.section,subject:g.subject,periods:g.periods,reviewedPeriods:g.lessons.filter(l=>l.feedback).length,weeklyReviewed:g.reviews.length>0,
+   lessons:g.lessons.map(l=>planningOf(l))}))};}).filter(t=>t.groups.length);
  if(!from)({from,to}=weekRange(week));
  return {from,to,teachers:rows};
 }

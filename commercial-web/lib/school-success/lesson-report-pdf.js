@@ -4,7 +4,8 @@
 // Evidence URLs are the existing stored links; nothing here creates or widens access.
 import {jsPDF} from 'jspdf';
 import {regularFont,boldFont} from './report-fonts.js';
-import {visibleLessonSections,lessonSummary,groupLessons,classSubjectBreakdown,formatDay,formatStamp,classLine,defaultLessonSections,sectionOn,MAX_LESSONS_PER_PDF,isImageUrl} from './lesson-records.js';
+import {visibleLessonSections,lessonSummary,groupLessons,classSubjectBreakdown,formatDay,formatStamp,classLine,defaultLessonSections,sectionOn,MAX_LESSONS_PER_PDF,isImageUrl,lessonDay} from './lesson-records.js';
+import {reviewLevels,weekLabel,weekClass} from './lesson-reviews.js';
 
 export const palette={navy:'#16323c',teal:'#127369',tealSoft:'#8fd3c8',ink:'#2b3d45',muted:'#66777e',faint:'#93a3a8',hair:'#dbe5e4',tint:'#f2f7f6',tealTint:'#e4f2ef',blue:'#2f5f8f',blueTint:'#e8eff7',plum:'#5d4a86',plumTint:'#eeebf6',amber:'#8a5a12',amberTint:'#f8f1e3',highlight:'#fff09a'};
 export const hasDevanagari=s=>/[ऀ-ॿ꣠-ꣿ]/.test(String(s||''));
@@ -15,6 +16,9 @@ const sectionStyle={activities:[palette.teal,palette.tealTint],writing:[palette.
 const plural=(n,one,many=one+'s')=>n+' '+(n===1?one:many);
 const reflectionQuestions={achievement:'Did students achieve the learning outcome, and what went well in your class?',nextStep:'Which students need support, what learning gaps do they have, and what will you do next to support them?'};
 const periodText=(from,to)=>from===to?formatDay(from):formatDay(from)+' – '+formatDay(to);
+// "Mon 23 Nov" (lessons by planned date).
+const shortDay=day=>{const t=Date.parse(String(day||'')+'T00:00:00Z');return Number.isFinite(t)?new Date(t).toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'}):'';};
+const longDay=day=>{const t=Date.parse(String(day||'')+'T00:00:00Z');return Number.isFinite(t)?new Date(t).toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'short',timeZone:'UTC'}).toUpperCase():'';};
 
 export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sections=defaultLessonSections,images=new Map(),raster=null,generatedAt=new Date(),thumbnailsPerSection=6,audience='full',linkFor=url=>url}){
  if(!Array.isArray(lessons)||!lessons.length)throw Error('No lessons match the selected filters.');
@@ -31,7 +35,10 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  const scope=lessons[0].scope||'period';
  // Consolidated reports are period snapshots; complete history is offered per lesson only.
  if(lessons.some(l=>(l.scope||'period')!==scope))throw Error('Lessons must share one reporting scope.');
- if(kind!=='lesson'&&scope!=='period')throw Error('Consolidated lesson reports cover the selected period only.');
+ if(kind!=='lesson'&&scope==='all')throw Error('Consolidated lesson reports cover the selected period only.');
+ // Lessons by planned date (owner decision, 28 November 2026): teaching order, both dates on every lesson, a weekly
+ // review printed once after the last lesson it covers.
+ const planned=scope==='planned';
  const on=key=>sectionOn(sections,key);
  const doc=new jsPDF({unit:'mm',format:'a4',compress:true});
  doc.addFileToVFS('Report-Regular.ttf',regularFont);doc.addFont('Report-Regular.ttf','Report','normal');
@@ -194,15 +201,15 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   for(const file of files)if(!shown.has(file.url))linkRow(file,{action:file.kind==='Audio'?'Listen':action,style});
   state.y+=2;
  }
- function reviewPanel(feedback){
+ function reviewPanel(feedback,{heading=true,label=''}={}){
   if(shareable){sectionHeading('Academic Review',undefined,sectionStyle.reflections,18);paragraph(`${feedback.date?'Review recorded on '+formatDay(feedback.date):'Review recorded'}. Review comments are left out of this shareable copy. ${FULL_VERSION}`,{size:8.6,color:palette.muted,after:2});state.y+=2;return;}
   const size=9.8,h=lineHeight(size),lines=wrap(feedback.text,W-12,size),total=lines.length*h+15;
-  sectionHeading('Academic Review',undefined,sectionStyle.reflections,Math.min(total,40));
+  if(heading)sectionHeading('Academic Review',undefined,sectionStyle.reflections,Math.min(total,40));else ensure(Math.min(total,40));
   const draw=(segment,isFirst)=>{
    const height=segment.length*h+(isFirst?13:6);rect(M,state.y,W,height,palette.tint,2);
    if(!state.dry){doc.setFillColor(palette.teal);doc.rect(M,state.y,1.2,height,'F');}
    let y=state.y+3.5;
-   if(isFirst){drawLine(feedback.date?'Reviewed '+formatStamp(feedback.date).split(',')[0]:'Review recorded',M+6,y,7.8,{bold:true,color:palette.teal,spacing:0.2});y+=lineHeight(7.8)+1.6;}
+   if(isFirst){drawLine(label||(feedback.date?'Reviewed '+formatStamp(feedback.date).split(',')[0]:'Review recorded'),M+6,y,7.8,{bold:true,color:palette.teal,spacing:0.2});y+=lineHeight(7.8)+1.6;}
    segment.forEach((line,k)=>drawLine(line,M+6,y+k*h,size));
    state.y+=height+3;
   };
@@ -238,12 +245,14 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  }
  function lessonHeader(lesson,index,total,teacherShown=false){
   const standalone=kind==='lesson';
-  if(!standalone)kicker(`Lesson ${index+1} of ${total}`);
+  if(!standalone)kicker(`Lesson ${index+1} of ${total}`+(planned&&lessonDay(lesson)?'  ·  '+shortDay(lessonDay(lesson))+(lesson.dayNumber?'  ·  Period '+lesson.dayNumber:''):''));
   const titleLines=wrap(lesson.topic,W,standalone?20:16.5,true);
   for(const line of titleLines){drawLine(line,M,state.y,standalone?20:16.5,{bold:true,color:palette.navy});state.y+=lineHeight(standalone?20:16.5);}
   state.y+=1;
   if(kind==='school'&&!teacherShown)paragraph('Teacher: '+lesson.teacher,{size:10.2,color:palette.muted,after:2.5});else state.y+=1.5;
-  const items=[['Class',[lesson.grade,lesson.section&&lesson.section!=='Not Applicable'?'Section '+lesson.section:''].filter(Boolean).join(' · ')||'—'],['Subject',lesson.subject||'—'],['Lesson date',[lesson.plannedDate?'Planned '+formatDay(lesson.plannedDate):'',lesson.conductedOn?'Taught '+formatDay(lesson.conductedOn):''].filter(Boolean).join('\n')||formatDay(lesson.firstDate)||'—'],['Submitted',formatStamp(lesson.submittedAt).replace(', ','\n')||'—']];
+  const cls=[lesson.grade,lesson.section&&lesson.section!=='Not Applicable'?'Section '+lesson.section:''].filter(Boolean).join(' · ')||'—';
+  // Lessons by planned date: the day it was planned for, and when the plan was submitted, on every lesson.
+  const items=planned?[['Class',cls+'\n'+(lesson.subject||'—')],['Planned for',lessonDay(lesson)?formatDay(lessonDay(lesson)):'—'],['Plan submitted',formatStamp(lesson.submittedAt).replace(', ','\n')||'—'],['Taught',lesson.conductedOn?formatDay(lesson.conductedOn):'—']]:[['Class',cls],['Subject',lesson.subject||'—'],['Lesson date',[lesson.plannedDate?'Planned '+formatDay(lesson.plannedDate):'',lesson.conductedOn?'Taught '+formatDay(lesson.conductedOn):''].filter(Boolean).join('\n')||formatDay(lesson.firstDate)||'—'],['Submitted',formatStamp(lesson.submittedAt).replace(', ','\n')||'—']];
   const inner=W-8,share=[0.23,0.21,0.26,0.30],xs=share.map((_,i)=>M+4+share.slice(0,i).reduce((a,b)=>a+b,0)*inner);
   const lines=items.map(([,v],i)=>wrap(v,share[i]*inner-4,8.8,true)),h=Math.max(...lines.map(l=>l.length))*lineHeight(8.8)+lineHeight(6.8)+7;
   rect(M,state.y,W,h,palette.tint,2);
@@ -260,6 +269,51 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   const list=shareable||!sectionOn(sections,'highlights')?[]:(lesson.reviews||[]).flatMap(r=>r.highlights||[]).filter(h=>String(h.record)===String(lesson.recordId));
   const of=field=>list.filter(h=>h.field===field).map(h=>h.text);of.any=list.length>0;return of;
  }
+ // ---------- reviews by type (lessons by planned date) ----------
+ // A weekly review covers several lessons: it is printed once, after the last of them in this PDF; the others carry
+ // one line pointing to it. Period reviews stay with their own lesson.
+ const weeklyLast=new Map(),weeklyPages=new Map(),weeklyRefs=[],weeklyCovered=new Map();
+ const reviewsOf=l=>l.reviews||[];
+ const reviewKind=l=>{const r=reviewsOf(l),w=r.some(x=>x.weekly),p=r.some(x=>!x.weekly)||(!r.length&&Boolean(l.feedback));return w&&p?'Weekly + Period':w?'Weekly':p?'Period':'—';};
+ const reviewColor={'Weekly':palette.teal,'Period':palette.blue,'Weekly + Period':palette.navy,'—':palette.faint};
+ const weeklyTitle=r=>weekClass(r.weekly)+'  ·  '+weekLabel(r.weekly.weekStart,r.weekly.weekEnd);
+ const whoLine=r=>[r.by,r.editedBy&&r.editedBy!==r.by?'updated by '+r.editedBy:r.editedBy?'updated':''].filter(Boolean).join(' · ');
+ function refLine(text,key){
+  const size=9.2,h=lineHeight(size)+4;ensure(h+3);
+  const top=state.y;rect(M,top,W,h,palette.tint,1.5);
+  if(!state.dry){doc.setFillColor(palette.teal);doc.rect(M,top,1.2,h,'F');}
+  const shown=fit(text,key?W-24:W-8,size);drawLine(shown,M+5,top+2,size,{color:palette.ink});
+  // "page N" is filled in once the weekly review's page is known.
+  if(!state.dry&&key)weeklyRefs.push({page:state.page,x:M+5+textWidth(shown,size)+1.2,y:top+2,top,h,key,size});
+  state.y+=h+3;
+ }
+ function weeklyBox(r){
+  const rv=r.review||{},rows=[['planning','Planning'],['execution','Execution']].filter(([k])=>rv[k]).map(([k,l])=>[l+' · '+rv[k].level+' ('+reviewLevels[rv[k].level]+')',rv[k].note]);
+  if(rv.focus)rows.push(['Focus for next week',rv.focus]);
+  const covered=weeklyCovered.get(r.key)||[],count=r.weekly.periods||covered.length;
+  ensure(42);weeklyPages.set(r.key,state.page);
+  state.y+=2;rule(state.y,palette.teal,0.5);state.y+=3.5;
+  kicker('Weekly review',M,palette.teal);
+  for(const line of wrap(weeklyTitle(r),W,12.5,true)){drawLine(line,M,state.y,12.5,{bold:true,color:palette.navy});state.y+=lineHeight(12.5);}
+  state.y+=0.8;
+  paragraph('Covers '+plural(count,'lesson')+(covered.length?': '+covered.map(l=>l.topic+' ('+shortDay(lessonDay(l)).split(' ')[0]+')').join('  ·  '):''),{size:8,color:palette.muted,after:0.6});
+  if(whoLine(r))paragraph('Given by '+whoLine(r)+(r.date?'  ·  '+formatDay(istDayOf(r.date)):''),{size:8,color:palette.muted,after:2});
+  if(rows.length)for(const [label,text] of rows)fieldRow(label,text);else paragraph(r.text,{size:9.6});
+  rule(state.y,palette.teal,0.5);state.y+=4;
+ }
+ const istDayOf=iso=>{const t=Date.parse(iso);return Number.isFinite(t)?new Date(t+330*60000).toISOString().slice(0,10):String(iso||'').slice(0,10);};
+ function reviewsSection(lesson){
+  const list=reviewsOf(lesson),period=list.filter(r=>!r.weekly),weekly=list.filter(r=>r.weekly&&r.key);
+  if(!list.length){reviewPanel(lesson.feedback);return;}
+  sectionHeading('Academic Review',undefined,sectionStyle.reflections,18);
+  for(const r of period)reviewPanel({date:r.date,text:r.text+(whoLine(r)?'\n— '+whoLine(r):'')},{heading:false,label:'Period review'+(r.date?'  ·  '+formatDay(istDayOf(r.date)):'')});
+  const here=[];
+  for(const r of weekly){
+   if(weeklyLast.get(r.key)===lesson.key){refLine('Reviewed in the weekly review  ·  '+weeklyTitle(r)+'  —  printed below',null);here.push(r);}
+   else refLine('Reviewed in the weekly review  ·  '+weeklyTitle(r)+'  —  see page',r.key);
+  }
+  for(const r of here)weeklyBox(r);
+ }
  function lessonBody(lesson){
   const visible=visibleLessonSections(lesson,sections);
   if(visible.plan){
@@ -275,7 +329,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   if(visible.remedial)evidenceSection('Remedial support',lesson.remedial,sectionStyle.remedial);
   if(visible.reflections)reflectionSection(lesson);
   if(visible.portfolio)evidenceSection('Student portfolio / assessment',lesson.portfolio,sectionStyle.portfolio);
-  if(visible.feedback)reviewPanel(lesson.feedback);
+  if(visible.feedback){if(planned&&!shareable)reviewsSection(lesson);else reviewPanel(lesson.feedback);}
   if(!Object.values(visible).some(Boolean))paragraph('No lesson plan details or selected evidence were recorded for this lesson.',{size:9,color:palette.muted});
  }
  // ---------- index ----------
@@ -305,6 +359,49 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
    }
   }
  }
+ // Lessons by planned date: Period · Lesson · Plan submitted · Review type · Page, with each weekly review as its own
+ // row after the last lesson it covers.
+ function plannedIndex(groups,pages){
+  const rev=on('feedback')&&!shareable;
+  const cols=[{label:kind==='school'?'Day · period':'Period',w:kind==='school'?24:13},{label:'Lesson',w:0},{label:'Plan submitted',w:31},...(rev?[{label:'Review',w:25}]:[]),{label:'Page',w:10,align:'right'}];
+  cols[1].w=W-cols.reduce((sum,c)=>sum+c.w,0)-(cols.length-1)*1.5;
+  const head=()=>{let x=M;ensure(9);cols.forEach(c=>{drawLine(c.label.toUpperCase(),c.align==='right'?x+c.w:x,state.y,6.4,{bold:true,color:palette.muted,align:c.align});x+=c.w+1.5;});state.y+=lineHeight(6.4)+1.4;rule(state.y,palette.navy,0.3);state.y+=1.6;};
+  head();let headPage=state.page;
+  const pageCol=cols.length-1;
+  for(const group of groups){
+   if(group.label){ensure(16);if(state.page!==headPage){head();headPage=state.page;}rect(M,state.y,W,lineHeight(8)+2.4,'#fafcfb',0);drawLine(group.label,M+1.5,state.y+1.2,8,{bold:true,color:palette.navy,spacing:0.2});state.y+=lineHeight(8)+3;}
+   for(const lesson of group.lessons){
+    const topic=wrap(lesson.topic,cols[1].w,8.6,true),detail=wrap(classLine(lesson)+(kind==='school'?'':''),cols[1].w,7.4);
+    const when=formatStamp(lesson.submittedAt).replace(/ \d{4},/,',').replace(/ IST$/,'');
+    const h=Math.max(topic.length*lineHeight(8.6)+detail.length*lineHeight(7.4),lineHeight(8.4)*(when?1:1))+3.2;
+    if(state.y+h>BOTTOM){newPage();head();headPage=state.page;}
+    const top=state.y+1.4;let x=M;
+    drawLine((kind==='school'?shortDay(lessonDay(lesson))+'  ':'')+(lesson.dayNumber?'P'+lesson.dayNumber:'—'),x,top,8.4,{bold:true,color:palette.ink});x+=cols[0].w+1.5;
+    topic.forEach((line,k)=>drawLine(line,x,top+k*lineHeight(8.6),8.6,{bold:true,color:palette.navy}));
+    detail.forEach((line,k)=>drawLine(line,x,top+topic.length*lineHeight(8.6)+k*lineHeight(7.4),7.4,{color:palette.muted}));
+    x+=cols[1].w+1.5;
+    drawLine(when||'—',x,top,8,{color:palette.ink});x+=cols[2].w+1.5;
+    if(rev){const k=reviewKind(lesson);drawLine(k==='—'?'— not reviewed':k,x,top,8,{bold:true,color:reviewColor[k]});x+=cols[3].w+1.5;}
+    drawLine(pages?String(pages.get(lesson.key)||''):'',x+cols[pageCol].w,top,8.4,{bold:true,color:palette.teal,align:'right'});
+    if(pages)link(M,state.y,W,h,pages.get(lesson.key));
+    state.y+=h;rule(state.y,palette.hair,0.12);
+    if(!rev)continue;
+    for(const r of reviewsOf(lesson))if(r.weekly&&r.key&&weeklyLast.get(r.key)===lesson.key){
+     const covered=weeklyCovered.get(r.key)||[],count=r.weekly.periods||covered.length;
+     const main=wrap('Weekly review  ·  '+weeklyTitle(r)+'  ·  covers '+plural(count,'lesson'),W-cols[pageCol].w-8,8.4,true),by=whoLine(r)?wrap(whoLine(r),W-cols[pageCol].w-8,7.4):[];
+     const rh=main.length*lineHeight(8.4)+by.length*lineHeight(7.4)+3.4;
+     if(state.y+rh>BOTTOM){newPage();head();headPage=state.page;}
+     rect(M,state.y,W,rh,palette.tint,0);if(!state.dry){doc.setFillColor(palette.teal);doc.rect(M,state.y,1.1,rh,'F');}
+     main.forEach((line,k)=>drawLine(line,M+3,state.y+1.5+k*lineHeight(8.4),8.4,{bold:true,color:palette.teal}));
+     by.forEach((line,k)=>drawLine(line,M+3,state.y+1.5+main.length*lineHeight(8.4)+k*lineHeight(7.4),7.4,{color:palette.muted}));
+     const wp=weeklyPages.get(r.key);
+     drawLine(pages&&wp?String(wp):'',M+W,state.y+1.5,8.4,{bold:true,color:palette.teal,align:'right'});
+     if(pages&&wp)link(M,state.y,W,rh,wp);
+     state.y+=rh;rule(state.y,palette.hair,0.12);
+    }
+   }
+  }
+ }
  const indexNo=new Map();
  function overviewTable(head,rows,widths,textColumns=1){
   const cols=head.map((label,i)=>({label,w:widths[i],align:i<textColumns?'left':'center'}));
@@ -319,7 +416,7 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
  function cover(){
   const subtitle=kind==='lesson'?[first.teacher,first.school].join('  ·  '):kind==='teacher'?first.teacher:first.school;
   const subSize=kind==='lesson'?10.5:15,subLines=wrap(subtitle,W,subSize).slice(0,4);
-  const scopeLine=kind==='lesson'?(scope==='all'?'Complete lesson history  ·  as of '+formatStamp(generatedAt.toISOString()).split(',')[0]:'Reporting period  ·  '+periodText(from,to)):periodText(from,to);
+  const scopeLine=planned&&kind!=='lesson'?'Lessons planned for  '+periodText(from,to):kind==='lesson'?(scope==='all'?'Complete lesson history  ·  as of '+formatStamp(generatedAt.toISOString()).split(',')[0]:'Reporting period  ·  '+periodText(from,to)):periodText(from,to);
   const top=kind==='lesson'?13:22,titleSize=kind==='lesson'?19:25;
   const bandH=Math.max(kind==='lesson'?44:70,top+8+lineHeight(titleSize)+(kind==='lesson'?1:2)+subLines.length*lineHeight(subSize)+1.5+lineHeight(10.5)+(kind==='lesson'?7:12));
   rect(0,0,PAGE_W,bandH,palette.navy,0);
@@ -332,16 +429,18 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   if(kind==='lesson'){state.y=bandH+9;return;}
   state.y=bandH+12;
   const classes=[...new Set(lessons.map(l=>l.grade).filter(Boolean))],subjects=[...new Set(lessons.map(l=>l.subject).filter(Boolean))];
-  metaGrid([['School',first.school],[kind==='teacher'?'Teacher':'Teachers',kind==='teacher'?first.teacher:plural(summary.teachers,'teacher')],['Reporting period',periodText(from,to)],['Generated',formatStamp(generatedAt.toISOString())],['Classes',classes.join(', ')||'—'],['Subjects',subjects.join(', ')||'—']]);
+  metaGrid([['School',first.school],[kind==='teacher'?'Teacher':'Teachers',kind==='teacher'?first.teacher:plural(summary.teachers,'teacher')],[planned?'Lessons planned for':'Reporting period',periodText(from,to)],['Generated',formatStamp(generatedAt.toISOString())],['Classes',classes.join(', ')||'—'],['Subjects',subjects.join(', ')||'—']]);
   state.y+=4;kicker('Summary');state.y+=1;
-  tiles([['Lessons documented',summary.lessons],['Lesson plans submitted in period',summary.plansSubmitted],...(kind==='school'?[['Teachers with lessons',summary.teachers]]:[]),
+  tiles([['Lessons documented',summary.lessons],[planned?'Lessons with a saved plan':'Lesson plans submitted in period',summary.plansSubmitted],...(kind==='school'?[['Teachers with lessons',summary.teachers]]:[]),
    ...[['activities','Classroom activities'],['writing','Student written work'],['remedial','Remedial support'],['reflections','After-class reflections'],['portfolio','Student portfolio / assessment']].filter(([k])=>on(k)).map(([k,l])=>[l,summary[k]]),
    ...(on('feedback')?[['Lessons with Academic Review',summary.reviewed]]:[])]);
   state.y+=3;kicker('About this report');
   const included=['Lesson plan',...[['activities','classroom activities'],['writing','student written work'],['remedial','remedial support'],['reflections','after-class reflections'],['portfolio','student portfolio / assessment'],['feedback','Academic Review']].filter(([k])=>on(k)).map(([,l])=>l)];
   for(const note of [
-   `Reporting period ${periodText(from,to)}: evidence files, recordings, reflections and Academic Review appear only when they were submitted or recorded in this period, matching School 360° and Teacher 360° counts. Lesson plan details are shown in full for every lesson with activity in the period.`,
-   'Lessons appear in the order they were first submitted. Evidence added later stays with its original lesson and does not change that order. Lessons with items outside the period say so; the complete history is available as an individual lesson PDF.',
+   ...(planned?[`Lessons planned for ${periodText(from,to)}, in teaching order: planned day, then period. Each lesson shows the day it was planned for and when its plan was submitted, with all its evidence, reflections and reviews, including those added after these dates.`,
+    'A weekly review covers all lessons of one class and subject in a week: it is printed once, after the last of those lessons, and each of the others points to it. Period reviews stay with their own lesson.']
+   :[`Reporting period ${periodText(from,to)}: evidence files, recordings, reflections and Academic Review appear only when they were submitted or recorded in this period, matching School 360° and Teacher 360° counts. Lesson plan details are shown in full for every lesson with activity in the period.`,
+   'Lessons appear in the order they were first submitted. Evidence added later stays with its original lesson and does not change that order. Lessons with items outside the period say so; the complete history is available as an individual lesson PDF.']),
    shareable?'SHAREABLE COPY — this PDF can be opened without signing in. It omits photos, videos, recordings, student work, attachment links, reflection text and review comments; it shows lesson plans and counts. The full evidence version is available with school sign-in.':'Each file is listed once under the lesson it was uploaded for. Links open the original stored evidence and need an internet connection.',
    'Counts describe what was submitted. They are not ratings of teaching quality.',
    'Included sections: '+included.join(', ')+'.'
@@ -367,8 +466,13 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
   const hierarchy=kind==='school'?groupLessons(lessons)[0].teachers:[];
   const ordered=kind==='school'?hierarchy.flatMap(t=>t.classes.flatMap(c=>c.lessons)):lessons;
   ordered.forEach((l,i)=>indexNo.set(l.key,i+1));
-  const groups=kind==='school'?hierarchy.flatMap(t=>t.classes.map(c=>({label:t.teacher+'  ·  '+classLine(c),lessons:c.lessons}))):[{label:'',lessons}];
-  const renderIndex=pages=>{kicker(kind==='school'?'Lesson index':'Chronological lesson index');paragraph(kind==='school'?'Grouped by teacher, then class and subject. Within each group, lessons follow their original submission order. Select a row to open the lesson.':'Lessons in original submission order, earliest first. Select a row to open the lesson.',{size:8.6,color:palette.muted,after:3});indexTable(groups,pages);};
+  const groups=kind==='school'?hierarchy.flatMap(t=>t.classes.map(c=>({label:t.teacher+'  ·  '+classLine(c),lessons:c.lessons})))
+   :planned?[...ordered.reduce((m,l)=>{const d=lessonDay(l);if(!m.has(d))m.set(d,{label:longDay(d)||'NO PLANNED DATE',lessons:[]});m.get(d).lessons.push(l);return m;},new Map()).values()]
+   :[{label:'',lessons}];
+  if(planned)for(const l of ordered)for(const r of reviewsOf(l))if(r.weekly&&r.key){weeklyLast.set(r.key,l.key);if(!weeklyCovered.has(r.key))weeklyCovered.set(r.key,[]);weeklyCovered.get(r.key).push(l);}
+  const renderIndex=pages=>{
+   if(planned){kicker(kind==='school'?'Lesson index  ·  by planned date':'Chronological lesson index  ·  by planned date');paragraph(kind==='school'?'Grouped by teacher, then class and subject; within each group, lessons follow the day and period they were planned for. Select a row to open it.':'Lessons by the day and period they were planned for. Review: Weekly (covered by that week\'s weekly review, listed after the week\'s lessons) · Period (its own lesson review). Select a row to open it.',{size:8.6,color:palette.muted,after:3});plannedIndex(groups,pages);return;}
+   kicker(kind==='school'?'Lesson index':'Chronological lesson index');paragraph(kind==='school'?'Grouped by teacher, then class and subject. Within each group, lessons follow their original submission order. Select a row to open the lesson.':'Lessons in original submission order, earliest first. Select a row to open the lesson.',{size:8.6,color:palette.muted,after:3});indexTable(groups,pages);};
   // Measure the index without drawing, reserve its pages, then fill it once page numbers are known.
   const indexStart=state.page+1,saved={...state};
   Object.assign(state,{dry:true,page:indexStart,y:TOP});renderIndex(null);
@@ -381,6 +485,8 @@ export function createLessonDocumentationPdf({kind='teacher',lessons,from,to,sec
    if(divider){currentTeacher=lesson.teacherKey;kicker('Teacher',M,palette.muted);for(const line of wrap(lesson.teacher,W,13,true)){drawLine(line,M,state.y,13,{bold:true,color:palette.teal});state.y+=lineHeight(13);}state.y+=1;rule(state.y,palette.teal,0.4);state.y+=5;}
    lessonHeader(lesson,i,ordered.length,divider);lessonBody(lesson);
   });
+  // "see page N" on lessons covered by a weekly review printed later.
+  for(const ref of weeklyRefs){const target=weeklyPages.get(ref.key);if(!target)continue;doc.setPage(ref.page);state.page=ref.page;drawLine(String(target),ref.x,ref.y,ref.size,{bold:true,color:palette.teal});link(M,ref.top,W,ref.h,target);}
   Object.assign(state,{page:indexStart,y:TOP,reuse:true});doc.setPage(indexStart);
   renderIndex(pages);
   if(state.page!==indexStart+indexPages-1)throw Error('Lesson index layout changed while rendering.');

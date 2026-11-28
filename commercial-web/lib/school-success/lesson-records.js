@@ -104,7 +104,10 @@ function fileSection(file){
 //     Teacher 360° counts. The lesson plan text is the lesson itself and is always shown.
 //  'all' — complete lesson history: every stored file and all feedback, whatever the date.
 // Labels are numbered on the complete history so "Classroom activity 3" is the same file in both.
-export const REPORT_SCOPES=['period','all'];
+//  'planned' — lessons chosen by their planned (teaching) date, owner decision 28 November 2026: a week planned on Sunday
+//     shows Monday's lessons under Monday. Each lesson carries its whole record (all evidence, reflections and
+//     reviews), even when added after the dates.
+export const REPORT_SCOPES=['period','all','planned'];
 export const istDay=iso=>{const t=new Date(iso).getTime();return Number.isFinite(t)?new Date(t+330*60000).toISOString().slice(0,10):'';};
 function lessonFromEntries(rows,{from,to,scope='period'}){
  const ordered=chronologicalRows(rows),first=ordered[0],files=new Map(),inRange=d=>Boolean(d)&&d>=from&&d<=to;
@@ -123,7 +126,7 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
  const written=reflections.filter(f=>f.textDocument&&f.reflection),unreadable=reflections.filter(f=>f.textDocument&&!f.reflection);
  const reflectionDocs=reflections.filter(f=>!isAudioUrl(f.url)&&!f.textDocument);
  const plan=parseLessonPlan(first.reflection,first.materials),planText=plan.fields.length>0||Boolean(plan.notes);
- const keep=f=>scope==='all'||f.dates.some(inRange);
+ const whole=scope!=='period',keep=f=>whole||f.dates.some(inRange);
  const scoped=list=>list.filter(keep);
  const sections={
   // The generated preparation PDF repeats the plan text shown inline, so it is listed only when no plan text exists.
@@ -136,11 +139,11 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
   reflections:[...label(reflectionDocs,(f,i,l)=>'Earlier after-class reflection (saved PDF)'+(l.length>1?' '+(i+1):'')).map(f=>({...f,legacy:true})),...label(unreadable,(f,i,l)=>'Written reflection (open saved text)'+(l.length>1?' '+(i+1):'')),...label(reflectionAudio,(f,i,l)=>'After-class reflection recording'+(l.length>1?' '+(i+1):''))]
  };
  // Period view: the taught date comes only from in-period activity, so later uploads do not leak in.
- const conducted=rows.filter(r=>scope==='all'||inRange(r.date)).map(r=>clean(r.conductedOn)).filter(Boolean).sort().at(-1)||'';
+ const conducted=rows.filter(r=>whole||inRange(r.date)).map(r=>clean(r.conductedOn)).filter(Boolean).sort().at(-1)||'';
  const prepared=utcStamp(rows.map(r=>r.preparationSavedAt).find(Boolean)),submitted=utcStamp(rows.map(r=>r.lessonSubmittedAt).find(Boolean));
  const legacy=rows.find(r=>clean(r.review));
  const history=first.reviewHistory || (legacy?[{text:clean(legacy.review),date:legacy.reviewedAt||legacy.version||''}]:[]);
- const visibleReviews=history.filter(r=>scope==='all'||inRange(istDay(utcStamp(r.date))));
+ const visibleReviews=history.filter(r=>whole||inRange(istDay(utcStamp(r.date))));
 
  const firstDate=rows.map(r=>r.date).filter(Boolean).sort()[0]||'';
  return {
@@ -151,7 +154,7 @@ function lessonFromEntries(rows,{from,to,scope='period'}){
   hasPreparation:rows.some(r=>r.stage==='preparation_saved'||r.feedStage==='Lesson preparation'),
   scope,period:{from,to},plan,
   ...Object.fromEntries(Object.entries(sections).map(([key,list])=>[key,scoped(list)])),
-  outsidePeriodFiles:scope==='all'?0:all.filter(f=>!keep(f)).length,
+  outsidePeriodFiles:whole?0:all.filter(f=>!keep(f)).length,
   reviewOutsidePeriod:visibleReviews.length<history.length,
   feedback:visibleReviews.length?{label:'Academic Review',text:feedbackTextWithReviewer(visibleReviews),date:utcStamp(visibleReviews.at(-1).date),by:reviewerLabel(visibleReviews.at(-1).by),key:visibleReviews.at(-1).key||'',weekly:visibleReviews.at(-1).weekly||null}:null,
   // Each review on its own (period review or weekly review), with the teacher's "Noted" date for it.
@@ -169,8 +172,21 @@ export function compareLessons(a,b){
  return time(a).localeCompare(time(b))||numericId(a.recordId)-numericId(b.recordId)||a.recordId.localeCompare(b.recordId)||a.key.localeCompare(b.key);
 }
 
+// Teaching order (scope 'planned'): planned day, then the period number the teacher's day gives it.
+export const lessonDay=l=>l.plannedDate||l.firstDate||'';
+export function comparePlanned(a,b){
+ return lessonDay(a).localeCompare(lessonDay(b))||a.teacher.localeCompare(b.teacher)||(a.dayNumber||0)-(b.dayNumber||0)||compareLessons(a,b);
+}
+// Period 1, 2, 3… on each teacher's day, in save order (the same numbering as the review screens).
+function numberPeriods(lessons){
+ const days=new Map();
+ for(const l of lessons){const d=lessonDay(l);if(!d)continue;const k=l.teacherKey+'|'+d;if(!days.has(k))days.set(k,[]);days.get(k).push(l);}
+ for(const list of days.values())list.sort((a,b)=>numericId(a.recordId)-numericId(b.recordId)||a.key.localeCompare(b.key)).forEach((l,i)=>{l.dayNumber=i+1;});
+}
+
 // entries: mapLive entries already limited by server access scope and the report directory source.
-// A lesson is included when any of its activity (preparation or evidence) falls in the period.
+// 'period' and 'all': a lesson is included when any of its activity (preparation or evidence) falls in the period.
+// 'planned': a lesson is included when its planned day falls in the period.
 export function buildLessonRecords(entries,from,to,{scope='period'}={}){
  if(!REPORT_SCOPES.includes(scope))throw Error('Unknown lesson report scope');
  const submissions=(entries||[]).filter(r=>r.kind==='submission'&&r.school&&r.teacher);
@@ -179,11 +195,18 @@ export function buildLessonRecords(entries,from,to,{scope='period'}={}){
  const lessons=[];
  for(const rows of groups.values()){
   const inPeriod=rows.filter(r=>r.date>=from&&r.date<=to);
+  if(scope==='planned'){
+   const lesson=lessonFromEntries(rows,{from,to,scope}),day=lessonDay(lesson);
+   if(!day||day<from||day>to)continue;
+   lesson.planSubmittedInPeriod=rows.some(r=>r.stage==='preparation_saved'||r.feedStage==='Lesson preparation');
+   lessons.push(lesson);continue;
+  }
   if(!inPeriod.length)continue;
   const lesson=lessonFromEntries(rows,{from,to,scope});
   lesson.planSubmittedInPeriod=inPeriod.some(r=>r.stage==='preparation_saved'||r.feedStage==='Lesson preparation');
   lessons.push(lesson);
  }
+ if(scope==='planned'){numberPeriods(lessons);return lessons.sort(comparePlanned);}
  return lessons.sort(compareLessons);
 }
 

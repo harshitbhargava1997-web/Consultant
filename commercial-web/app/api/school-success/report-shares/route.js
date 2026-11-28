@@ -40,7 +40,9 @@ async function handlePOST(req){
    const {entries} = await mapLive({records}, base);
    const selected = entries.filter(row => row.kind === 'submission' && row.school === meta.school &&
     row.teacher === meta.teacher && row.grade === meta.grade && row.section === meta.section && row.subject === meta.subject);
-   const allowedKeys = new Set(buildLessonRecords(selected, meta.from, meta.to)
+   // Reports list lessons planned for these dates (whole record); reports exported before 28 November 2026 used
+   // activity in these dates. Either selection is accepted.
+   const allowedKeys = new Set(['planned', 'period'].flatMap(scope => buildLessonRecords(selected, meta.from, meta.to, { scope }))
     .flatMap(lessonEvidenceFiles).map(file => evidenceKeyFromUrl(file.url, base)));
    if (input.evidence.some(key => !allowedKeys.has(key))) {
     throw Error('409:The evidence has changed or is outside this report selection. Refresh the report data and export again.');

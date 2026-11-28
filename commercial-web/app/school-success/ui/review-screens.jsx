@@ -5,10 +5,10 @@
 //   Weekly         — teacher → subject (with class) → week: one weekly review (Planning, Execution, focus);
 //   Week overview  — every teacher's class-and-subject weeks in the school, reviewed or awaiting review.
 // The three share one selection, so the overview opens a teacher's day or a subject's week directly.
-import {useEffect,useRef,useState} from 'react';
+import {Fragment,useEffect,useRef,useState} from 'react';
 import {ArrowUpRight,CircleCheck,ClipboardCheck,RefreshCw,ChevronLeft,ChevronRight,Pencil,Highlighter} from 'lucide-react';
 import {successFetch} from '@/lib/school-success/client';
-import {formatDay} from '@/lib/school-success/lesson-records';
+import {formatDay,formatStamp} from '@/lib/school-success/lesson-records';
 import {reviewCriteria,reviewLevels,weekLabel,reviewerLabel,mayEditReview} from '@/lib/school-success/lesson-reviews';
 import {sentences,markKey,toggleMark,lessonMarks} from '@/lib/school-success/highlights';
 import {weekRange} from '@/lib/school-success/day-periods';
@@ -178,6 +178,8 @@ function WeeklySubject({sel,set,schools,teachers,reloadKey,onSaved,actor}){
  </>;
 }
 
+// When a plan was submitted against its planned day: ✓ ahead, = same day, +n days late.
+const timingLabel=x=>x.timing==='ahead'?'✓ ahead':x.timing==='same'?'= same day':x.timing==='late'?'+'+x.daysLate+(x.daysLate===1?' day late':' days late'):'—';
 function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
  const range=weekRange(sel.week),[view,setView]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[subject,setSubject]=useState(''),[show,setShow]=useState('all');
  useEffect(()=>{if(!sel.school){setView(null);return;}let live=true;setLoading(true);setError('');
@@ -186,10 +188,12 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
  const names=[...new Set([...roster.filter(r=>r.school===sel.school).map(r=>r.name),...planned.keys()])].sort((a,b)=>a.localeCompare(b));
  const subjects=[...new Set((view?.teachers||[]).flatMap(t=>t.groups.map(g=>g.subject)))].sort();
  const rows=names.map(name=>({name,groups:(planned.get(name)||[]).filter(g=>!subject||g.subject===subject)})).filter(r=>show==='all'||r.groups.some(g=>!g.weeklyReviewed));
- const all=[...planned.values()].flat(),done=all.filter(g=>g.weeklyReviewed).length;
+ const lessons=rows.flatMap(r=>r.groups.flatMap(g=>g.lessons||[])),count=t=>lessons.filter(x=>x.timing===t).length;
+ // Monday to Saturday, and Sunday too when something is planned for it.
+ const days=[0,1,2,3,4,5,6].map(i=>addDays(range.from,i)).filter((d,i)=>i<6||lessons.some(x=>x.day===d));
  const thisWeek=weekRange(istToday()).from,lastWeek=weekRange(addDays(istToday(),-7)).from;
  return <>
-  <p className="hint">Every teacher's subjects this week, and whether the weekly subject review is done. Tap a subject to open its weekly review; tap a teacher for the day-wise view.</p>
+  <p className="hint">Every teacher's lessons this week, by class and subject and by day: when each plan was submitted (✓ ahead, = same day, +n days late) and whether it is reviewed. Tap a lesson for the day-wise review; tap the weekly review to open it.</p>
   <Pickers schools={schools} school={sel.school} setSchool={v=>set({school:v})} teachers={[]}>
    <label className="field"><span>Week</span><input type="date" value={range.from} onChange={e=>e.target.value&&set({week:weekRange(e.target.value).from})}/><small>{weekLabel(range.from,range.to)}</small></label>
    <label className="field"><span>Subject</span><select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">All subjects</option>{subjects.map(s=><option key={s}>{s}</option>)}</select></label>
@@ -198,10 +202,16 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
   <div className="ta-filters wr-weeks">{[[lastWeek,'Last week'],[thisWeek,'This week']].map(([w,l])=><button key={l} type="button" className={'ta-chip'+(range.from===w?' on':'')} onClick={()=>set({week:w})}>{l}</button>)}<button type="button" className="ta-chip" onClick={()=>set({week:addDays(range.from,-7)})}><ChevronLeft size={13}/>Earlier</button><button type="button" className="ta-chip" onClick={()=>set({week:addDays(range.from,7)})}>Later<ChevronRight size={13}/></button></div>
   {error&&<p className="alert error" role="alert">{error}</p>}
   {!sel.school?<p className="hint">Choose a school.</p>:loading&&!view?<p role="status">Opening the week…</p>:view&&<>
-   <Stats items={[[names.length,'Teachers'],[all.length,'Subject weeks planned'],[done,'Weekly reviews done'],[all.length-done,'Awaiting weekly review']]}/>
-   <div className="table-scroll"><table className="wo-table"><thead><tr><th>Teacher</th><th>Subjects this week (class)</th></tr></thead><tbody>
-    {rows.map(r=><tr key={r.name}><td><button type="button" className="text-button" onClick={()=>openDay(r.name)}><b>{r.name}</b></button><small>Open day-wise ›</small></td>
-     <td>{!r.groups.length?<span className="wo-none">{planned.get(r.name)?.length?'No plans for this subject':'No plans this week'}</span>:<div className="wo-cells">{r.groups.map(g=><button type="button" key={g.key} className={'wo-cell '+(g.weeklyReviewed?'ok':'wait')} onClick={()=>openWeekly(r.name,g.key)}><span>{subjectOf(g)}</span><b>{g.weeklyReviewed?'✓ Weekly review done':'Awaiting weekly review'}</b><small>{g.periods} {g.periods===1?'period':'periods'} · {g.reviewedPeriods} reviewed</small></button>)}</div>}</td></tr>)}
+   <Stats items={[[lessons.length,'Lessons planned this week'],[count('ahead'),'Planned ahead'],[count('same'),'Planned the same day'],[count('late'),'Written after the lesson'],[lessons.filter(x=>x.reviewed).length+' of '+lessons.length,'Lessons reviewed']]}/>
+   <div className="table-scroll"><table className="wo-grid"><thead><tr><th>Class · subject</th>{days.map(d=><th key={d}>{weekday(d)}</th>)}<th>This week</th><th>Weekly review</th></tr></thead><tbody>
+    {rows.map(r=>{const gs=planned.get(r.name)||[];return <Fragment key={r.name}>
+     <tr className="wo-t"><td colSpan={days.length+3}><button type="button" className="text-button wo-name" onClick={()=>openDay(r.name)}><b>{r.name}</b></button><small>{gs.length?gs.filter(g=>g.weeklyReviewed).length+' of '+gs.length+(gs.length===1?' subject':' subjects')+' reviewed weekly':'No plans this week'}</small><button type="button" className="text-button wo-open" onClick={()=>openDay(r.name)}>Open day-wise ›</button></td></tr>
+     {!r.groups.length?<tr><td colSpan={days.length+3} className="wo-none">{gs.length?'No plans for this subject':'No lesson plans for this week'}</td></tr>
+     :r.groups.map(g=>{const ls=g.lessons||[],n=ls.length;return <tr key={g.key}><td className="wo-cs">{subjectOf(g)}</td>
+      {days.map(d=>{const here=ls.filter(x=>x.day===d);return <td key={d}>{here.length?here.map(x=><button type="button" key={x.recordId} className={'wo-pl '+(x.timing||'none')} title={(x.period?'Period '+x.period+' · ':'')+x.topic+(x.submittedAt?' · plan submitted '+formatStamp(x.submittedAt):'')} onClick={()=>openDay(r.name,d)}><b>{timingLabel(x)}</b><small className={x.reviewed?'ok':''}>{x.reviewed?(x.weekly?'● Weekly':'● Reviewed'):'○ Awaiting'}</small></button>):<span className="wo-dot">·</span>}</td>;})}
+      <td className="wo-sum">{ls.filter(x=>x.timing==='ahead').length} of {n} ahead<br/>{ls.filter(x=>x.reviewed).length} of {n} reviewed</td>
+      <td><button type="button" className={'wo-wk '+(g.weeklyReviewed?'ok':'wait')} onClick={()=>openWeekly(r.name,g.key)}>{g.weeklyReviewed?'Weekly review done':'Awaiting weekly review'}</button></td></tr>;})}
+    </Fragment>;})}
    </tbody></table></div>
    {!rows.length&&<p className="hint">No teacher matches these filters.</p>}
   </>}
@@ -227,6 +237,6 @@ export default function ReviewScreens({data,school:initialSchool='',reloadKey=0,
   {tab==='day'&&<DayWise {...common}/>}
   {tab==='weekly'&&<WeeklySubject {...common}/>}
   {tab==='overview'&&<WeekOverview sel={sel} set={set} schools={schools} roster={roster} reloadKey={reloadKey}
-   openWeekly={(teacher,group)=>{set({teacher,group});setTab('weekly');}} openDay={teacher=>{set({teacher,date:sel.week<=istToday()&&istToday()<=addDays(sel.week,6)?istToday():sel.week});setTab('day');}}/>}
+   openWeekly={(teacher,group)=>{set({teacher,group});setTab('weekly');}} openDay={(teacher,date)=>{set({teacher,date:date||(sel.week<=istToday()&&istToday()<=addDays(sel.week,6)?istToday():sel.week)});setTab('day');}}/>}
  </section>;
 }

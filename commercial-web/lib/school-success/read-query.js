@@ -15,7 +15,8 @@ export function readScope(a,records=false){
 export function recordQuery(from,to,a){
  const start=from+'T00:00:00',end=to+'T23:59:59.999999';
  const eventStart=new Date(from+'T00:00:00+05:30').toISOString().replace('Z',''),eventEnd=new Date(to+'T23:59:59.999+05:30').toISOString().replace('Z','');
- return {or:'(and(StartTime.gte.'+start+',StartTime.lte.'+end+'),and(preparation_saved_at.gte.'+eventStart+',preparation_saved_at.lte.'+eventEnd+'),and(planned_lesson_on.lte.'+to+',evidence_submitted_at.gte.'+eventStart+'))',...readScope(a,true)};
+ // Lessons planned for these dates are read too, so lesson reports by planned date are complete.
+ return {or:'(and(StartTime.gte.'+start+',StartTime.lte.'+end+'),and(preparation_saved_at.gte.'+eventStart+',preparation_saved_at.lte.'+eventEnd+'),and(planned_lesson_on.lte.'+to+',evidence_submitted_at.gte.'+eventStart+'),and(planned_lesson_on.gte.'+from+',planned_lesson_on.lte.'+to+'))',...readScope(a,true)};
 }
 
 export async function readAllPages(readPage,{pageSize=1000,maxRows=100000,concurrency=4}={}){
