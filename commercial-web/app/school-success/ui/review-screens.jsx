@@ -12,6 +12,8 @@ import {formatDay,formatStamp} from '@/lib/school-success/lesson-records';
 import {reviewCriteria,reviewLevels,weekLabel,reviewerLabel,mayEditReview} from '@/lib/school-success/lesson-reviews';
 import {sentences,markKey,toggleMark,lessonMarks} from '@/lib/school-success/highlights';
 import {weekRange} from '@/lib/school-success/day-periods';
+import {shortLabel,statusLabel} from '@/lib/school-success/day-status';
+import DayStatus from './day-status';
 import './lesson-records.css';
 
 const istToday=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
@@ -26,6 +28,7 @@ async function post(url,body){
 }
 const weeklyApi=body=>post('/api/school-success/weekly-reviews',body);
 const lessonApi=body=>post('/api/school-success/lesson-reviews',body);
+const dayApi=body=>post('/api/school-success/day-status',body);
 const hasEvidence=l=>l.activities.length||l.writing.length||(l.remedial||[]).length||(l.portfolio||[]).length;
 const hasReflection=l=>l.reflections.length||(l.writtenReflections||[]).length;
 function Files({title,files}){if(!files?.length)return null;return <div className="wr-files"><span>{title}</span>{files.map(f=><a key={f.url} href={f.url} target="_blank" rel="noopener noreferrer">{f.label}<ArrowUpRight size={13}/></a>)}</div>;}
@@ -188,6 +191,11 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
  const range=weekRange(sel.week),[view,setView]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[subject,setSubject]=useState(''),[show,setShow]=useState('all');
  useEffect(()=>{if(!sel.school){setView(null);return;}let live=true;setLoading(true);setError('');
   weeklyApi({action:'overview',school:sel.school,week:range.from}).then(d=>{if(live)setView(d);}).catch(e=>{if(live){setError(e.message);setView(null);}}).finally(()=>{if(live)setLoading(false);});return ()=>{live=false;};},[sel.school,range.from,reloadKey]);
+ // Day status (owner decision, 28 November 2026): what each teacher marked each day; the principal can correct it.
+ const [statuses,setStatuses]=useState(new Map()),[dayTick,setDayTick]=useState(0),[dayEdit,setDayEdit]=useState(null),[dayNotice,setDayNotice]=useState('');
+ useEffect(()=>{if(!sel.school){setStatuses(new Map());return;}let live=true;
+  dayApi({action:'read',school:sel.school,from:range.from,to:range.to}).then(d=>{if(live)setStatuses(new Map((d.statuses||[]).map(s=>[s.teacher+'|'+s.date,s])));}).catch(()=>{if(live)setStatuses(new Map());});
+  return ()=>{live=false;};},[sel.school,range.from,reloadKey,dayTick]);
  const planned=new Map((view?.teachers||[]).map(t=>[t.teacher,t.groups]));
  const names=[...new Set([...roster.filter(r=>r.school===sel.school).map(r=>r.name),...planned.keys()])].sort((a,b)=>a.localeCompare(b));
  const subjects=[...new Set((view?.teachers||[]).flatMap(t=>t.groups.map(g=>g.subject)))].sort();
@@ -212,6 +220,9 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
    <div className="table-scroll"><table className="wo-grid"><thead><tr><th>Class · subject</th>{days.map(d=><th key={d}>{weekday(d)}</th>)}<th>This week</th><th>Weekly review</th></tr></thead><tbody>
     {rows.map(r=>{const gs=planned.get(r.name)||[];return <Fragment key={r.name}>
      <tr className="wo-t"><td colSpan={days.length+3}><button type="button" className="text-button wo-name" onClick={()=>openDay(r.name)}><b>{r.name}</b></button><small>{gs.length?gs.filter(g=>g.weeklyReviewed).length+' of '+gs.length+(gs.length===1?' subject':' subjects')+' reviewed weekly':'No plans this week'}</small><button type="button" className="text-button wo-open" onClick={()=>openDay(r.name)}>Open day-wise ›</button></td></tr>
+     <tr className="wo-ds"><td className="wo-cs">This day</td>{days.map(d=>{const s=statuses.get(r.name+'|'+d);
+      return <td key={d}><button type="button" className={'wo-st '+(s?s.status:'none')} title={s?[statusLabel(s),s.from!==s.to?weekday(s.from)+' – '+weekday(s.to):'',s.changedByLeader?'Changed by '+(reviewerLabel(s.by)||'the school'):'Marked by the teacher',s.teacherMark?'Teacher marked: '+statusLabel(s.teacherMark):'',s.note?'Note: '+s.note:'','Click to change'].filter(Boolean).join('\n'):'Present · click to mark or change'}
+       onClick={()=>{setDayNotice('');setDayEdit({teacher:r.name,date:d,saved:s||null});}}>{s?<>{shortLabel(s)}{s.changedByLeader&&<em>✎</em>}</>:<span aria-label="Present">·</span>}</button></td>;})}<td colSpan={2}/></tr>
      {!r.groups.length?<tr><td colSpan={days.length+3} className="wo-none">{gs.length?'No plans for this subject':'No lesson plans for this week'}</td></tr>
      :r.groups.map(g=>{const all=g.lessons||[],ls=all.filter(x=>x.periodType!=='substitute'),n=ls.length;return <tr key={g.key}><td className="wo-cs">{subjectOf(g)}</td>
       {days.map(d=>{const here=all.filter(x=>x.day===d);return <td key={d}>{here.length?here.map(x=>{const sub=x.periodType==='substitute';return <button type="button" key={x.recordId} className={'wo-pl '+(sub?'sub':(x.timing||'none'))+(x.periodType==='remedial'?' rem':'')} title={[(x.period?'Period '+x.period:'')+' · '+weekday(x.day)+(typeName[x.periodType]?' · '+typeName[x.periodType]:''),x.topic,x.submittedAt?'Plan submitted '+formatStamp(x.submittedAt)+(x.timing&&!sub?' · '+timingLabel(x):''):'',sub?'Substitute class · not for review':x.reviewed?(x.weekly?'Reviewed in the weekly review':'Reviewed'):'Not reviewed yet — click to review'].filter(Boolean).join('\n')} onClick={()=>openDay(r.name,d)}><b>{cellLabel(x)}</b><small className={x.reviewed&&!sub?'ok':''}>{sub?'not for review':x.reviewed?(x.weekly?'● Weekly':'● Reviewed'):'○ Awaiting'}</small></button>;}):<span className="wo-dot">·</span>}</td>;})}
@@ -221,6 +232,12 @@ function WeekOverview({sel,set,schools,roster,reloadKey,openWeekly,openDay}){
    </tbody></table></div>
    {!rows.length&&<p className="hint">No teacher matches these filters.</p>}
   </>}
+  {dayNotice&&<p className="alert success" role="status">{dayNotice}</p>}
+  {dayEdit&&<div className="modal-backdrop" onClick={e=>{if(e.target===e.currentTarget)setDayEdit(null);}}><section role="dialog" aria-modal="true" aria-labelledby="ds-title" className="modal ds-modal">
+   <div className="card-head"><h2 id="ds-title">{dayEdit.teacher} · {longDay(dayEdit.date)}</h2><button type="button" className="icon" aria-label="Close" onClick={()=>setDayEdit(null)}>✕</button></div>
+   <DayStatus leader teacherName={dayEdit.teacher} date={dayEdit.date} saved={dayEdit.saved} api={body=>dayApi({...body,school:sel.school,teacher:dayEdit.teacher})}
+    onSaved={s=>{setDayEdit(null);setDayTick(n=>n+1);setDayNotice(dayEdit.teacher+' · '+longDay(dayEdit.date)+': '+(s?statusLabel(s):'Present')+'. The teacher will see the change.');}}/>
+  </section></div>}
  </>;
 }
 

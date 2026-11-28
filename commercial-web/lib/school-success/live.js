@@ -2,6 +2,7 @@ import { actor, assertSchool } from './server';
 import {hasLessonRecord,LEGACY_MEDIA_BASES} from './live-mapping.js';
 import {readRubricRows,appendRubric,appendWeeklyReview,readReviewVersions} from './lesson-review-store.js';
 import {readNotes,appendNote,feedbackKey} from './feedback-notes.js';
+import {readDayStatuses,appendDayStatus} from './day-status.js';
 import {lessonRecordId,reviewerRole,reviewerName,mayEditReview,weeklyReview,rubricReview} from './lesson-reviews.js';
 import { service, checked } from './database';
 import { prepareUsageImport } from './usage-import.js';
@@ -41,6 +42,10 @@ export async function weekLessonRows({school,teacher='',from,to}) {
     }
     return {records,reviews,notes};
 }
+// Day status (owner decision, 28 November 2026). The caller checks the school (and, for a teacher, that it is their
+// own day) before either call.
+export async function dayStatuses(query){return readDayStatuses(query,all);}
+export async function saveDayStatus(row){return appendDayStatus(row,request);}
 // Highlights may only mark sentences of the lessons a review covers.
 function checkHighlights(review,covered){
     if((review.highlights||[]).some(h=>!covered.includes(String(h.record))))throw Error('Highlights must be on the lessons this review covers.');

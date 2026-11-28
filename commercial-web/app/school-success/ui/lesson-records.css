@@ -164,3 +164,16 @@
 .success-app .wr-ptype{font-size:11px;font-weight:800;border-radius:999px;padding:2px 8px}.success-app .wr-ptype.remedial{background:#f2ecf8;color:#5d4a86}.success-app .wr-ptype.substitute{background:#fbf1e3;color:#8a5a12}
 .success-app .wo-grid .wo-wk{white-space:normal;max-width:120px;line-height:1.25}
 .success-app .wo-grid .wo-open{white-space:nowrap}
+/* Day status row in the Week overview (owner decision, 28 November 2026) */
+.success-app .wo-grid tr.wo-ds td{padding-top:4px;padding-bottom:6px;background:#fbfcfa}
+.success-app .wo-grid tr.wo-ds td.wo-cs{font-size:10.5px;color:#7c8984;font-weight:600}
+.success-app .wo-st{display:inline-flex;align-items:center;gap:3px;border-radius:7px;padding:3px 7px;font-size:10.5px;font-weight:700;white-space:nowrap;border:1px solid transparent}
+.success-app .wo-st em{font-style:normal;font-size:10px;opacity:.8}
+.success-app .wo-st.none{color:#b3bdb8;padding:3px 10px}.success-app .wo-st.none:hover{border-color:#d6dfda;color:var(--green)}
+.success-app .wo-st.present{background:var(--mint);color:var(--green)}
+.success-app .wo-st.half-day{background:#fbf3d9;color:#7a6110}
+.success-app .wo-st.absent{background:#fbecea;color:#9a3a30}
+.success-app .wo-st.exam{background:#e9f0f9;color:#2b4c7a}
+.success-app .wo-st.summer,.success-app .wo-st.winter,.success-app .wo-st.festival,.success-app .wo-st.national{background:#f1ecf7;color:#4d3868}
+.success-app .ds-modal{width:480px}
+.success-app .wo-st.other{background:#f1ecf7;color:#4d3868}

@@ -477,3 +477,42 @@
 .success-app .lp-ptype-option.on{background:#fff;color:var(--ink);box-shadow:0 1px 4px #0000001a}
 .success-app .lp-ptype-option.remedial.on{color:#5d4a86}.success-app .lp-ptype-option.substitute.on{color:#8a5a12}
 .success-app .lp-ptype-option:focus-visible{outline:2px solid var(--green);outline-offset:1px}
+/* Day status in the Planner (owner decision, 28 November 2026) */
+.success-app .ds{margin:4px 0 2px}
+.success-app .ds-label,.success-app .ds-sub{display:block;font-size:12px;font-weight:650;color:#6c7a75;margin:10px 0 6px}
+.success-app .ds-quick{display:flex;gap:6px}
+.success-app .ds-btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:4px;border:1px solid #d6dfda;border-radius:11px;padding:10px 4px;font-weight:700;font-size:13.5px;color:#4d5c57;background:#fff;min-height:44px}
+.success-app .ds-btn.on{border:2px solid var(--green);background:var(--mint);color:var(--green)}
+.success-app .ds-btn.half-day.on{border-color:#c9a227;background:#fbf3d9;color:#7a6110}
+.success-app .ds-btn.absent.on{border-color:#c0574b;background:#fbecea;color:#9a3a30}
+.success-app .ds-more{display:inline-flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;font-weight:700;color:var(--green);padding:4px 0}
+.success-app .ds-chosen{display:flex;width:100%;justify-content:space-between;align-items:center;margin-top:10px;border:2px solid #3d6aa6;background:#e9f0f9;color:#2b4c7a;border-radius:11px;padding:10px 12px;font-size:13.5px}
+.success-app .ds-chosen em{font-style:normal;font-weight:700;font-size:12.5px}
+.success-app .ds-detail{display:block;margin-top:4px}
+.success-app .ds-seg{display:flex;background:#eef2ef;border-radius:12px;padding:3px;gap:2px}
+.success-app .ds-seg button{flex:1;font-size:13.5px;font-weight:700;color:#7c8984;padding:9px 4px;border-radius:10px;min-height:40px}
+.success-app .ds-seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 4px #0000001a}
+.success-app .ds-pills{display:flex;flex-wrap:wrap;gap:6px}
+.success-app .ds-pills button{border:1px solid #d6dfda;border-radius:20px;padding:8px 12px;font-size:13px;font-weight:700;color:#4d5c57;background:#fff}
+.success-app .ds-pills button.on{border:2px solid #3d6aa6;background:#e9f0f9;color:#2b4c7a}
+.success-app .ds-range{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.success-app .ds-save{width:100%;margin-top:12px;min-height:44px;font-size:13.5px}
+.success-app .ds-saved{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0 0;font-size:12.5px;font-weight:650;color:var(--green);line-height:1.4}
+.success-app .ds-changed{display:block;width:100%;font-style:normal;font-weight:600;color:#7a5216;background:#fdf1d8;border-radius:8px;padding:6px 9px;font-size:12px}
+.success-app .ds-done{font-size:12px;color:var(--green);margin:8px 0 0}
+.success-app .ds-mark{font-size:12.5px;margin:0 0 4px;color:#4d5c57}
+.success-app .ds-sheet h3{font-size:16px;margin:4px 0 12px}
+.success-app .ds-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.success-app .ds-tile{border:1px solid #e1e8e4;border-radius:14px;padding:12px 6px;text-align:center;font-size:12.5px;font-weight:700;line-height:1.25;background:#fff;min-height:84px}
+.success-app .ds-tile i{display:block;font-style:normal;font-size:24px;margin-bottom:6px}
+.success-app .ds-tile.on{border:2px solid var(--green);background:var(--mint)}
+.success-app .ds-tile.cancel{color:#7c8984}
+.success-app .ds-notice{background:#fbecea;border-color:#f1d4cf}
+.success-app .ds-notice h3{font-size:15px;color:#7a2e26}.success-app .ds-notice p{color:#7a2e26;margin:6px 0 10px}
+.success-app .ds-notice.exam{background:#e9f0f9;border-color:#d3e0f0}.success-app .ds-notice.exam h3,.success-app .ds-notice.exam p{color:#2b4c7a}
+.success-app .ds-notice.summer,.success-app .ds-notice.winter,.success-app .ds-notice.festival,.success-app .ds-notice.national{background:#f1ecf7;border-color:#e2d8ee}
+.success-app .ds-notice.summer h3,.success-app .ds-notice.summer p,.success-app .ds-notice.winter h3,.success-app .ds-notice.winter p,.success-app .ds-notice.festival h3,.success-app .ds-notice.festival p,.success-app .ds-notice.national h3,.success-app .ds-notice.national p{color:#4d3868}
+.success-app .ds-half{margin:0 0 12px;background:#fbf3d9;color:#7a6110}
+.success-app .lp-setup .ds{max-width:440px}
+.success-app .ta-sheet-bg.ds-sheet-bg{z-index:70}.success-app .ta-sheet.ds-sheet{z-index:71}
+.success-app .ds-notice.other{background:#f1ecf7;border-color:#e2d8ee}.success-app .ds-notice.other h3,.success-app .ds-notice.other p{color:#4d3868}
