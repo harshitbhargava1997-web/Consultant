@@ -126,6 +126,15 @@ Code:
 
 Tests: `tests/success-review-edit.test.cjs`, `tests/success-review-highlights.test.mjs`.
 
+## 28 November 2026: Week overview filters (owner request)
+The Week overview has a **Teacher** picker: All teachers, or one teacher.
+
+**Show** offers two choices:
+- **All subjects**
+- **Subjects awaiting weekly review:** only the class-and-subject rows that have lessons to review and no weekly review yet. Teachers with nothing awaiting are hidden, and substitute-only rows never count as awaiting.
+
+The stats above the grid follow the chosen filters. The Teacher choice resets when the school changes.
+
 ## 28 November 2026: day status in the Planner (owner decision, option B)
 **What the teacher sees.** On a daily plan, under the lesson date:
 - Three one-tap buttons: **Present · Half day · Absent**. Present is the default and needs no tap.
