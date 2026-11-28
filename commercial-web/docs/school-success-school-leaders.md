@@ -126,6 +126,39 @@ Code:
 
 Tests: `tests/success-review-edit.test.cjs`, `tests/success-review-highlights.test.mjs`.
 
+## 28 November 2026: lesson PDFs by planned date, Week overview planning grid, principal lesson PDF (owner decision)
+**Lesson PDFs follow the planned date.**
+- Applies to the Teacher 360° report's "Open lesson documentation" PDFs, Lesson records, and the principal's download.
+- A lesson is included when the day it was planned for falls in the dates, not when it was submitted. A week planned on Sunday shows Monday's lessons under Monday.
+- Each lesson carries its whole record: all evidence, reflections and reviews, even those added after the dates. Lessons are in teaching order: planned day, then period.
+- Every lesson shows **Planned for**, **Plan submitted** and **Taught**.
+
+**Index.**
+- Grouped by planned day, with each lesson's period and when its plan was submitted.
+- A **Review** column says Weekly, Period, Weekly + Period, or not reviewed.
+- Each weekly review is its own row after the last lesson it covers, with its page.
+
+**Weekly reviews in the PDF.**
+- A weekly review is printed once, after the last lesson of that class and subject in the week it covers.
+- Each of its other lessons shows one line: "Reviewed in the weekly review … — see page N".
+- Period reviews stay with their own lesson.
+
+**Week overview (Lesson reviews).**
+- One block per teacher, one row per class and subject, one column per day.
+- Each lesson shows when its plan was submitted against its planned day (✓ ahead, = same day, +n days late) and whether it is reviewed (Weekly, Reviewed or Awaiting). Tapping it opens that day.
+- Columns: "This week" (planned ahead and reviewed counts) and "Weekly review" (done, or open to write it).
+- Summary strip: lessons planned, planned ahead, same day, written after the lesson, lessons reviewed.
+
+**Principal, coordinator and school management.** Profile menu → **Download lesson PDF**:
+- teacher, dates (up to 100 days), and one class and subject or all;
+- the same PDF, built in the browser from the school's own data.
+
+**Data.**
+- The portal read also returns lessons planned for the dates (`recordQuery`).
+- Share links accept evidence of either selection, so reports exported earlier still open.
+- Code: `lesson-records.js` (scope `planned`, `comparePlanned`), `lesson-report-pdf.js`, `weekly-review.js` (`planningOf`), `review-screens.jsx`, `leader-lesson-pdf.jsx`, `lesson-snapshots.js`, `read-query.js`, `report-shares/route.js`.
+- Tests: `tests/success-lesson-pdf-planned.test.mjs`.
+
 ## 24 November 2026: sign-in fixes (owner decision)
 - **Passwords:** every Vision and School Success account uses one rule, 6 to 128 characters (6 digits are fine), with no uppercase, number or symbol requirement. It covers:
   - first sign-in;

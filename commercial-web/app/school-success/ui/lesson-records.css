@@ -137,3 +137,24 @@
 .success-app .wr-edited{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}.success-app .wr-edited em{font-style:normal;background:#eef2ff;color:#3b5ba5;border-radius:999px;padding:1px 7px;font-weight:700;margin-right:5px;font-size:10.5px}
 .success-app .wr-done.editing,.success-app .lr-review.editing{outline:2px solid #3d6aa6;outline-offset:2px}
 .success-app .wr-done .text-button,.success-app .lr-review .text-button{font-size:12.5px}
+/* Week overview planning grid (28 November 2026): each class and subject by day, when the plan was submitted and
+   whether the lesson is reviewed. */
+.success-app .wo-grid{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}
+.success-app .wo-grid th{font-size:10.5px;letter-spacing:.4px;color:var(--muted);text-transform:uppercase;text-align:center;border-bottom:1.5px solid var(--ink);padding:7px 4px;background:none;white-space:nowrap}
+.success-app .wo-grid th:first-child{text-align:left}
+.success-app .wo-grid td{border-bottom:1px solid #edf1ee;padding:7px 4px;text-align:center;vertical-align:middle}
+.success-app .wo-grid td.wo-cs{text-align:left;font-weight:600;white-space:nowrap}
+.success-app .wo-grid tr.wo-t td{text-align:left;background:#f6f8f5;padding:8px}
+.success-app .wo-grid tr.wo-t small{display:inline;color:var(--muted);margin-left:10px;font-size:11.5px}
+.success-app .wo-grid .wo-name{font-size:13.5px;color:var(--ink);padding:0}
+.success-app .wo-grid .wo-open{float:right;font-size:12px;padding:0}
+.success-app .wo-pl{display:inline-flex;flex-direction:column;align-items:center;gap:2px;margin:1px;padding:0;background:none;border:0;cursor:pointer}
+.success-app .wo-pl b{border-radius:999px;padding:2px 8px;font-size:11px;white-space:nowrap}
+.success-app .wo-pl.ahead b{background:#e8f5ec;color:#1f6f45}.success-app .wo-pl.same b{background:#fff4df;color:#8a5a12}.success-app .wo-pl.late b{background:#fde8e6;color:#a8402e}.success-app .wo-pl.none b{background:#eef1ef;color:var(--muted)}
+.success-app .wo-pl small{font-size:10.5px;color:#a3aea9}.success-app .wo-pl small.ok{color:#1f6f45}
+.success-app .wo-pl:focus-visible{outline:2px solid var(--green);border-radius:8px}
+.success-app .wo-dot{color:#c4ccc8}
+.success-app .wo-sum{font-size:11px;color:var(--muted);white-space:nowrap}
+.success-app .wo-wk{font-size:11px;font-weight:700;border-radius:8px;padding:4px 8px;white-space:nowrap;border:0;cursor:pointer}
+.success-app .wo-wk.ok{background:#e8f5ec;color:#1f6f45}.success-app .wo-wk.wait{background:#fff4df;color:#8a5a12}
+.success-app .wo-grid .wo-none{text-align:left;color:#a3aea9;font-size:12px}

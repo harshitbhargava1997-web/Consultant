@@ -12,8 +12,9 @@ export const THUMBNAIL_LEVELS=[6,2,0];
 const groupKey=g=>JSON.stringify([g.teacherKey,g.grade,g.section,g.subject]);
 export const groupLessons=(lessons,g)=>lessons.filter(l=>l.teacherKey===g.teacherKey&&l.grade===g.grade&&l.section===g.section&&l.subject===g.subject);
 
+// Lessons planned for these dates (owner decision, 28 November 2026), each with its whole record.
 export function documentationGroups(entries,from,to,teacherKeys){
- const lessons=buildLessonRecords(entries,from,to),keys=new Set(teacherKeys);
+ const lessons=buildLessonRecords(entries,from,to,{scope:'planned'}),keys=new Set(teacherKeys);
  return {lessons,groups:lessonDocumentationGroups(lessons).filter(g=>keys.has(g.teacherKey))};
 }
 

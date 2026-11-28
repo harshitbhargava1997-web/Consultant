@@ -6,9 +6,10 @@ const ui=load('app/school-success/ui/lesson-records.jsx'),LessonRecords=ui.defau
 async function fixture(){const {mapLive}=await import('../lib/school-success/live-mapping.js'),f=await import('./fixtures/lesson-records.mjs');const mapped=await mapLive(f.raw(),f.base);return {data:{entries:mapped.entries,roster:mapped.roster,period:{from:f.from,to:f.to},directory:{archives:[]}},from:f.from,to:f.to};}
 const render=(props)=>renderToStaticMarkup(React.createElement(LessonRecords,props));
 
-test('teacher lesson records list only that teacher’s lessons in submission order without preloading files',async()=>{
+test('teacher lesson records list only that teacher’s lessons by planned date (then period) without preloading files',async()=>{
  const {data,from,to}=await fixture(),html=render({data,from,to,school:'Alpha School',teacherKey:JSON.stringify(['Alpha School','Asha']),mode:'teacher'});
- const order=['Counting in tens','Blending CVC words','मात्रा वाले शब्द'].map(t=>html.indexOf(t));
+ // Planned 23 Oct (Period 1 English, Period 2 Hindi), then 27 Oct (Mathematics), whatever order they were submitted in.
+ const order=['Blending CVC words','मात्रा वाले शब्द','Counting in tens'].map(t=>html.indexOf(t));
  assert.ok(order.every(i=>i>0));assert.deepEqual([...order].sort((a,b)=>a-b),order);
  assert.ok(!html.includes('Letter sounds'),'another teacher');assert.ok(!html.includes('Beta objective'),'another school');
  assert.ok(!html.includes('<img'),'collapsed lessons do not load images');assert.ok(!html.includes('<audio'));

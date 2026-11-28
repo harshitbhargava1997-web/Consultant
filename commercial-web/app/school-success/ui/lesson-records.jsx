@@ -25,8 +25,9 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
  const [page,setPage]=useState(1),[busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const fresh=data.period?.from===from&&data.period?.to===to;
  const source=useMemo(()=>reportDirectorySource(data,data.directory?.archives||[],includeArchived),[data,includeArchived]);
- // Period view (default) and complete per-lesson history, built from the same authorised data.
- const all=useMemo(()=>buildLessonRecords(source.entries,from,to),[source,from,to]);
+ // Lessons planned for these dates, in teaching order, each with its whole record (owner decision, 28 November
+ // 2026); the complete per-lesson history is built from the same authorised data.
+ const all=useMemo(()=>buildLessonRecords(source.entries,from,to,{scope:'planned'}),[source,from,to]);
  const history=useMemo(()=>new Map(buildLessonRecords(source.entries,from,to,{scope:'all'}).map(l=>[l.key,l])),[source,from,to]);
  const scoped=useMemo(()=>filterLessons(all,{school,teacher:teacherKey}),[all,school,teacherKey]);
  const teachers=useMemo(()=>[...new Map(scoped.map(l=>[l.teacherKey,l.teacher])).entries()].sort((a,b)=>a[1].localeCompare(b[1])),[scoped]);
@@ -62,7 +63,7 @@ export default function LessonRecords({data,from,to,school='',teacherKey='',incl
  if(!fresh)return <section className="card lesson-records-stale" role="status"><p>Apply the selected period to review lesson records. Loaded period: {data.period?.from} to {data.period?.to}.</p></section>;
  return <div className="lesson-records">
   <section className="card">
-   <div className="lr-head"><div><span className="eyebrow">LESSON DOCUMENTATION</span><h2>{mode==='school'?'Lesson records · '+school:'Lesson records'+(teacherName?' · '+teacherName:'')}</h2><p>Each lesson with its plan, classroom activities, written work, recordings, reflections and Academic Review, in the order it was first submitted. Evidence and reviews are limited to {formatDay(from)} – {formatDay(to)}; each lesson also offers its complete history.</p></div><BookOpen size={24}/></div>
+   <div className="lr-head"><div><span className="eyebrow">LESSON DOCUMENTATION</span><h2>{mode==='school'?'Lesson records · '+school:'Lesson records'+(teacherName?' · '+teacherName:'')}</h2><p>Lessons planned for {formatDay(from)} – {formatDay(to)}, in teaching order, each with its plan, classroom activities, written work, recordings, reflections and Academic Review, and when the plan was submitted.</p></div><BookOpen size={24}/></div>
    <div className="lr-filters">
     {mode==='school'&&<label className="field"><span>Teacher</span><select value={filters.teacher} onChange={e=>setFilter('teacher',e.target.value)}><option value="">All teachers</option>{teachers.map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>}
     <label className="field"><span>Class</span><select value={filters.grade} onChange={e=>setFilter('grade',e.target.value)}><option value={ANY}>All classes</option>{[...new Set([...options.grades,...(filters.grade!==ANY?[filters.grade]:[])])].map(g=><option key={g||'none'} value={g}>{g||'Not recorded'}</option>)}</select></label>

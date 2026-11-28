@@ -5,12 +5,13 @@
 // subject-wise review (with period reviews alongside) and the Feedback list (weekly and period reviews, with the
 // teacher's "Noted"). Reads the same school-scoped data as before.
 import {useEffect,useMemo,useState} from 'react';
-import {CalendarDays,ChevronRight,CircleCheck,KeyRound,LogOut,X,MessageSquareText,ArrowLeft,RefreshCw,House,CalendarRange,CalendarCheck2} from 'lucide-react';
+import {CalendarDays,ChevronRight,CircleCheck,KeyRound,LogOut,X,MessageSquareText,ArrowLeft,RefreshCw,House,CalendarRange,CalendarCheck2,FileDown} from 'lucide-react';
 import {buildLessonRecords,formatDay} from '@/lib/school-success/lesson-records';
 import {MAX_RANGE_DAYS,rangeFor,initials,leaderHome,feedbackItems,subjectLabel} from '@/lib/school-success/leader-home';
 import {weekRange} from '@/lib/school-success/day-periods';
 import ReviewScreens from './review-screens';
 import TeacherPinAdmin from './teacher-pin-admin';
+import LeaderLessonPdf from './leader-lesson-pdf';
 import {browserClient} from '@/lib/supabase';
 
 const istToday=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
@@ -57,12 +58,14 @@ export default function LeaderApp({data,refresh}){
  const top=<div className="ta-top"><div className="ta-brand"><i>S</i>School Success</div><button type="button" className="ta-avatar la-avatar" aria-label="Your profile" onClick={()=>setSheet(true)}>{initials(actor.name)}</button></div>;
  const sheetEl=sheet&&<><div className="ta-sheet-bg" onClick={()=>setSheet(false)}/><div className="ta-sheet" role="dialog" aria-modal="true" aria-label="Your profile"><div className="ta-grab"/><button type="button" className="ta-sheet-x icon" aria-label="Close" onClick={()=>setSheet(false)}><X size={18}/></button>
   <div className="ta-me"><span className="ta-avatar big la-avatar">{initials(actor.name)}</span><div><b>{actor.name}</b><small>{role} · {school}</small></div></div>
+  <button type="button" className="ta-opt" onClick={()=>{setSheet(false);setView('pdf');}}><span className="ta-opt-icon"><FileDown size={18}/></span><span className="ta-opt-label">Download lesson PDF</span><ChevronRight size={18}/></button>
   <button type="button" className="ta-opt" onClick={()=>{setSheet(false);setView('pins');}}><span className="ta-opt-icon"><KeyRound size={18}/></span><span className="ta-opt-label">Teacher PINs</span><ChevronRight size={18}/></button>
   <button type="button" className="ta-opt danger" onClick={()=>void signOut()}><span className="ta-opt-icon"><LogOut size={18}/></span><span className="ta-opt-label">Sign out</span></button></div></>;
  const tabBar=<nav className="ta-tabs" aria-label="Principal menu">{TABS.map(([k,Icon,l])=><button type="button" key={k} aria-current={tab===k&&!view?'page':undefined} className={'ta-tab'+(tab===k&&!view?' on':'')} onClick={()=>{setTab(k);setView('');}}><span className="ta-tab-icon"><Icon size={20}/></span>{l}{k==='home'&&home.awaiting>0&&<span className="ta-badge">{home.awaiting}</span>}</button>)}</nav>;
  const shell=body=><div className="teacher-workspace tp ta-app leader-app">{top}{body}{tabBar}{sheetEl}</div>;
  const title=(text,sub)=><div className="ta-hello"><small>{sub}</small><h1>{text}</h1></div>;
 
+ if(view==='pdf')return shell(<><div className="ta-title"><button type="button" className="ta-back" aria-label="Back" onClick={()=>setView('')}><ArrowLeft size={18}/></button><h2>Download lesson PDF</h2></div><LeaderLessonPdf data={data} refresh={refresh} teachers={teachers}/></>);
  if(view==='pins')return shell(<><div className="ta-title"><button type="button" className="ta-back" aria-label="Back" onClick={()=>setView('')}><ArrowLeft size={18}/></button><h2>Teacher PINs</h2></div><TeacherPinAdmin schools={school?[school]:[]} initialSchool={school} open/></>);
  if(tab==='day'||tab==='weekly')return shell(<>
   {title(tab==='day'?'Day-wise review':'Weekly review',tab==='day'?'Every period of one teacher’s day':'One subject’s week · period reviews alongside')}
